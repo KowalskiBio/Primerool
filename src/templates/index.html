@@ -1,0 +1,2057 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Primerool – Cloud Primer Designer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
+    rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+
+    .font-mono {
+      font-family: 'Fira Code', monospace;
+    }
+
+    /* Custom Sequence Viewer Styles */
+    .sequence-viewer {
+      font-family: 'Fira Code', monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.6;
+    }
+
+    .seq-flank {
+      color: #94a3b8;
+    }
+
+    /* slate-400 */
+    .seq-intron {
+      color: #64748b;
+    }
+
+    /* slate-500 */
+    .seq-intron-placeholder {
+      color: #94a3b8;
+      font-style: italic;
+      user-select: none;
+    }
+
+    .seq-utr {
+      color: #0f172a;
+      /* slate-900 */
+      background-color: #ffedd5;
+      /* orange-100 */
+    }
+
+    .seq-cds {
+      color: #0f172a;
+      font-weight: 700;
+      background-color: #ffedd5;
+    }
+
+    .seq-primer {
+      color: #dc2626;
+      /* red-600 */
+      font-weight: 700;
+      text-decoration: underline;
+      background-color: #fef2f2;
+      /* red-50 */
+    }
+
+    .junction-mark {
+      display: inline-block;
+      padding: 0 2px;
+      margin: 0 1px;
+      border-left: 2px solid #475569;
+      opacity: 0.35;
+      user-select: none;
+    }
+
+    .exon-label {
+      display: block;
+      color: #64748b;
+      font-size: 0.75rem;
+      font-weight: 600;
+      font-family: 'Inter', sans-serif;
+      margin-top: 0.5rem;
+      margin-bottom: 0.125rem;
+      user-select: none;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 0.25rem;
+    }
+
+    .exon-label:first-child {
+      border-top: none;
+      margin-top: 0;
+      padding-top: 0;
+    }
+  </style>
+</head>
+
+<body class="min-h-screen bg-gradient-to-br from-green-50 to-emerald-50/30 py-8 px-4 sm:px-6 lg:px-8 text-slate-900">
+
+  <div class="max-w-5xl mx-auto">
+    <!-- Header -->
+    <!-- Header -->
+    <header class="mb-8 relative flex items-center">
+      <div class="z-10"> <!-- Added z-index just in case -->
+        <h1 class="text-3xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent">
+          Primerool
+        </h1>
+        <p class="mt-1 text-slate-500">Cloud-based Primer Design Tool</p>
+      </div>
+      <!-- Absolute Logo: Edit 'height', 'top', and 'right' here -->
+      <img src="/static/logo.png" alt="Primerool Logo"
+        style="position: absolute; height: 165px; width: auto; top: -30px; right: 35px;"
+        class="object-contain opacity-90 pointer-events-none">
+    </header>
+
+    <!-- Main Container Card -->
+    <div class="container bg-white shadow-sm rounded-xl border border-slate-200 p-6 mb-6">
+      <h2 class="text-lg font-semibold text-slate-800 mb-4">How would you like to start?</h2>
+
+      <!-- Styled Radio Group -->
+      <div class="flex flex-wrap gap-4 mb-6">
+        <label
+          class="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 hover:bg-slate-100 transition-colors has-[:checked]:border-green-500 has-[:checked]:bg-green-50 has-[:checked]:text-green-700">
+          <input type="radio" name="inputMode" value="gene" checked onchange="toggleInputMode()"
+            class="accent-green-600 w-4 h-4">
+          <span class="font-medium">Search by Gene Name</span>
+        </label>
+        <label
+          class="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 hover:bg-slate-100 transition-colors has-[:checked]:border-green-500 has-[:checked]:bg-green-50 has-[:checked]:text-green-700">
+          <input type="radio" name="inputMode" value="fasta" onchange="toggleInputMode()"
+            class="accent-green-600 w-4 h-4">
+          <span class="font-medium">Paste a Sequence (FASTA)</span>
+        </label>
+      </div>
+
+      <!-- Gene name input (default) -->
+      <div id="geneInputPanel">
+        <label for="geneInput" class="block text-sm font-semibold text-slate-700 mb-1">Gene Name or Accession ID</label>
+        <div class="flex gap-3">
+          <input type="text" id="geneInput" placeholder="e.g., CHAT or NR_132312.2"
+            class="flex-1 rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
+          <button
+            class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm"
+            onclick="handleGeneSearch()">
+            Search
+          </button>
+        </div>
+      </div>
+
+      <!-- FASTA sequence input -->
+      <div id="fastaInputPanel" class="hidden">
+        <label for="fastaInput" class="block text-sm font-semibold text-slate-700 mb-1">Paste your sequence (raw or
+          FASTA format)</label>
+        <textarea id="fastaInput" rows="6"
+          class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 font-mono text-sm p-3 border resize-y mb-3"
+          placeholder=">optional_header&#10;ATGCGTACGATCGATCGATCGATCG..."></textarea>
+
+        <button id="blastBtn"
+          class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full sm:w-auto"
+          onclick="identifySequence()">
+          Identify Sequence (NCBI BLAST)
+        </button>
+
+        <div id="blastProgress" class="hidden mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <div class="flex items-center gap-2 mb-2">
+            <strong class="text-amber-800">Running NCBI BLAST...</strong>
+            <span class="text-sm text-amber-700">This may take up to 2 minutes. Please wait.</span>
+          </div>
+          <div class="w-full h-2 bg-amber-100 rounded-full overflow-hidden">
+            <div id="blastProgressBar" class="h-full bg-amber-500 transition-all duration-1000 ease-linear"
+              style="width:0%"></div>
+          </div>
+        </div>
+
+        <div id="blastResults" class="hidden mt-4 overflow-x-auto"></div>
+      </div>
+
+      <div id="geneError"
+        class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-medium"></div>
+      <div id="geneSuccess"
+        class="hidden mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm font-medium">
+      </div>
+    </div>
+
+    <div class="container bg-white shadow-sm rounded-xl border border-slate-200 p-6 mb-6 hidden" id="transcriptSection">
+      <h2 class="text-lg font-semibold text-slate-800 mb-4">Select Transcript & Configure</h2>
+
+      <label for="transcriptSelect" class="block text-sm font-semibold text-slate-700 mb-1">Transcript:</label>
+      <select id="transcriptSelect"
+        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border mb-6">
+        <option value="">-- Select a transcript --</option>
+      </select>
+
+      <h3 class="text-md font-semibold text-slate-800 mt-6 mb-3 border-t border-slate-100 pt-4">Sequence Options</h3>
+
+      <div class="space-y-3 mb-6">
+        <label class="flex items-center gap-2 cursor-pointer text-slate-700">
+          <input type="checkbox" id="includeIntrons" onchange="updateSequence()" class="accent-green-600 rounded">
+          Include Introns (genomic DNA with introns/exons)
+        </label>
+
+        <label class="flex items-center gap-2 cursor-pointer text-slate-700">
+          <input type="checkbox" id="truncateIntrons" onchange="updateSequence()" class="accent-green-600 rounded">
+          Truncate Introns (show length only, for easier exon copying)
+        </label>
+
+        <label class="flex items-center gap-2 cursor-pointer text-slate-700">
+          <input type="checkbox" id="includeUTR" onchange="updateSequence()" class="accent-green-600 rounded">
+          Include UTRs (untranslated regions)
+        </label>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        <div>
+          <label for="upFlank" class="block text-sm font-semibold text-slate-700 mb-1">Upstream Flank (bp):</label>
+          <input type="number" id="upFlank" value="200" min="0" onchange="updateSequence()"
+            class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
+        </div>
+        <div>
+          <label for="downFlank" class="block text-sm font-semibold text-slate-700 mb-1">Downstream Flank (bp):</label>
+          <input type="number" id="downFlank" value="200" min="0" onchange="updateSequence()"
+            class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
+        </div>
+      </div>
+
+      <button
+        class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm"
+        onclick="showSequence()">
+        Show Sequence
+      </button>
+    </div>
+
+    <div id="featureMapContainer"
+      class="container bg-white shadow-sm rounded-xl border border-slate-200 p-6 mb-6 hidden">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-slate-800">Feature Map</h2>
+        <div class="flex gap-2">
+          <button onclick="resetFeatureMapZoom()"
+            class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1 rounded border border-slate-300 transition-colors">
+            Reset Zoom
+          </button>
+
+          <label class="inline-flex items-center text-xs ml-2 cursor-pointer">
+            <input type="checkbox" id="showPrimers" checked onchange="renderFeatureMap()"
+              class="form-checkbox h-4 w-4 text-green-600 rounded border-slate-300 focus:ring-green-500">
+            <span class="ml-1 text-slate-700">Primers</span>
+          </label>
+          <label class="inline-flex items-center text-xs ml-2 cursor-pointer">
+            <input type="checkbox" id="showAmplicons" checked onchange="renderFeatureMap()"
+              class="form-checkbox h-4 w-4 text-green-600 rounded border-slate-300 focus:ring-green-500">
+            <span class="ml-1 text-slate-700">Amplicons</span>
+          </label>
+          <button onclick="document.getElementById('featureMapContainer').classList.add('hidden')"
+            class="text-slate-400 hover:text-slate-600">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd"
+                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L11.414 10 5.707 5.707a1 1 0 01-1.414-1.414z"
+                clip-rule="evenodd" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="overflow-hidden relative select-none">
+        <div id="featureMapContent" class="w-full"></div>
+      </div>
+    </div>
+
+    <div class="container bg-white shadow-sm rounded-xl border border-slate-200 p-6 mb-6 hidden" id="resultsSection">
+      <div class="flex flex-wrap items-center justify-between mb-4 gap-2">
+        <h2 class="text-lg font-semibold text-slate-800">Sequence & Primer Design</h2>
+        <button onclick="toggleFeatureMap()"
+          class="bg-green-100 hover:bg-green-200 text-green-800 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors border border-green-200">
+          Show Feature Map
+        </button>
+      </div>
+      <div id="sequenceInfo" class="mb-4 text-slate-700"></div>
+
+      <div id="visualizerContainer" class="hidden">
+        <h3 class="text-md font-semibold text-slate-800 mb-2">Sequence Map (WGA / flanking)</h3>
+        <div
+          class="flex flex-wrap gap-4 text-sm mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100 text-slate-600">
+          <div class="flex items-center gap-1.5"><span class="text-slate-400">■</span> Flanking regions</div>
+          <div class="flex items-center gap-1.5"><span class="text-slate-500">■</span> Introns</div>
+          <div class="flex items-center gap-1.5"><span class="px-1 bg-orange-100 text-slate-900 rounded">■</span> UTR
+          </div>
+          <div class="flex items-center gap-1.5"><strong class="px-1 bg-orange-100 text-slate-900 rounded">■</strong>
+            CDS</div>
+          <div class="flex items-center gap-1.5"><span class="text-red-600">■</span> Selected primer binding sites</div>
+        </div>
+
+        <!-- Main viewer: up + gene + down -->
+        <div
+          class="sequence-viewer bg-white border border-slate-300 rounded-lg p-4 font-mono text-sm overflow-y-auto max-h-[520px]"
+          id="sequenceMap"></div>
+
+        <!-- Internal/junction viewer -->
+        <div id="splicedViewerBlock" class="hidden mt-6">
+          <h3 class="text-md font-semibold text-slate-800 mb-2">Spliced exon-only template (for exon–exon junction
+            primers)</h3>
+          <div class="text-sm text-slate-500 mb-3 bg-blue-50 p-2 rounded border border-blue-100">
+            This template is always exon-only. Junction positions in the selector refer to this sequence.
+            Vertical bars indicate exon boundaries.
+          </div>
+          <div
+            class="sequence-viewer bg-white border border-slate-300 rounded-lg p-4 font-mono text-sm overflow-y-auto max-h-[520px]"
+            id="splicedMap"></div>
+        </div>
+
+        <div class="callout mt-4 p-4 bg-slate-50 border border-slate-200 rounded-lg text-sm hidden"
+          id="selectedPrimerInfo"></div>
+
+        <h3 class="text-md font-semibold text-slate-800 mt-8 mb-4 border-t border-slate-100 pt-6">Primer Design</h3>
+
+        <div class="flex flex-wrap gap-4 mb-6">
+          <label
+            class="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 hover:bg-slate-100 transition-colors has-[:checked]:border-green-500 has-[:checked]:bg-green-50 has-[:checked]:text-green-700">
+            <input type="radio" name="primerMode" value="flanking" checked class="accent-green-600 w-4 h-4">
+            <span class="font-medium">WGA (primers in flanking regions)</span>
+          </label>
+          <label
+            class="flex items-center gap-2 cursor-pointer bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 hover:bg-slate-100 transition-colors has-[:checked]:border-green-500 has-[:checked]:bg-green-50 has-[:checked]:text-green-700">
+            <input type="radio" name="primerMode" value="internal" class="accent-green-600 w-4 h-4">
+            <span class="font-medium">Internal (exon–exon junction primers)</span>
+          </label>
+        </div>
+
+        <!-- Internal junction panel -->
+        <div id="internalJunctionPanel" class="hidden bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label for="junctionSelect" class="block text-sm font-semibold text-slate-700 mb-1">Choose
+                junction:</label>
+              <select id="junctionSelect"
+                class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
+                <option value="">-- Select a junction --</option>
+              </select>
+            </div>
+            <div>
+              <label for="overlapMin" class="block text-sm font-semibold text-slate-700 mb-1">Junction overlap min
+                (bp):</label>
+              <input type="number" id="overlapMin" value="6" min="1"
+                class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
+            </div>
+            <div>
+              <label for="overlapMax" class="block text-sm font-semibold text-slate-700 mb-1">Junction overlap max
+                (bp):</label>
+              <input type="number" id="overlapMax" value="12" min="1"
+                class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label for="ampliconMin" class="block text-sm font-semibold text-slate-700 mb-1">Amplicon min
+                (bp):</label>
+              <input type="number" id="ampliconMin" value="80" min="1"
+                class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
+            </div>
+            <div>
+              <label for="ampliconMax" class="block text-sm font-semibold text-slate-700 mb-1">Amplicon max
+                (bp):</label>
+              <input type="number" id="ampliconMax" value="220" min="1"
+                class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
+            </div>
+          </div>
+        </div>
+
+        <button
+          class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm mb-4"
+          onclick="designPrimers()">
+          Design Primers
+        </button>
+
+        <div>
+          <button class="text-sm text-green-600 hover:text-green-800 underline"
+            onclick="clearAllPrimerHighlights()">Clear primer highlights</button>
+        </div>
+
+        <div id="primerResults" class="mt-6 space-y-4"></div>
+
+        <div class="mt-8 pt-8 border-t border-slate-200">
+          <h3 class="text-md font-semibold text-slate-800 mb-2">Design Primers from Sequence</h3>
+          <p class="text-sm text-slate-500 mb-4">Paste a sequence region for each primer. Primer3 will find the best
+            primer within each region.</p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label for="fwdRegion" class="block text-sm font-semibold text-slate-700 mb-1">Forward Primer
+                Region:</label>
+              <textarea id="fwdRegion" rows="3"
+                class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 font-mono text-sm p-3 border resize-y"
+                placeholder="Paste sequence region for forward primer..."></textarea>
+            </div>
+            <div>
+              <label for="revRegion" class="block text-sm font-semibold text-slate-700 mb-1">Reverse Primer
+                Region:</label>
+              <textarea id="revRegion" rows="3"
+                class="w-full rounded-lg border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 font-mono text-sm p-3 border resize-y"
+                placeholder="Paste sequence region for reverse primer..."></textarea>
+            </div>
+          </div>
+
+          <button
+            class="bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full md:w-auto"
+            onclick="designFromSequence()">
+            Design Primers
+          </button>
+
+          <div id="manualDesignResults" class="mt-4"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <script>
+      let currentGeneName = '';
+      let currentSpecies = 'homo_sapiens';
+      let currentSequenceData = null;
+
+      function toggleInputMode() {
+        const mode = document.querySelector('input[name="inputMode"]:checked').value;
+        document.getElementById('geneInputPanel').classList.toggle('hidden', mode !== 'gene');
+        document.getElementById('fastaInputPanel').classList.toggle('hidden', mode !== 'fasta');
+        // Clear messages
+        document.getElementById('geneError').classList.add('hidden');
+        document.getElementById('geneSuccess').classList.add('hidden');
+        document.getElementById('blastResults').classList.add('hidden');
+      }
+
+      async function identifySequence() {
+        const raw = document.getElementById('fastaInput').value.trim();
+        const errorDiv = document.getElementById('geneError');
+        const successDiv = document.getElementById('geneSuccess');
+        const progressDiv = document.getElementById('blastProgress');
+        const resultsDiv = document.getElementById('blastResults');
+        const btn = document.getElementById('blastBtn');
+
+        errorDiv.classList.add('hidden');
+        successDiv.classList.add('hidden');
+        resultsDiv.classList.add('hidden');
+
+        // Check for Accession ID pattern (e.g. NR_132312.2)
+        // Heuristic: contain digits and looks like an ID
+        const cleaned = raw.trim();
+        const isAccession = /[A-Za-z]{1,4}_?\d{5,}/.test(cleaned);
+        const seqLen = raw.replace(/^>.*$/gm, '').replace(/\s/g, '').length;
+
+        if (!isAccession && seqLen < 20) {
+          errorDiv.textContent = 'Please paste a valid Accession ID or a sequence of at least 20 bp.';
+          errorDiv.classList.remove('hidden');
+          return;
+        }
+
+        // Show progress
+        progressDiv.classList.remove('hidden');
+        btn.disabled = true;
+        btn.textContent = 'Running BLAST...';
+
+        // Animate progress bar (fake progress over ~120s)
+        const bar = document.getElementById('blastProgressBar');
+        bar.style.width = '0%';
+        let progress = 0;
+        const progressTimer = setInterval(() => {
+          progress = Math.min(progress + 1, 95);
+          bar.style.width = progress + '%';
+        }, 1200);
+
+        try {
+          const response = await fetch('/blast_sequence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sequence: raw })
+          });
+
+          clearInterval(progressTimer);
+          bar.style.width = '100%';
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            errorDiv.textContent = data.error || `HTTP ${response.status}`;
+            errorDiv.classList.remove('hidden');
+            return;
+          }
+
+          const hits = data.hits || [];
+          if (!hits.length) {
+            errorDiv.textContent = 'No significant matches found.';
+            errorDiv.classList.remove('hidden');
+            return;
+          }
+
+          // Show top hits
+          let html = '<h3 class="text-md font-semibold text-slate-800 mb-3">BLAST Results</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-slate-600 border border-slate-200 rounded-lg"><thead class="text-xs text-slate-700 uppercase bg-slate-50"><tr>' +
+            '<th class="px-4 py-3 border-b border-slate-200">#</th><th class="px-4 py-3 border-b border-slate-200">Organism</th><th class="px-4 py-3 border-b border-slate-200">Gene</th><th class="px-4 py-3 border-b border-slate-200">Description</th><th class="px-4 py-3 border-b border-slate-200">Accession</th><th class="px-4 py-3 border-b border-slate-200">Identity</th><th class="px-4 py-3 border-b border-slate-200">E-value</th><th class="px-4 py-3 border-b border-slate-200">Action</th>' +
+            '</tr></thead><tbody>';
+
+          hits.slice(0, 10).forEach((hit, i) => {
+            const evalue = hit.evalue !== null ? hit.evalue.toExponential(1) : '-';
+            const gs = (hit.gene_symbol || '').replace(/'/g, "\\'");
+            const sp = (hit.ensembl_species || '').replace(/'/g, "\\'");
+            const org = (hit.organism || '').replace(/'/g, "\\'");
+            const title = (hit.title || '').replace(/'/g, "\\'");
+
+            html += `<tr class="bg-white border-b hover:bg-slate-50 last:border-0 text-xs">
+            <td class="px-4 py-3">${i + 1}</td>
+            <td class="px-4 py-3"><em>${hit.organism}</em></td>
+            <td class="px-4 py-3"><strong>${hit.gene_symbol || '<span class="text-slate-400">-</span>'}</strong></td>
+            <td class="px-4 py-3"><div class="max-w-[200px] whitespace-nowrap overflow-hidden text-ellipsis" title="${hit.title}">${hit.title}</div></td>
+            <td class="px-4 py-3"><a href="https://www.ncbi.nlm.nih.gov/nuccore/${hit.accession}" target="_blank" class="text-green-600 hover:underline">${hit.accession}</a></td>
+            <td class="px-4 py-3">${hit.identity_pct}%</td>
+            <td class="px-4 py-3">${evalue}</td>
+            <td class="px-4 py-3"><button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" onclick="useBlastHit('${gs}', '${sp}', '${org}')">Use</button></td>
+          </tr>`;
+          });
+          html += '</tbody></table></div>';
+
+          resultsDiv.innerHTML = html;
+          resultsDiv.classList.remove('hidden');
+
+          // Auto-use text if there is a perfect match? 
+          // No, let user choose if multiple hits.
+
+        } catch (e) {
+          clearInterval(progressTimer);
+          errorDiv.textContent = 'Error: ' + e.message;
+          errorDiv.classList.remove('hidden');
+        } finally {
+          progressDiv.classList.add('hidden');
+          btn.disabled = false;
+          btn.textContent = 'Identify Sequence (NCBI BLAST)';
+        }
+      }
+
+      function useBlastHit(geneSymbol, ensemblSpecies, organismName) {
+        // If gene symbol is missing, ask the user to input it manually
+        if (!geneSymbol) {
+          // Don't block, just focus the input and ask
+          currentSpecies = ensemblSpecies || 'homo_sapiens'; // default if unknown
+          document.getElementById('geneInput').value = '';
+          document.getElementById('geneInput').focus();
+
+          const infoDiv = document.getElementById('geneSuccess');
+          infoDiv.textContent = `Organism identified as ${organismName || 'Unknown'}. Gene symbol not found in BLAST result. Please check the Description and enter the gene name manually above.`;
+          infoDiv.className = 'error'; // Use error style (red/pink) to catch attention, or keep success? error is better for "action required"
+          infoDiv.classList.remove('hidden');
+          return;
+        }
+
+        currentSpecies = ensemblSpecies || 'homo_sapiens';
+
+        // Fill the gene input and auto-search
+        document.getElementById('geneInput').value = geneSymbol;
+
+        const successDiv = document.getElementById('geneSuccess');
+        successDiv.className = 'success';
+        successDiv.textContent = `Identified: ${organismName} — ${geneSymbol}. Searching Ensembl...`;
+        successDiv.classList.remove('hidden');
+
+        searchGene();
+      }
+
+      // WGA highlights (on upstream/downstream)
+      let selectedWGAForward = null; // { region:'up', start, end, primerSeq, bindingSeq, source }
+      let selectedWGAReverse = null; // { region:'down', start, end, primerSeq, bindingSeq, source }
+
+      // Junction highlights (on spliced_exons_seq)
+      let selectedJuncLeft = null;   // { region:'spliced', start, end, primerSeq, bindingSeq, source }
+      let selectedJuncRight = null;  // { region:'spliced', start, end, primerSeq, bindingSeq, source }
+
+      function fmt(x) { return (x === null || x === undefined) ? '-' : x; }
+
+      function normalizeDNA(s) {
+        return (s || '').toUpperCase().replace(/[^ACGTN]/g, '');
+      }
+
+      function revcomp(seq) {
+        const map = { A: 'T', T: 'A', G: 'C', C: 'G', N: 'N' };
+        return seq.toUpperCase().split('').reverse().map(b => map[b] || 'N').join('');
+      }
+
+      function clearAllPrimerHighlights() {
+        selectedWGAForward = null;
+        selectedWGAReverse = null;
+        selectedJuncLeft = null;
+        selectedJuncRight = null;
+        renderAllSequences();
+        showSelectedPrimerInfo();
+      }
+
+      function showSelectedPrimerInfo() {
+        const box = document.getElementById('selectedPrimerInfo');
+        const parts = [];
+
+        function one(label, obj) {
+          if (!obj) return;
+          parts.push(`
+          <div style="margin-bottom:10px;">
+            <strong>${label}</strong> (${obj.source || 'unknown'})<br>
+            Primer (5'→3'): <span class="mono">${obj.primerSeq}</span><br>
+            Binding site (highlighted): <span class="mono">${obj.bindingSeq}</span><br>
+            Location: <span class="mono">${obj.region}</span> [${obj.start}, ${obj.end})
+          </div>
+        `);
+        }
+
+        one('WGA Forward selected', selectedWGAForward);
+        one('WGA Reverse selected', selectedWGAReverse);
+        one('Junction Left selected', selectedJuncLeft);
+        one('Junction Right selected', selectedJuncRight);
+
+        if (!parts.length) {
+          box.style.display = 'none';
+          box.innerHTML = '';
+          return;
+        }
+        box.style.display = 'block';
+        box.innerHTML = parts.join('');
+      }
+
+      function applyPrimerSpan(rawSeq, start, end) {
+        const s = Math.max(0, start);
+        const e = Math.min(rawSeq.length, end);
+        if (e <= s) return rawSeq;
+        return rawSeq.substring(0, s)
+          + `<span class="seq-primer">${rawSeq.substring(s, e)}</span>`
+          + rawSeq.substring(e);
+      }
+
+      async function handleGeneSearch() {
+        const input = document.getElementById('geneInput').value.trim();
+        if (!input) return;
+
+        const errorDiv = document.getElementById('geneError');
+        const successDiv = document.getElementById('geneSuccess');
+        errorDiv.classList.add('hidden');
+        successDiv.classList.add('hidden');
+
+        // Check if it looks like an Accession ID (e.g. NR_132312, NM_001.1, AL359314)
+        // Heuristic: has digits, maybe underscore, length >= 5
+        const isAccession = /[A-Za-z]{1,4}_?\d{5,}/.test(input);
+
+        if (isAccession) {
+          successDiv.textContent = `Input '${input}' looks like an Accession ID. Resolving via BLAST...`;
+          successDiv.classList.remove('hidden');
+          await resolveAccessionAndSearch(input);
+        } else {
+          await searchGene(input);
+        }
+      }
+
+      async function resolveAccessionAndSearch(accession) {
+        const errorDiv = document.getElementById('geneError');
+        const successDiv = document.getElementById('geneSuccess');
+
+        try {
+          // Reuse the BLAST endpoint
+          const response = await fetch('/blast_sequence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sequence: accession })
+          });
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || `BLAST failed: ${response.status}`);
+          }
+
+          const hits = data.hits || [];
+          if (!hits.length) {
+            throw new Error("No BLAST hits found for this Accession ID.");
+          }
+
+          // Take top hit
+          const top = hits[0];
+          const geneSymbol = top.gene_symbol;
+          const species = top.ensembl_species || 'homo_sapiens';
+
+          if (!geneSymbol) {
+            throw new Error(`Accession identified as '${top.organism}' but no Gene Symbol found. Please try searching by Sequence to view full results.`);
+          }
+
+          // Proceed to search gene
+          successDiv.textContent = `Accession '${accession}' identified as ${top.organism} — ${geneSymbol}. Loading gene data...`;
+          currentSpecies = species;
+
+          // Call the core search logic with the resolved symbol
+          await searchGene(geneSymbol, species);
+
+        } catch (e) {
+          successDiv.classList.add('hidden');
+          errorDiv.textContent = e.message;
+          errorDiv.classList.remove('hidden');
+        }
+      }
+
+      async function searchGene(geneNameOverride, speciesOverride) {
+        const geneName = geneNameOverride || document.getElementById('geneInput').value.trim();
+        const species = speciesOverride || currentSpecies;
+
+        const errorDiv = document.getElementById('geneError');
+        const successDiv = document.getElementById('geneSuccess');
+
+        // (Only clear if not already set by handleGeneSearch wrapper loop)
+        if (!geneNameOverride) {
+          errorDiv.classList.add('hidden');
+          successDiv.classList.add('hidden');
+        }
+
+        if (!geneName) return;
+
+        try {
+          const response = await fetch('/search_gene', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gene_name: geneName, species: species })
+          });
+          const data = await response.json();
+
+          if (!response.ok) {
+            errorDiv.textContent = data.error || `HTTP ${response.status}`;
+            errorDiv.classList.remove('hidden');
+            // If we came from Accession ID, the "success" message might still be visible, hide it on error
+            if (geneNameOverride) successDiv.classList.add('hidden');
+            return;
+          }
+
+          currentGeneName = data.gene_name;
+
+          // Update success message
+          successDiv.textContent = `Gene ${data.gene_name} found with ${data.transcripts.length} transcript(s).`;
+          successDiv.classList.remove('hidden');
+
+          const select = document.getElementById('transcriptSelect');
+          select.innerHTML = '<option value="">-- Select a transcript --</option>';
+          data.transcripts.forEach(t => {
+            const option = document.createElement('option');
+            option.value = t.id;
+            option.textContent = `${t.name} (${t.exon_count} exons, strand ${t.strand})`;
+            select.appendChild(option);
+          });
+
+          document.getElementById('transcriptSection').classList.remove('hidden');
+
+        } catch (e) {
+          errorDiv.textContent = 'Error: ' + e.message;
+          errorDiv.classList.remove('hidden');
+          if (geneNameOverride) successDiv.classList.add('hidden');
+        }
+      }
+
+      function updateSequence() {
+        if (currentSequenceData) showSequence();
+      }
+
+      async function showSequence() {
+        const transcriptId = document.getElementById('transcriptSelect').value;
+        if (!transcriptId) { alert('Please select a transcript first'); return; }
+
+        const upFlank = parseInt(document.getElementById('upFlank').value);
+        const downFlank = parseInt(document.getElementById('downFlank').value);
+        const includeIntrons = document.getElementById('includeIntrons').checked;
+        const includeUTR = document.getElementById('includeUTR').checked;
+
+        // reset highlights on new load
+        selectedWGAForward = null;
+        selectedWGAReverse = null;
+        selectedJuncLeft = null;
+        selectedJuncRight = null;
+
+        document.getElementById('primerResults').innerHTML = '';
+        document.getElementById('selectedPrimerInfo').style.display = 'none';
+        document.getElementById('selectedPrimerInfo').innerHTML = '';
+
+        try {
+          const response = await fetch('/get_sequence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              gene_name: currentGeneName,
+              transcript_id: transcriptId,
+              upstream_bp: upFlank,
+              downstream_bp: downFlank,
+              include_introns: includeIntrons,
+              include_utr: includeUTR,
+              species: currentSpecies
+            })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            alert(data.error || `HTTP ${response.status}`);
+            return;
+          }
+
+          currentSequenceData = data;
+          // View state should cover flanks if present
+          const start = -(data.upstream_len || 0);
+          const end = data.gene_len + (data.downstream_len || 0);
+          mapViewState = { start, end };
+
+          // populate junction selector
+          const jSel = document.getElementById('junctionSelect');
+          jSel.innerHTML = '<option value="">-- Select a junction --</option>';
+          (data.junctions || []).forEach(j => {
+            const opt = document.createElement('option');
+            opt.value = j.pos;
+            opt.textContent = j.label || `junction @ ${j.pos}`;
+            jSel.appendChild(opt);
+          });
+
+          renderAllSequences();
+
+          document.getElementById('visualizerContainer').classList.remove('hidden');
+          document.getElementById('resultsSection').classList.remove('hidden');
+
+        } catch (e) {
+          console.error(e);
+          alert('Error loading sequence: ' + e.message);
+        }
+      }
+
+      function renderAllSequences() {
+        renderMainSequence();
+        renderSplicedSequence();
+        showSelectedPrimerInfo();
+        renderFeatureMap();
+      }
+
+      function renderMainSequence() {
+        if (!currentSequenceData) return;
+
+        const data = currentSequenceData;
+        const up = data.upstream_seq || '';
+        const gene = data.gene_seq || '';
+        const down = data.downstream_seq || '';
+
+        // Upstream highlight (WGA forward)
+        let upHTML = up;
+        if (selectedWGAForward && selectedWGAForward.region === 'up') {
+          upHTML = applyPrimerSpan(upHTML, selectedWGAForward.start, selectedWGAForward.end);
+        }
+        upHTML = `<span class="seq-flank">${upHTML}</span>`;
+
+        // Downstream highlight (WGA reverse)
+        let downHTML = down;
+        if (selectedWGAReverse && selectedWGAReverse.region === 'down') {
+          downHTML = applyPrimerSpan(downHTML, selectedWGAReverse.start, selectedWGAReverse.end);
+        }
+        downHTML = `<span class="seq-flank">${downHTML}</span>`;
+
+        // Gene block rendering with introns/cds/utr formatting (no primer highlighting inside gene here)
+        const geneHTML = renderGeneBlock(data);
+
+        document.getElementById('sequenceMap').innerHTML = upHTML + geneHTML + downHTML;
+
+        const modeText = data.include_introns
+          ? 'Genomic DNA (with introns; CDS bold, UTR highlighted)'
+          : (data.include_utr ? 'Spliced transcript (UTR highlighted, CDS bold)' : 'Spliced CDS only (no UTR)');
+
+        document.getElementById('sequenceInfo').innerHTML = `
+        <p><strong>Sequence loaded successfully!</strong></p>
+        <p><strong>Transcript:</strong> ${data.transcript_name} (${data.transcript_id})</p>
+        <p><strong>Mode:</strong> ${modeText} | <strong>Length:</strong> ${data.gene_len} bp</p>
+        <p><strong>Flanking:</strong> ${data.upstream_len} bp upstream, ${data.downstream_len} bp downstream</p>
+      `;
+      }
+
+      function renderGeneBlock(data) {
+        const seq = data.gene_seq || '';
+        if (!seq) return '';
+
+        // GENOMIC MODE: introns + exons; within exons distinguish CDS vs UTR using cds annotations
+        if (data.include_introns && Array.isArray(data.annotations) && data.annotations.length > 0) {
+          const exonIntervals = data.annotations
+            .filter(a => a.type === 'exon')
+            .map(a => [a.start, a.end])
+            .sort((x, y) => x[0] - y[0]);
+
+          const cdsIntervals = data.annotations
+            .filter(a => a.type === 'cds')
+            .map(a => [a.start, a.end])
+            .sort((x, y) => x[0] - y[0]);
+
+          function isInCDS(pos) {
+            for (const [s, e] of cdsIntervals) {
+              if (pos < s) return false;
+              if (pos >= s && pos < e) return true;
+            }
+            return false;
+          }
+
+          let html = '';
+          let last = 0;
+
+          for (const [exS, exE] of exonIntervals) {
+            if (exS > last) {
+              const intronSeq = seq.substring(last, exS);
+              const intronLen = intronSeq.length;
+              const truncate = document.getElementById('truncateIntrons')?.checked || false;
+              if (truncate) {
+                // Truncate intron display but show length - non-copyable placeholder
+                html += `<span class="seq-intron-placeholder" title="Intron sequence (${intronLen}bp): ${intronSeq.substring(0, 30)}...">...intron ${intronLen}bp...</span>`;
+              } else {
+                // Show full intron sequence
+                html += `<span class="seq-intron">${intronSeq}</span>`;
+              }
+            }
+
+            // split exon into UTR vs CDS based on CDS intervals
+            let i = exS;
+            while (i < exE) {
+              const inCds = isInCDS(i);
+              let j = i + 1;
+              while (j < exE && isInCDS(j) === inCds) j++;
+
+              const chunk = seq.substring(i, j);
+              // Add ID to CDS/Exon spans for teleporting
+              // We use specific ID format: seq-region-{start}
+              const regionId = `seq-region-${i}`;
+              html += inCds
+                ? `<span class="seq-cds" id="${regionId}">${chunk}</span>`
+                : `<span class="seq-utr" id="${regionId}">${chunk}</span>`;
+              i = j;
+            }
+
+            last = exE;
+          }
+
+          if (last < seq.length) {
+            const intronSeq = seq.substring(last);
+            const intronLen = intronSeq.length;
+            const truncate = document.getElementById('truncateIntrons')?.checked || false;
+            if (truncate) {
+              // Truncate trailing intron display but show length - non-copyable placeholder
+              html += `<span class="seq-intron-placeholder" title="Intron sequence (${intronLen}bp): ${intronSeq.substring(0, 30)}...">...intron ${intronLen}bp...</span>`;
+            } else {
+              // Show full trailing intron sequence
+              html += `<span class="seq-intron">${intronSeq}</span>`;
+            }
+          }
+
+          return html;
+        }
+
+        // SPLICED MODE: use CDS annotations to bold CDS and highlight UTR if available
+        const cdsAnn = (data.annotations || [])
+          .filter(a => a.type === 'cds')
+          .sort((a, b) => a.start - b.start);
+
+        if (cdsAnn.length > 0) {
+          let html = '';
+          let last = 0;
+
+          cdsAnn.forEach(a => {
+            if (a.start > last) {
+              html += `<span class="seq-utr">${seq.substring(last, a.start)}</span>`;
+            }
+            html += `<span class="seq-cds">${seq.substring(a.start, a.end)}</span>`;
+            last = a.end;
+          });
+
+          if (last < seq.length) {
+            html += `<span class="seq-utr">${seq.substring(last)}</span>`;
+          }
+          return html;
+        }
+
+        // no cds annotations
+        if (data.include_utr) return `<span class="seq-utr">${seq}</span>`;
+        return `<span class="seq-cds">${seq}</span>`;
+      }
+
+      function renderSplicedSequence() {
+        if (!currentSequenceData) return;
+
+        const mode = document.querySelector('input[name="primerMode"]:checked').value;
+        const block = document.getElementById('splicedViewerBlock');
+
+        if (mode !== 'internal') {
+          block.classList.add('hidden');
+          return;
+        }
+
+        block.classList.remove('hidden');
+
+        const spliced = currentSequenceData.spliced_exons_seq || '';
+        const junctions = currentSequenceData.junctions || [];
+
+        // build base string with junction marks inserted (purely visual)
+        // Important: inserting marks changes indices, so we must render using a mapping.
+        // We'll render by slicing raw sequence between junctions and inserting mark spans in between.
+        let parts = [];
+        let last = 0;
+
+        // highlight intervals on raw spliced coords
+        const spans = [];
+        if (selectedJuncLeft && selectedJuncLeft.region === 'spliced') spans.push({ start: selectedJuncLeft.start, end: selectedJuncLeft.end, which: 'L' });
+        if (selectedJuncRight && selectedJuncRight.region === 'spliced') spans.push({ start: selectedJuncRight.start, end: selectedJuncRight.end, which: 'R' });
+        spans.sort((a, b) => a.start - b.start);
+
+        // helper to apply highlight spans to a raw substring [a,b) given global offset
+        function sliceWithHighlights(a, b) {
+          // collect spans that overlap [a,b)
+          const relevant = spans.filter(sp => sp.end > a && sp.start < b).sort((x, y) => x.start - y.start);
+          let out = '';
+          let cur = a;
+
+          for (const sp of relevant) {
+            const s = Math.max(a, sp.start);
+            const e = Math.min(b, sp.end);
+            if (s > cur) out += spliced.substring(cur, s);
+            out += `<span class="seq-primer">${spliced.substring(s, e)}</span>`;
+            cur = e;
+          }
+          if (cur < b) out += spliced.substring(cur, b);
+          return out;
+        }
+
+        // Show each exon on its own line with a label
+        const jPos = junctions.map(j => parseInt(j.pos)).filter(x => !isNaN(x)).sort((a, b) => a - b);
+
+        let exonNum = 1;
+        for (const jp of jPos) {
+          const a = last;
+          const b = Math.min(jp, spliced.length);
+          const exonLen = b - a;
+          parts.push(`<span class="exon-label">Exon ${exonNum} (${exonLen} bp)</span>`);
+          parts.push(sliceWithHighlights(a, b));
+          exonNum++;
+          last = b;
+        }
+        if (last < spliced.length) {
+          const exonLen = spliced.length - last;
+          parts.push(`<span class="exon-label">Exon ${exonNum} (${exonLen} bp)</span>`);
+          parts.push(sliceWithHighlights(last, spliced.length));
+        }
+
+        document.getElementById('splicedMap').innerHTML = parts.join('');
+      }
+
+      async function designPrimers() {
+        if (!currentSequenceData) { alert('Please load sequence first'); return; }
+
+        const mode = document.querySelector('input[name="primerMode"]:checked').value;
+        const panel = document.getElementById('internalJunctionPanel');
+        panel.classList.toggle('hidden', mode !== 'internal');
+
+        const resultsDiv = document.getElementById('primerResults');
+        resultsDiv.innerHTML = `<div class="p-4 mb-4 text-sm text-slate-700 bg-slate-50 rounded-lg border border-slate-200">Designing primers…</div>`;
+
+        try {
+          let payload = {};
+
+          if (mode === 'flanking') {
+            payload = {
+              mode: 'flanking',
+              upstream_seq: currentSequenceData.upstream_seq,
+              downstream_seq: currentSequenceData.downstream_seq
+            };
+          } else {
+            const junctionPos = document.getElementById('junctionSelect').value;
+            const overlapMin = parseInt(document.getElementById('overlapMin').value);
+            const overlapMax = parseInt(document.getElementById('overlapMax').value);
+            const ampliconMin = parseInt(document.getElementById('ampliconMin').value);
+            const ampliconMax = parseInt(document.getElementById('ampliconMax').value);
+
+            if (!junctionPos) {
+              resultsDiv.innerHTML = `<div class="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50" role="alert">Select a junction first.</div>`;
+              return;
+            }
+
+            const spliced = currentSequenceData.spliced_exons_seq || currentSequenceData.spliced_seq || '';
+            if (!spliced) {
+              resultsDiv.innerHTML = `<div class="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50" role="alert">No exon-only spliced template available for junction primer design.</div>`;
+              return;
+            }
+
+            payload = {
+              mode: 'internal',
+              sequence: spliced,
+              junction_pos: parseInt(junctionPos),
+              junction_overlap_min: overlapMin,
+              junction_overlap_max: overlapMax,
+              amplicon_min: ampliconMin,
+              amplicon_max: ampliconMax
+            };
+          }
+
+          const response = await fetch('/design_primers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          const text = await response.text();
+          let data;
+          try { data = JSON.parse(text); }
+          catch (e) {
+            console.error('Non-JSON from /design_primers:', text);
+            resultsDiv.innerHTML = `<div class="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50" role="alert">Server returned non-JSON. Check Flask console logs.</div>`;
+            return;
+          }
+
+          if (!response.ok) {
+            resultsDiv.innerHTML = `<div class="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50" role="alert">${data.error || `HTTP ${response.status}`}</div>`;
+            return;
+          }
+
+          displayPrimerResults(data);
+
+        } catch (e) {
+          console.error(e);
+          resultsDiv.innerHTML = `<div class="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50" role="alert">Error designing primers: ${e.message}</div>`;
+        }
+      }
+
+      function useWGA(which, region, interval, primerSeq, source = 'recommended', silent = false) {
+        const start = interval[0], end = interval[1];
+        let binding = '';
+        if (region === 'up') binding = (currentSequenceData.upstream_seq || '').substring(start, end);
+        if (region === 'down') binding = (currentSequenceData.downstream_seq || '').substring(start, end);
+
+        const obj = { region, start, end, primerSeq, bindingSeq: binding, source };
+
+        if (which === 'forward') selectedWGAForward = obj;
+        else selectedWGAReverse = obj;
+
+        renderAllSequences();
+        if (!silent) document.getElementById('sequenceMap').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      function useJunction(which, interval, primerSeq, source = 'recommended', silent = false) {
+        const start = interval[0], end = interval[1];
+        const spliced = currentSequenceData.spliced_exons_seq || '';
+        const binding = spliced.substring(start, end);
+
+        const obj = { region: 'spliced', start, end, primerSeq, bindingSeq: binding, source };
+
+        if (which === 'left') selectedJuncLeft = obj;
+        else selectedJuncRight = obj;
+
+        renderAllSequences();
+        if (!silent) document.getElementById('splicedMap').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      function displayPrimerResults(data) {
+        const resultsDiv = document.getElementById('primerResults');
+        const mode = data.mode;
+
+        // ---- FLANKING (WGA) ----
+        if (mode === 'flanking') {
+          const fwd = data.primers?.forward?.primers || [];
+          const rev = data.primers?.reverse?.primers || [];
+          const pair = data.primers?.pair_metrics?.heterodimer || null;
+
+          if (!fwd.length || !rev.length) {
+            resultsDiv.innerHTML = `<div class="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50" role="alert">No primers returned. Try larger flanks.</div>`;
+            return;
+          }
+
+          function rowPrimer(p, idx, which, region) {
+            const hp = p.hairpin || {};
+            const hd = p.homodimer || {};
+            const iv = p.interval; // [start,end)
+            const btn = iv
+              ? `<button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" onclick='useWGA("${which}","${region}",[${iv[0]},${iv[1]}],"${p.sequence.replace(/"/g, '&quot;')}", "recommended")'>Use</button>`
+              : '-';
+
+            const binding = (iv && region === 'up')
+              ? (currentSequenceData.upstream_seq || '').substring(iv[0], iv[1])
+              : (iv && region === 'down')
+                ? (currentSequenceData.downstream_seq || '').substring(iv[0], iv[1])
+                : '';
+
+            return `
+            <tr class="bg-white border-b hover:bg-slate-50 last:border-0 text-xs text-slate-600">
+              <td class="px-4 py-3 whitespace-nowrap text-slate-500">#${idx + 1}</td>
+              <td class="px-4 py-3 font-mono text-slate-800">${p.sequence}</td>
+              <td class="px-4 py-3">${fmt(p.length)}</td>
+              <td class="px-4 py-3">${fmt(p.tm)}</td>
+              <td class="px-4 py-3">${fmt(p.gc_percent)}</td>
+              <td class="px-4 py-3">${hp.structure_found ? 'Yes' : 'No'}</td>
+              <td class="px-4 py-3">${fmt(hp.tm)}</td>
+              <td class="px-4 py-3">${fmt(hp.dg)}</td>
+              <td class="px-4 py-3">${hd.structure_found ? 'Yes' : 'No'}</td>
+              <td class="px-4 py-3">${fmt(hd.tm)}</td>
+              <td class="px-4 py-3">${fmt(hd.dg)}</td>
+              <td class="px-4 py-3">${btn}</td>
+              <td class="px-4 py-3 font-mono text-xs text-slate-500 break-all">${binding}</td>
+            </tr>
+          `;
+          }
+
+          let html = `
+          <h3 class="text-md font-semibold text-slate-800 mb-2">Flanking Primers (WGA)</h3>
+          <div class="text-sm text-slate-500 mb-4 bg-slate-50 p-2 rounded border border-slate-100">
+            Reverse (RIGHT) primers: the red highlight shows the <strong>binding site on the downstream template</strong>.
+            The primer sequence is expected to be the reverse-complement of that binding site.
+          </div>
+
+          <h4 class="text-sm font-semibold text-slate-700 mb-2 mt-4 ml-1">Forward primers (upstream flank)</h4>
+          <div class="overflow-x-auto mb-6 border border-slate-200 rounded-lg">
+          <table class="w-full text-sm text-left text-slate-600">
+            <thead class="text-xs text-slate-700 uppercase bg-slate-50">
+              <tr>
+                <th class="px-4 py-3 border-b">#</th><th class="px-4 py-3 border-b">Sequence (5'→3')</th><th class="px-4 py-3 border-b">Len</th><th class="px-4 py-3 border-b">Tm</th><th class="px-4 py-3 border-b">GC%</th>
+                <th class="px-4 py-3 border-b">Hairpin</th><th class="px-4 py-3 border-b">HP Tm</th><th class="px-4 py-3 border-b">HP ΔG</th>
+                <th class="px-4 py-3 border-b">Homol</th><th class="px-4 py-3 border-b">HD Tm</th><th class="px-4 py-3 border-b">HD ΔG</th>
+                <th class="px-4 py-3 border-b">Action</th><th class="px-4 py-3 border-b">Binding site</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${fwd.map((p, i) => rowPrimer(p, i, 'forward', 'up')).join('')}
+            </tbody>
+          </table>
+          </div>
+
+          <h4 class="text-sm font-semibold text-slate-700 mb-2 mt-4 ml-1">Reverse primers (downstream flank)</h4>
+          <div class="overflow-x-auto border border-slate-200 rounded-lg">
+          <table class="w-full text-sm text-left text-slate-600">
+            <thead class="text-xs text-slate-700 uppercase bg-slate-50">
+              <tr>
+                <th class="px-4 py-3 border-b">#</th><th class="px-4 py-3 border-b">Sequence (5'→3')</th><th class="px-4 py-3 border-b">Len</th><th class="px-4 py-3 border-b">Tm</th><th class="px-4 py-3 border-b">GC%</th>
+                <th class="px-4 py-3 border-b">Hairpin</th><th class="px-4 py-3 border-b">HP Tm</th><th class="px-4 py-3 border-b">HP ΔG</th>
+                <th class="px-4 py-3 border-b">Homol</th><th class="px-4 py-3 border-b">HD Tm</th><th class="px-4 py-3 border-b">HD ΔG</th>
+                <th class="px-4 py-3 border-b">Action</th><th class="px-4 py-3 border-b">Binding site</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rev.map((p, i) => rowPrimer(p, i, 'reverse', 'down')).join('')}
+            </tbody>
+          </table>
+          </div>
+        `;
+
+          if (pair) {
+            html += `
+            <h4>Best-pair heterodimer (Forward #1 vs Reverse #1)</h4>
+            <p>
+              <strong>Heterodimer:</strong> ${pair.structure_found ? 'Yes' : 'No'}
+              | <strong>Tm:</strong> ${fmt(pair.tm)}
+              | <strong>ΔG:</strong> ${fmt(pair.dg)}
+            </p>
+          `;
+          }
+
+          resultsDiv.innerHTML = html;
+
+          // optional: auto-highlight #1/#1 if present
+          if (fwd[0]?.interval) useWGA('forward', 'up', fwd[0].interval, fwd[0].sequence, 'recommended', true);
+          if (rev[0]?.interval) useWGA('reverse', 'down', rev[0].interval, rev[0].sequence, 'recommended', true);
+
+          return;
+        }
+
+        // ---- INTERNAL (junction) ----
+        if (mode === 'internal') {
+          const pairs = data.primers?.pairs || [];
+          if (!pairs.length) {
+            resultsDiv.innerHTML = `<div class="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50" role="alert">No internal primer pairs returned.</div>`;
+            return;
+          }
+
+          function rowPair(pair, idx) {
+            const L = pair.left || {};
+            const R = pair.right || {};
+            const Lhp = L.hairpin || {};
+            const Lhd = L.homodimer || {};
+            const Rhp = R.hairpin || {};
+            const Rhd = R.homodimer || {};
+
+            const Lbtn = (L.interval)
+              ? `<button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" onclick='useJunction("left",[${L.interval[0]},${L.interval[1]}],"${L.sequence.replace(/"/g, '&quot;')}","recommended")'>Use L</button>`
+              : '-';
+            const Rbtn = (R.interval)
+              ? `<button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" onclick='useJunction("right",[${R.interval[0]},${R.interval[1]}],"${R.sequence.replace(/"/g, '&quot;')}","recommended")'>Use R</button>`
+              : '-';
+
+            const spliced = currentSequenceData.spliced_exons_seq || '';
+            const Lbind = L.interval ? spliced.substring(L.interval[0], L.interval[1]) : '';
+            const Rbind = R.interval ? spliced.substring(R.interval[0], R.interval[1]) : '';
+
+            return `
+            <tr class="bg-white border-b hover:bg-slate-50 last:border-0 text-xs text-slate-600">
+              <td class="px-4 py-3 text-slate-500">#${idx + 1}</td>
+              <td class="px-4 py-3 font-mono text-slate-800">${L.sequence || ''}</td>
+              <td class="px-4 py-3 font-mono text-slate-800">${R.sequence || ''}</td>
+              <td class="px-4 py-3">${fmt(pair.product_size)}</td>
+              <td class="px-4 py-3">${fmt(L.tm)}</td>
+              <td class="px-4 py-3">${fmt(R.tm)}</td>
+              <td class="px-4 py-3 flex gap-2">${Lbtn} ${Rbtn}</td>
+              <td class="px-4 py-3 font-mono text-xs text-slate-500 break-all">${Lbind}</td>
+              <td class="px-4 py-3 font-mono text-xs text-slate-500 break-all">${Rbind}</td>
+            </tr>
+          `;
+          }
+
+          let html = `
+          <h3 class="text-md font-semibold text-slate-800 mb-2">Exon–Exon Junction Primer Pairs</h3>
+          <div class="text-sm text-slate-500 mb-4 bg-slate-50 p-2 rounded border border-slate-100">
+            Highlights appear in the <strong>spliced exon-only template</strong> (shown above when Internal mode is selected).
+            Right primer binding site on the template will generally be the reverse-complement of the primer sequence.
+          </div>
+
+          <div class="overflow-x-auto border border-slate-200 rounded-lg">
+          <table class="w-full text-sm text-left text-slate-600">
+            <thead class="text-xs text-slate-700 uppercase bg-slate-50">
+              <tr>
+                <th class="px-4 py-3 border-b">#</th>
+                <th class="px-4 py-3 border-b">Left (5'→3')</th>
+                <th class="px-4 py-3 border-b">Right (5'→3')</th>
+                <th class="px-4 py-3 border-b">Product</th>
+                <th class="px-4 py-3 border-b">Left Tm</th>
+                <th class="px-4 py-3 border-b">Right Tm</th>
+                <th class="px-4 py-3 border-b">Highlight</th>
+                <th class="px-4 py-3 border-b">Left binding</th>
+                <th class="px-4 py-3 border-b">Right binding</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pairs.map((p, i) => rowPair(p, i)).join('')}
+            </tbody>
+          </table>
+          </div>
+        `;
+
+          resultsDiv.innerHTML = html;
+
+          // optional auto-highlight first pair
+          const first = pairs[0];
+          if (first?.left?.interval) useJunction('left', first.left.interval, first.left.sequence, 'recommended', true);
+          if (first?.right?.interval) useJunction('right', first.right.interval, first.right.sequence, 'recommended', true);
+
+          // ensure spliced viewer is visible
+          document.getElementById('splicedViewerBlock').classList.remove('hidden');
+          renderSplicedSequence();
+          showSelectedPrimerInfo();
+
+          return;
+        }
+
+        resultsDiv.innerHTML = `<div class="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50" role="alert">Unknown mode returned by server.</div>`;
+      }
+
+      async function designFromSequence() {
+        const fwdRegion = normalizeDNA(document.getElementById('fwdRegion').value);
+        const revRegion = normalizeDNA(document.getElementById('revRegion').value);
+        const resultsDiv = document.getElementById('manualDesignResults');
+
+        if (!fwdRegion || fwdRegion.length < 18) {
+          alert('Please enter a forward primer region (at least 18 bp).');
+          return;
+        }
+        if (!revRegion || revRegion.length < 18) {
+          alert('Please enter a reverse primer region (at least 18 bp).');
+          return;
+        }
+
+        resultsDiv.innerHTML = `<div class="callout">Designing primers from provided regions…</div>`;
+
+        try {
+          const response = await fetch('/design_from_sequence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ forward_region: fwdRegion, reverse_region: revRegion })
+          });
+
+          const text = await response.text();
+          let data;
+          try { data = JSON.parse(text); }
+          catch (e) {
+            resultsDiv.innerHTML = `<div class="error">Server returned non-JSON. Check Flask logs.</div>`;
+            return;
+          }
+
+          if (!response.ok) {
+            resultsDiv.innerHTML = `<div class="error">${data.error || 'Primer design failed.'}</div>`;
+            return;
+          }
+
+          // Show forward primers
+          let html = '';
+          if (data.forward_primers && data.forward_primers.length > 0) {
+            html += `<h4>Forward Primers (from forward region)</h4>
+          <div style="overflow-x:auto;"><table>
+            <thead><tr>
+              <th>#</th><th>Sequence (5'→3')</th><th>Len</th><th>Tm</th><th>GC%</th>
+              <th>Hairpin</th><th>HP ΔG</th><th>Homodimer</th><th>HD ΔG</th>
+            </tr></thead><tbody>`;
+            data.forward_primers.forEach((p, i) => {
+              const hp = p.hairpin || {};
+              const hd = p.homodimer || {};
+              html += `<tr>
+              <td>${i + 1}</td>
+              <td class="mono">${p.sequence}</td>
+              <td>${fmt(p.length)}</td>
+              <td>${fmt(p.tm)}</td>
+              <td>${fmt(p.gc_percent)}</td>
+              <td>${hp.structure_found ? 'Yes' : 'No'}</td>
+              <td>${fmt(hp.dg)}</td>
+              <td>${hd.structure_found ? 'Yes' : 'No'}</td>
+              <td>${fmt(hd.dg)}</td>
+            </tr>`;
+            });
+            html += `</tbody></table></div>`;
+          }
+
+          if (data.reverse_primers && data.reverse_primers.length > 0) {
+            html += `<h4>Reverse Primers (from reverse region)</h4>
+          <div style="overflow-x:auto;"><table>
+            <thead><tr>
+              <th>#</th><th>Sequence (5'→3')</th><th>Len</th><th>Tm</th><th>GC%</th>
+              <th>Hairpin</th><th>HP ΔG</th><th>Homodimer</th><th>HD ΔG</th>
+            </tr></thead><tbody>`;
+            data.reverse_primers.forEach((p, i) => {
+              const hp = p.hairpin || {};
+              const hd = p.homodimer || {};
+              html += `<tr>
+              <td>${i + 1}</td>
+              <td class="mono">${p.sequence}</td>
+              <td>${fmt(p.length)}</td>
+              <td>${fmt(p.tm)}</td>
+              <td>${fmt(p.gc_percent)}</td>
+              <td>${hp.structure_found ? 'Yes' : 'No'}</td>
+              <td>${fmt(hp.dg)}</td>
+              <td>${hd.structure_found ? 'Yes' : 'No'}</td>
+              <td>${fmt(hd.dg)}</td>
+            </tr>`;
+            });
+            html += `</tbody></table></div>`;
+          }
+
+          // Best pairing suggestions
+          if (data.best_pairs && data.best_pairs.length > 0) {
+            html += `<h4>Best Pair Combinations</h4>
+          <div style="overflow-x:auto;"><table>
+            <thead><tr>
+              <th>#</th><th>Forward</th><th>Fwd Tm</th>
+              <th>Reverse</th><th>Rev Tm</th>
+              <th>ΔTm</th><th>Heterodimer</th><th>Het ΔG</th>
+            </tr></thead><tbody>`;
+            data.best_pairs.forEach((bp, i) => {
+              const het = bp.heterodimer || {};
+              html += `<tr>
+              <td>${i + 1}</td>
+              <td class="mono">${bp.forward_seq}</td>
+              <td>${fmt(bp.forward_tm)}</td>
+              <td class="mono">${bp.reverse_seq}</td>
+              <td>${fmt(bp.reverse_tm)}</td>
+              <td>${fmt(bp.tm_diff)}</td>
+              <td>${het.structure_found ? 'Yes' : 'No'}</td>
+              <td>${fmt(het.dg)}</td>
+            </tr>`;
+            });
+            html += `</tbody></table></div>`;
+          }
+
+          if (!html) {
+            html = `<div class="error">No primers found. Try different or longer sequences.</div>`;
+          }
+
+          resultsDiv.innerHTML = html;
+
+        } catch (e) {
+          console.error(e);
+          resultsDiv.innerHTML = `<div class="error">Error: ${e.message}</div>`;
+        }
+      }
+
+      // Radio change: show internal panel + spliced viewer when internal selected
+      document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('input[name="primerMode"]').forEach(radio => {
+          radio.addEventListener('change', function () {
+            const mode = document.querySelector('input[name="primerMode"]:checked').value;
+            document.getElementById('internalJunctionPanel').classList.toggle('hidden', mode !== 'internal');
+
+            if (mode === 'internal') {
+              document.getElementById('splicedViewerBlock').classList.remove('hidden');
+            } else {
+              document.getElementById('splicedViewerBlock').classList.add('hidden');
+            }
+            renderAllSequences();
+          });
+        });
+
+        document.getElementById('geneInput').addEventListener('keypress', function (e) {
+          if (e.key === 'Enter') searchGene();
+        });
+
+        document.getElementById('fastaInput').addEventListener('keypress', function (e) {
+          if (e.key === 'Enter' && e.ctrlKey) identifySequence();
+        });
+
+        document.getElementById('upFlank').addEventListener('keypress', function (e) {
+          if (e.key === 'Enter') showSequence();
+        });
+
+        document.getElementById('downFlank').addEventListener('keypress', function (e) {
+          if (e.key === 'Enter') showSequence();
+        });
+      });
+      function toggleFeatureMap() {
+        const container = document.getElementById('featureMapContainer');
+        container.classList.toggle('hidden');
+        if (!container.classList.contains('hidden')) {
+          renderFeatureMap();
+        }
+      }
+
+      function renderFeatureMap() {
+        if (!currentSequenceData) return;
+        const data = currentSequenceData;
+        const container = document.getElementById('featureMapContent');
+
+        // Settings
+        const width = 1000;
+        const height = 150;
+        const trackHeight = 40;
+        const trackY = 50;
+        const rulerY = 110;
+        const margin = 20;
+
+        // Calculate scale
+        // gene_seq includes introns if include_introns=true
+        // We need to map relative coordinates (0 to gene_len)
+        const totalLen = data.gene_len;
+        const scale = (val) => (val / totalLen) * (width - 2 * margin) + margin;
+
+        let svg = `<svg width="100%" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" style="font-family: 'Inter', sans-serif;">`;
+
+        // 1. Draw backbone (Introns) - Gray line
+        svg += `<line x1="${scale(0)}" y1="${trackY + trackHeight / 2}" x2="${scale(totalLen)}" y2="${trackY + trackHeight / 2}" stroke="#94a3b8" stroke-width="2" />`;
+
+        // Prepare annotations
+        const annotations = data.annotations || [];
+
+        // Filter elements
+        const exons = annotations.filter(a => a.type === 'exon');
+        const cds = annotations.filter(a => a.type === 'cds');
+        // UTRs are regions in exons that are NOT CDS
+        // Construct visual blocks. 
+        // We will draw Exons as light gray (UTR color) first, then overlay CDS as peachy.
+        // Actually, user wants: Peachy Exons (CDS), Grayish Introns+UTR (lighter than introns).
+        // Let's interpret:
+        // Intron: Thin line or Gap.
+        // UTR: Light Gray Rect.
+        // CDS: Peachy Rect.
+
+        // Draw Exons (as UTR color base)
+        exons.forEach(ex => {
+          const x1 = scale(ex.start);
+          const x2 = scale(ex.end);
+          const w = Math.max(1, x2 - x1);
+
+          // Interaction: click to scroll
+          // We'll attach onclick to a group or rect
+          svg += `<rect x="${x1}" y="${trackY}" width="${w}" height="${trackHeight}" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1" class="cursor-pointer hover:opacity-80 transition-opacity" onclick="teleportTo(${ex.start})" title="Exon/UTR ${ex.start}-${ex.end}">
+                      <title>Exon ${ex.start}-${ex.end}</title>
+                    </rect>`;
+
+          // Add splice site text
+          svg += `<text x="${x1}" y="${trackY - 5}" font-size="10" fill="#64748b" text-anchor="middle">${ex.start}</text>`;
+          svg += `<text x="${x2}" y="${trackY + trackHeight + 12}" font-size="10" fill="#64748b" text-anchor="middle">${ex.end}</text>`;
+        });
+
+        // Overlay CDS (Peachy)
+        cds.forEach(c => {
+          const x1 = scale(c.start);
+          const x2 = scale(c.end);
+          const w = Math.max(1, x2 - x1);
+          svg += `<rect x="${x1}" y="${trackY}" width="${w}" height="${trackHeight}" fill="#fed7aa" stroke="#fbbf24" stroke-width="1" class="cursor-pointer hover:opacity-80 transition-opacity" onclick="teleportTo(${c.start})" title="CDS ${c.start}-${c.end}">
+                      <title>CDS ${c.start}-${c.end}</title>
+                    </rect>`;
+        });
+
+        // Draw Ruler
+        svg += `<line x1="${margin}" y1="${rulerY}" x2="${width - margin}" y2="${rulerY}" stroke="#334155" stroke-width="1" />`;
+
+        // Ruler ticks every 10% or so
+        const step = Math.pow(10, Math.floor(Math.log10(totalLen)));
+        const majorStep = step > totalLen / 5 ? step / 2 : step;
+
+        for (let i = 0; i <= totalLen; i += majorStep) {
+          const x = scale(i);
+          if (x > width - margin) break;
+          svg += `<line x1="${x}" y1="${rulerY}" x2="${x}" y2="${rulerY + 5}" stroke="#334155" stroke-width="1" />`;
+          svg += `<text x="${x}" y="${rulerY + 15}" font-size="10" fill="#334155" text-anchor="middle">${i}</text>`;
+        }
+
+        svg += `</svg>`;
+        container.innerHTML = svg;
+      }
+
+      function teleportTo(startPos) {
+        // startPos is annotation relative to gene start (0-based)
+        // The span IDs are 'seq-region-{start}'
+
+        // We need to find the span that *contains* or *starts at* this position.
+        // exact match first
+        let el = document.getElementById(`seq-region-${startPos}`);
+
+        // If exact match not found (e.g. if CDS start is inside an exon span split), try to find nearby?
+        // Actually, our renderGeneBlock splits spans exactly at CDS boundaries IF they are exons.
+        // renderGeneBlock iterates exonIntervals.
+        // Inside exon, it splits by CDS.
+        // So a span will start exactly at `exS` or at `cdsS` or `cdsE`.
+        // So if we click an Exon start or CDS start, it should exist.
+
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Flash highlight
+          el.style.backgroundColor = '#fef08a'; // yellow-200
+          setTimeout(() => {
+            el.style.backgroundColor = ''; // reset (CSS classes handle the rest, though inline style overrides... we might need to be careful)
+            // Actually spans use classes. resetting style.backgroundColor removes the inline override.
+          }, 1000);
+        } else {
+          console.warn(`Element for position ${startPos} not found.`);
+        }
+      }
+      // Feature Map State
+      let mapViewState = { start: 0, end: null }; // bp coordinates
+      let isMapDragging = false;
+      let dragStartBp = null;
+      let dragCurrentBp = null;
+
+      function toggleFeatureMap() {
+        const container = document.getElementById('featureMapContainer');
+        container.classList.toggle('hidden');
+        if (!container.classList.contains('hidden')) {
+          // Reset view on open if not set
+          if (currentSequenceData && mapViewState.end === null) {
+            const data = currentSequenceData;
+            const start = -(data.upstream_len || 0);
+            const end = data.gene_len + (data.downstream_len || 0);
+            mapViewState = { start, end };
+          }
+          renderFeatureMap();
+        }
+      }
+
+      function resetFeatureMapZoom() {
+        if (currentSequenceData) {
+          const data = currentSequenceData;
+          const start = -(data.upstream_len || 0);
+          const end = data.gene_len + (data.downstream_len || 0);
+          mapViewState = { start, end };
+          renderFeatureMap();
+        }
+      }
+
+      function handleMapMouseDown(e, margin) {
+        if (!currentSequenceData) return;
+        const svg = e.currentTarget;
+        const rect = svg.getBoundingClientRect();
+
+        // CHECK if click target is a feature
+        const targetStart = e.target.getAttribute('data-start');
+
+        // Calculate initial BP
+        const width = 1000 - 2 * margin;
+        const x = e.clientX - rect.left - margin;
+        const viewW = mapViewState.end - mapViewState.start;
+        const bp = (x / width) * viewW + mapViewState.start;
+
+        isMapDragging = true;
+        dragStartBp = Math.max(mapViewState.start, Math.min(mapViewState.end, bp));
+        dragCurrentBp = dragStartBp;
+
+        // Attach global listeners for smooth dragging outside element
+        const onMove = (ev) => {
+          const cx = ev.clientX - rect.left - margin;
+          // Allow dragging outside to clamp
+          const cBp = (cx / width) * viewW + mapViewState.start;
+          dragCurrentBp = Math.max(mapViewState.start, Math.min(mapViewState.end, cBp));
+          renderFeatureMap();
+        };
+
+        const onUp = () => {
+          isMapDragging = false;
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+
+          // Apply Zoom OR Teleport
+          if (dragStartBp !== null && dragCurrentBp !== null) {
+            const start = Math.min(dragStartBp, dragCurrentBp);
+            const end = Math.max(dragStartBp, dragCurrentBp);
+            const span = end - start;
+
+            if (span > 50) { // Minimum threshold for ZOOM
+              mapViewState = { start, end };
+            } else if (targetStart) {
+              // If drag was small AND we clicked a feature -> Teleport
+              teleportTo(targetStart);
+            }
+          }
+          dragStartBp = null;
+          dragCurrentBp = null;
+          renderFeatureMap();
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+
+        renderFeatureMap();
+      }
+
+      // Legacy handlers removed as we use global listeners now
+      function handleMapMouseMove(e) { }
+      function handleMapMouseUp(e) { }
+      function handleMapMouseLeave(e) { }
+
+      function renderFeatureMap() {
+        if (!currentSequenceData) return;
+        const data = currentSequenceData;
+        const container = document.getElementById('featureMapContent');
+
+        // Initialize view state if needed
+        if (mapViewState.end === null) {
+          mapViewState.start = 0;
+          mapViewState.end = data.gene_len;
+        }
+
+        // Settings
+        const width = 1000;
+        const height = 180; // slightly taller for primers
+        const trackHeight = 40;
+        const trackY = 60;
+        const rulerY = 130;
+        const margin = 20;
+
+        const viewStart = mapViewState.start;
+        const viewEnd = mapViewState.end;
+        const viewLen = viewEnd - viewStart;
+
+        // Scale function mapping BP to X
+        const scale = (bp) => {
+          return ((bp - viewStart) / viewLen) * (width - 2 * margin) + margin;
+        };
+
+        // Helper to check visibility
+        const isVisible = (start, end) => {
+          return !(end < viewStart || start > viewEnd);
+        };
+
+        let svg = `<svg width="100%" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" style="font-family: 'Inter', sans-serif; cursor: crosshair;" 
+                    onmousedown="handleMapMouseDown(event, ${margin})">`;
+
+        // Styles for hover
+        svg += `<style>
+            .feature-rect { transition: height 0.2s, y 0.2s, filter 0.2s; }
+            .feature-rect:hover { 
+                fill-opacity: 1; 
+                filter: drop-shadow(0 4px 3px rgb(0 0 0 / 0.07)); 
+                stroke-width: 2px;
+                stroke: #f59e0b; /* amber-500 */
+                z-index: 10;
+            }
+        </style>`;
+
+        // 1. Draw backbone (Introns) - Gray line
+        svg += `<line x1="${margin}" y1="${trackY + trackHeight / 2}" x2="${width - margin}" y2="${trackY + trackHeight / 2}" stroke="#94a3b8" stroke-width="2" />`;
+
+        // Prepare annotations
+        const annotations = data.annotations || [];
+        const exons = annotations.filter(a => a.type === 'exon');
+        const cds = annotations.filter(a => a.type === 'cds');
+
+        // Draw Exons (as UTR color base - Light Gray #e2e8f0)
+        exons.forEach(ex => {
+          if (!isVisible(ex.start, ex.end)) return;
+
+          const x1 = Math.max(margin, scale(ex.start));
+          const x2 = Math.min(width - margin, scale(ex.end));
+          const w = Math.max(1, x2 - x1);
+
+          svg += `<rect class="feature-rect cursor-pointer hover:opacity-100 opacity-90" 
+                      x="${x1}" y="${trackY}" width="${w}" height="${trackHeight}" 
+                      fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1"
+                      data-start="${ex.start}"
+                      onmouseenter="this.setAttribute('height', ${trackHeight + 6}); this.setAttribute('y', ${trackY - 3});"
+                      onmouseleave="this.setAttribute('height', ${trackHeight}); this.setAttribute('y', ${trackY});">
+                      <title>Exon/UTR ${ex.start}-${ex.end}</title>
+                    </rect>`;
+
+          // Text if visible enough
+          if (w > 20) {
+            if (scale(ex.start) >= margin)
+              svg += `<text x="${x1}" y="${trackY - 8}" font-size="10" fill="#64748b" text-anchor="middle" pointer-events="none">${ex.start}</text>`;
+            if (scale(ex.end) <= width - margin)
+              svg += `<text x="${x2}" y="${trackY + trackHeight + 15}" font-size="10" fill="#64748b" text-anchor="middle" pointer-events="none">${ex.end}</text>`;
+          }
+        });
+
+        // Overlay CDS (Peachy #fed7aa)
+        cds.forEach(c => {
+          if (!isVisible(c.start, c.end)) return;
+          const x1 = Math.max(margin, scale(c.start));
+          const x2 = Math.min(width - margin, scale(c.end));
+          const w = Math.max(1, x2 - x1);
+
+          svg += `<rect class="feature-rect cursor-pointer hover:opacity-100 opacity-90" 
+                      x="${x1}" y="${trackY}" width="${w}" height="${trackHeight}" 
+                      fill="#fed7aa" stroke="#fbbf24" stroke-width="1"
+                      data-start="${c.start}"
+                      onmouseenter="this.setAttribute('height', ${trackHeight + 6}); this.setAttribute('y', ${trackY - 3});"
+                      onmouseleave="this.setAttribute('height', ${trackHeight}); this.setAttribute('y', ${trackY});">
+                      <title>CDS ${c.start}-${c.end}</title>
+                    </rect>`;
+        });
+
+        // Draw Selected Primers
+        const showPrimers = document.getElementById('showPrimers') ? document.getElementById('showPrimers').checked : true;
+        const showAmplicons = document.getElementById('showAmplicons') ? document.getElementById('showAmplicons').checked : true;
+
+        const primerHighlights = [
+          { p: selectedWGAForward, label: 'F' },
+          { p: selectedWGAReverse, label: 'R' },
+          { p: selectedJuncLeft, label: 'F' },
+          { p: selectedJuncRight, label: 'R' }
+        ];
+
+        // Helper to map primer coords to genomic blocks
+        const mapPrimerToGenomic = (p) => {
+          if (!p) return [];
+          const ranges = [];
+
+          if (p.region === 'up') {
+            // Upstream: p.start is index in upstream_seq
+            const upLen = data.upstream_len || 0;
+            ranges.push({
+              start: p.start - upLen,
+              end: p.end - upLen
+            });
+          } else if (p.region === 'down') {
+            // Downstream: starts at gene_len
+            ranges.push({
+              start: data.gene_len + p.start,
+              end: data.gene_len + p.end
+            });
+          } else if (p.region === 'spliced') {
+            // Spliced: map spliced coords to exon genomic coords
+            let remainingStart = p.start;
+            let remainingLen = p.end - p.start;
+
+            // Exons sorted by genomic start
+            const exons = (data.annotations || []).filter(a => a.type === 'exon').sort((a, b) => a.start - b.start);
+
+            for (let ex of exons) {
+              const exLen = ex.end - ex.start;
+
+              if (remainingStart < exLen) {
+                // Starts in this exon
+                const chunkStart = ex.start + remainingStart;
+                const availableLen = exLen - remainingStart;
+                const chunkLen = Math.min(remainingLen, availableLen);
+
+                ranges.push({
+                  start: chunkStart,
+                  end: chunkStart + chunkLen
+                });
+
+                remainingLen -= chunkLen;
+                remainingStart = 0; // Next chunk starts at beginning of next exon
+                if (remainingLen <= 0) break;
+              } else {
+                remainingStart -= exLen;
+              }
+            }
+          }
+          return ranges;
+        };
+
+        // 1. Draw Amplicons (Purple Dotted Line)
+        if (showAmplicons) {
+          // Check WGA Pair
+          if (selectedWGAForward && selectedWGAReverse) {
+            const rangesF = mapPrimerToGenomic(selectedWGAForward);
+            const rangesR = mapPrimerToGenomic(selectedWGAReverse);
+            if (rangesF.length && rangesR.length) {
+              const start = Math.min(...rangesF.map(r => r.start));
+              const end = Math.max(...rangesR.map(r => r.end));
+              const x1 = scale(start);
+              const x2 = scale(end);
+              // Only draw if roughly visible
+              if (x2 > margin && x1 < width - margin) {
+                svg += `<line x1="${x1}" y1="${trackY - 28}" x2="${x2}" y2="${trackY - 28}" 
+                                stroke="#9333ea" stroke-width="2" stroke-dasharray="4,4" opacity="0.5" />`;
+              }
+            }
+          }
+          // Check Junction Pair
+          if (selectedJuncLeft && selectedJuncRight) {
+            const rangesF = mapPrimerToGenomic(selectedJuncLeft);
+            const rangesR = mapPrimerToGenomic(selectedJuncRight);
+            if (rangesF.length && rangesR.length) {
+              const start = Math.min(...rangesF.map(r => r.start));
+              const end = Math.max(...rangesR.map(r => r.end));
+              const x1 = scale(start);
+              const x2 = scale(end);
+              if (x2 > margin && x1 < width - margin) {
+                svg += `<line x1="${x1}" y1="${trackY - 28}" x2="${x2}" y2="${trackY - 28}" 
+                                stroke="#9333ea" stroke-width="2" stroke-dasharray="4,4" opacity="0.5" />`;
+              }
+            }
+          }
+        }
+
+        if (showPrimers) {
+          primerHighlights.forEach(item => {
+            const p = item.p;
+            if (!p) return;
+            const ranges = mapPrimerToGenomic(p);
+            if (ranges.length === 0) return;
+
+            // Draw Connecting Lines if multiple parts (e.g. across introns)
+            if (ranges.length > 1) {
+              for (let i = 0; i < ranges.length - 1; i++) {
+                const curr = ranges[i];
+                const next = ranges[i + 1];
+
+                const x1 = scale(curr.end);
+                const x2 = scale(next.start);
+
+                // Draw dashed line connecting parts
+                svg += `<line x1="${x1}" y1="${trackY - 20}" x2="${x2}" y2="${trackY - 20}" 
+                              stroke="#ef4444" stroke-width="1" stroke-dasharray="3,3" />`;
+              }
+            }
+
+            ranges.forEach(r => {
+              const xStart = scale(r.start);
+              const xEnd = scale(r.end);
+              const w = Math.max(3, xEnd - xStart);
+
+              // Draw Red Bar rising upwards
+              svg += `<rect x="${xStart}" y="${trackY - 20}" width="${w}" height="${25}" 
+                          fill="#ef4444" stroke="#991b1b" stroke-width="1"
+                          class="cursor-pointer hover:opacity-80"
+                          onclick="teleportTo(${r.start}); event.stopPropagation();">
+                          <title>Primer: ${p.primerSeq}</title>
+                        </rect>`;
+
+              // Label Above
+              svg += `<text x="${xStart + w / 2}" y="${trackY - 24}" font-size="10" fill="#b91c1c" text-anchor="middle" font-weight="bold">${item.label}</text>`;
+            });
+          });
+        }
+
+        // Draw Drag Selection (Green Rect)
+        // Only draw if width is significant to avoid "0 bp" flash on simple click
+        if (isMapDragging && dragStartBp !== null && dragCurrentBp !== null) {
+          const start = Math.min(dragStartBp, dragCurrentBp);
+          const end = Math.max(dragStartBp, dragCurrentBp);
+
+          if (end - start > 0) {
+            const x1 = Math.max(margin, scale(start));
+            const x2 = Math.min(width - margin, scale(end));
+            const w = Math.max(1, x2 - x1);
+
+            svg += `<rect x="${x1}" y="${trackY}" width="${w}" height="${trackHeight}" 
+                        fill="rgba(74, 222, 128, 0.15)" stroke="#22c55e" stroke-width="1" pointer-events="none" />`;
+
+            // Show selection text
+            svg += `<text x="${x1 + w / 2}" y="${trackY + trackHeight / 2}" font-size="12" fill="#15803d" text-anchor="middle" font-weight="bold" pointer-events="none">${Math.round(end - start)} bp</text>`;
+          }
+        }
+
+
+        // Draw Ruler
+        svg += `<line x1="${margin}" y1="${rulerY}" x2="${width - margin}" y2="${rulerY}" stroke="#334155" stroke-width="1" />`;
+
+        // Ruler ticks adapted to zoom
+        const totalBP = viewLen;
+        const tickStep = Math.pow(10, Math.floor(Math.log10(totalBP)) - 1);
+        const effectiveStep = tickStep * (totalBP / tickStep > 20 ? 2 : 1) * (totalBP / tickStep > 50 ? 2.5 : 1);
+
+        // Find first tick
+        const startTick = Math.floor(viewStart / effectiveStep) * effectiveStep;
+
+        for (let i = startTick; i <= viewEnd; i += effectiveStep) {
+          if (i < viewStart) continue;
+          const x = scale(i);
+          if (x > width - margin) break;
+
+          svg += `<line x1="${x}" y1="${rulerY}" x2="${x}" y2="${rulerY + 5}" stroke="#334155" stroke-width="1" />`;
+          svg += `<text x="${x}" y="${rulerY + 15}" font-size="10" fill="#334155" text-anchor="middle">${Math.round(i)}</text>`;
+        }
+
+        svg += `</svg>`;
+        container.innerHTML = svg;
+      }
+
+      function teleportTo(startPos) {
+        // Find the element by ID. Usually seq-region-{startPos}
+        // If not exact match, we might need to search, but our rendering logic gives exact IDs for features.
+        let el = document.getElementById(`seq-region-${startPos}`);
+
+        // If exact ID missing, try mapping to the appropriate segment
+        // (For primers mapped to genomic coords, the startPos might not match an exon boundary directly unless it's an exon feature)
+        // If we can't find exact ID, we might just look for the span containing that BP? 
+        // For now, assume strict mapping for Exons/CDS. 
+        // For Primers, we might want to pass the specific element ID if possible, or just scroll to the "approximate" location.
+        // Actually, for primers we might need to find the span that covers 'startPos'.
+
+        if (!el) {
+          // Fallback: try to find a span that *contains* this position
+          // Since we don't have a quick index, we can just look for the gene container?
+          // Or better, let's just warn for now. The Exon click works because we use exon.start.
+        }
+
+        if (el) {
+          const container = document.getElementById('sequenceMap');
+
+          if (container) {
+            // Calculate position relative to container and scroll container ONLY
+            const containerRect = container.getBoundingClientRect();
+            const elRect = el.getBoundingClientRect();
+
+            // Desired scroll change: Move element to center of container
+            // diff = elAbsoluteTop - containerAbsoluteTop
+            // We want this diff to become containerHeight/2
+            // currentScrollTop + (relativeTop - containerHeight/2)
+
+            // We need to account for the current scrollTop in the relative calculation if using getBoundingClientRect (which is viewport relative)
+            // Actually getBoundingClientRect works perfectly for relative visual difference.
+
+            const relativeTop = elRect.top - containerRect.top;
+            const relativeLeft = elRect.left - containerRect.left;
+
+            container.scrollTo({
+              top: container.scrollTop + relativeTop - (container.clientHeight / 2) + (el.offsetHeight / 2),
+              behavior: 'smooth'
+            });
+          } else {
+            // Fallback if container not found (e.g. spliced view?)
+            el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+          }
+
+          // Flash highlight
+          const originalBg = el.style.backgroundColor;
+          el.style.backgroundColor = '#fef08a'; // yellow-200
+          el.style.transition = 'background-color 0.3s';
+
+          setTimeout(() => {
+            el.style.backgroundColor = '';
+          }, 3000);
+        } else {
+          console.warn(`Element for position ${startPos} not found.`);
+        }
+      }
+
+    </script>
+</body>
+
+</html>

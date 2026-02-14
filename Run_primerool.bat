@@ -79,7 +79,7 @@ if %errorlevel% neq 0 (
         echo  ============================================
         echo.
         echo   Please close this window and open
-        echo   run_primero.bat again to launch Primerool.
+        echo   run_primerool.bat again to launch Primerool.
         echo.
         pause
         exit /b 0

@@ -7,5 +7,4 @@ venv/
 __pycache__/
 *.pyc
 
-# Claude config
 .claude/

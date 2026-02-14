@@ -70,6 +70,7 @@ def search_gene(gene_name: str, species: str = DEFAULT_SPECIES) -> Optional[Dict
             "biotype": t.get("biotype", ""),
             "strand": "+" if t.get("strand", 1) == 1 else "-",
             "exon_count": len(t.get("Exon", [])),
+            "is_canonical": bool(t.get("is_canonical", False)),
         })
 
     return {

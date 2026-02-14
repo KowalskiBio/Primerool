@@ -42,8 +42,17 @@ if %errorlevel% neq 0 (
         )
     )
 
-    :: Refresh PATH so python is visible in this session
+    :: Refresh PATH from both user and system registry entries
     for /f "tokens=2*" %%A in ('reg query "HKCU\Environment" /v PATH 2^>nul') do set "PATH=%PATH%;%%B"
+    for /f "tokens=2*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v PATH 2^>nul') do set "PATH=%PATH%;%%B"
+
+    :: Also check the most common Python install locations directly
+    if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
+        set "PATH=%PATH%;%LOCALAPPDATA%\Programs\Python\Python312;%LOCALAPPDATA%\Programs\Python\Python312\Scripts"
+    )
+    if exist "%PROGRAMFILES%\Python312\python.exe" (
+        set "PATH=%PATH%;%PROGRAMFILES%\Python312;%PROGRAMFILES%\Python312\Scripts"
+    )
 
     python --version >nul 2>&1
     if %errorlevel% neq 0 (

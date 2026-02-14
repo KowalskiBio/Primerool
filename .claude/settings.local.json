@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "WebFetch(domain:blast.ncbi.nlm.nih.gov)",
-      "Bash(python -c:*)",
-      "Bash(pip3 install:*)"
-    ]
-  }
-}

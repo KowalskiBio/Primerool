@@ -152,6 +152,7 @@ def search_gene_route():
                 "name": t["name"],
                 "exon_count": t["exon_count"],
                 "strand": t["strand"],
+                "is_canonical": t.get("is_canonical", False),
             }
             for t in result["transcripts"]
         ],

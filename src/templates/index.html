@@ -91,6 +91,12 @@
       margin-top: 0;
       padding-top: 0;
     }
+
+    .resizable-th {
+      resize: horizontal;
+      overflow: auto;
+      min-width: 50px;
+    }
   </style>
 </head>
 
@@ -177,7 +183,7 @@
       <div id="geneError"
         class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-medium"></div>
       <div id="geneSuccess"
-        class="hidden mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm font-medium">
+        class="hidden mt-4 mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm font-medium">
       </div>
     </div>
 
@@ -491,7 +497,7 @@
 
           // Show top hits
           let html = '<h3 class="text-md font-semibold text-slate-800 mb-3">BLAST Results</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-slate-600 border border-slate-200 rounded-lg"><thead class="text-xs text-slate-700 uppercase bg-slate-50"><tr>' +
-            '<th class="px-4 py-3 border-b border-slate-200">#</th><th class="px-4 py-3 border-b border-slate-200">Organism</th><th class="px-4 py-3 border-b border-slate-200">Gene</th><th class="px-4 py-3 border-b border-slate-200">Description</th><th class="px-4 py-3 border-b border-slate-200">Accession</th><th class="px-4 py-3 border-b border-slate-200">Identity</th><th class="px-4 py-3 border-b border-slate-200">E-value</th><th class="px-4 py-3 border-b border-slate-200">Action</th>' +
+            '<th class="px-4 py-3 border-b border-slate-200 resizable-th">#</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Organism</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Gene</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Description</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Accession</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Identity</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">E-value</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Action</th>' +
             '</tr></thead><tbody>';
 
           hits.slice(0, 10).forEach((hit, i) => {
@@ -505,7 +511,9 @@
             <td class="px-4 py-3">${i + 1}</td>
             <td class="px-4 py-3"><em>${hit.organism}</em></td>
             <td class="px-4 py-3"><strong>${hit.gene_symbol || '<span class="text-slate-400">-</span>'}</strong></td>
-            <td class="px-4 py-3"><div class="max-w-[200px] whitespace-nowrap overflow-hidden text-ellipsis" title="${hit.title}">${hit.title}</div></td>
+            <td class="px-4 py-3">
+              <div class="min-w-[200px]" title="${hit.title}">${hit.title}</div>
+            </td>
             <td class="px-4 py-3"><a href="https://www.ncbi.nlm.nih.gov/nuccore/${hit.accession}" target="_blank" class="text-green-600 hover:underline">${hit.accession}</a></td>
             <td class="px-4 py-3">${hit.identity_pct}%</td>
             <td class="px-4 py-3">${evalue}</td>
@@ -541,7 +549,9 @@
 
           const infoDiv = document.getElementById('geneSuccess');
           infoDiv.textContent = `Organism identified as ${organismName || 'Unknown'}. Gene symbol not found in BLAST result. Please check the Description and enter the gene name manually above.`;
-          infoDiv.className = 'error'; // Use error style (red/pink) to catch attention, or keep success? error is better for "action required"
+
+          // Use error/warning style
+          infoDiv.className = 'mt-4 mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm font-medium';
           infoDiv.classList.remove('hidden');
           return;
         }
@@ -552,7 +562,8 @@
         document.getElementById('geneInput').value = geneSymbol;
 
         const successDiv = document.getElementById('geneSuccess');
-        successDiv.className = 'success';
+        // Reset to success style
+        successDiv.className = 'mt-4 mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm font-medium';
         successDiv.textContent = `Identified: ${organismName} — ${geneSymbol}. Searching Ensembl...`;
         successDiv.classList.remove('hidden');
 
@@ -735,7 +746,14 @@
           data.transcripts.forEach(t => {
             const option = document.createElement('option');
             option.value = t.id;
-            option.textContent = `${t.name} (${t.exon_count} exons, strand ${t.strand})`;
+            // Add (Canonical) label if applicable
+            const canonicalText = t.is_canonical ? ' (Canonical)' : '';
+            option.textContent = `${t.name}${canonicalText} (${t.exon_count} exons, strand ${t.strand})`;
+
+            // Auto-select if canonical
+            if (t.is_canonical) {
+              option.selected = true;
+            }
             select.appendChild(option);
           });
 

@@ -35,9 +35,13 @@ The tool also allows you to identify genomic structure of your sequence based on
 
 ## How to Run (Windows)
 
+## How to Run (Windows)
+
 1.  Find the `Run_primerool.bat` file in this folder.
 2.  Double-click it.
-3.  A command prompt window will open, and the app will launch in your default web browser.
+3.  A command prompt window will open.
+4.  **If Python is not installed**, it will be downloaded and installed automatically. Once it says "Python installed successfully", **close the window and double-click `Run_primerool.bat` again** — this is required once so Windows picks up the new Python installation.
+5.  On the second run, the app will finish setting up and launch in your default web browser.
 
 ## How to Run (Development)
 

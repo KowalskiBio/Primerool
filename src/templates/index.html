@@ -619,6 +619,27 @@
         one('Junction Left selected', selectedJuncLeft);
         one('Junction Right selected', selectedJuncRight);
 
+        // Calculate Amplicon Length if pair exists
+        if (selectedWGAForward && selectedWGAReverse && currentSequenceData) {
+          const upLen = currentSequenceData.upstream_len || 0;
+          const geneLen = currentSequenceData.gene_len || 0;
+          const len = geneLen + selectedWGAReverse.end - selectedWGAForward.start + upLen;
+          parts.push(`
+           <div style="margin-top:10px; padding-top:10px; border-top: 1px solid #e2e8f0;">
+             <strong>Amplicon (WGA)</strong>: <span class="mono">${len} bp</span>
+           </div>
+           `);
+        }
+
+        if (selectedJuncLeft && selectedJuncRight) {
+          const len = selectedJuncRight.end - selectedJuncLeft.start;
+          parts.push(`
+           <div style="margin-top:10px; padding-top:10px; border-top: 1px solid #e2e8f0;">
+             <strong>Amplicon (Junction)</strong>: <span class="mono">${len} bp</span>
+           </div>
+           `);
+        }
+
         if (!parts.length) {
           box.style.display = 'none';
           box.innerHTML = '';

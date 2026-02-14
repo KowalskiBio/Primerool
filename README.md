@@ -31,7 +31,9 @@ Cloud-based primer design tool for genes, exons, and whole-genome amplification 
 
 1.  Find the `run_primero.bat` file in this folder.
 2.  Double-click it.
-3.  A command prompt window will open, and the app will launch in your default web browser.
+3.  A command prompt window will open.
+4.  **If Python is not installed**, it will be downloaded and installed automatically. Once it says "Python installed successfully", **close the window and double-click `run_primero.bat` again** — this is required once so Windows picks up the new Python installation.
+5.  On the second run, the app will finish setting up and launch in your default web browser.
 
 ## How to Run (Development)
 

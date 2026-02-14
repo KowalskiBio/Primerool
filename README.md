@@ -1,4 +1,4 @@
-# Primeroonline
+# Primerool
 
 Cloud-based primer design tool for genes, exons, and whole-genome amplification (WGA).
 The tool also allows you to identify genomic structure of your sequence based on a BLAST/alignment.

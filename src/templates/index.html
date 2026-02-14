@@ -311,6 +311,18 @@
             id="splicedMap"></div>
         </div>
 
+        <div class="mt-4 flex justify-end">
+          <button onclick="clearAllPrimerHighlights()"
+            class="text-sm text-slate-500 hover:text-red-600 font-medium px-3 py-1.5 rounded border border-slate-200 hover:border-red-200 bg-white shadow-sm transition-colors flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd"
+                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L11.414 10 5.707 5.707a1 1 0 01-1.414-1.414z"
+                clip-rule="evenodd" />
+            </svg>
+            Clear Primer Highlights
+          </button>
+        </div>
+
         <div class="callout mt-4 p-4 bg-slate-50 border border-slate-200 rounded-lg text-sm hidden"
           id="selectedPrimerInfo"></div>
 
@@ -376,10 +388,7 @@
           Design Primers
         </button>
 
-        <div>
-          <button class="text-sm text-green-600 hover:text-green-800 underline"
-            onclick="clearAllPrimerHighlights()">Clear primer highlights</button>
-        </div>
+
 
         <div id="primerResults" class="mt-6 space-y-4"></div>
 
@@ -874,19 +883,37 @@
         const gene = data.gene_seq || '';
         const down = data.downstream_seq || '';
 
-        // Upstream highlight (WGA forward)
-        let upHTML = up;
-        if (selectedWGAForward && selectedWGAForward.region === 'up') {
-          upHTML = applyPrimerSpan(upHTML, selectedWGAForward.start, selectedWGAForward.end);
-        }
-        upHTML = `<span class="seq-flank">${upHTML}</span>`;
+        // Helper to apply highlight spans for any primers in this region
+        function highlightRegion(rawSeq, regionName) {
+          const intervals = [];
+          if (selectedWGAForward && selectedWGAForward.region === regionName) intervals.push(selectedWGAForward);
+          if (selectedWGAReverse && selectedWGAReverse.region === regionName) intervals.push(selectedWGAReverse);
 
-        // Downstream highlight (WGA reverse)
-        let downHTML = down;
-        if (selectedWGAReverse && selectedWGAReverse.region === 'down') {
-          downHTML = applyPrimerSpan(downHTML, selectedWGAReverse.start, selectedWGAReverse.end);
+          if (!intervals.length) return `<span class="seq-flank">${rawSeq}</span>`;
+
+          // Sort by start
+          intervals.sort((a, b) => a.start - b.start);
+
+          let out = '';
+          let cur = 0;
+          for (const p of intervals) {
+            // clamp to valid range
+            const s = Math.max(0, Math.max(cur, p.start));
+            const e = Math.min(rawSeq.length, p.end);
+
+            if (s > cur) out += rawSeq.substring(cur, s);
+            if (e > s) {
+              out += `<span class="seq-primer">${rawSeq.substring(s, e)}</span>`;
+              cur = e;
+            }
+          }
+          if (cur < rawSeq.length) out += rawSeq.substring(cur);
+
+          return `<span class="seq-flank">${out}</span>`;
         }
-        downHTML = `<span class="seq-flank">${downHTML}</span>`;
+
+        const upHTML = highlightRegion(up, 'up');
+        const downHTML = highlightRegion(down, 'down');
 
         // Gene block rendering with introns/cds/utr formatting (no primer highlighting inside gene here)
         const geneHTML = renderGeneBlock(data);
@@ -1155,6 +1182,10 @@
       }
 
       function useWGA(which, region, interval, primerSeq, source = 'recommended', silent = false) {
+        // Auto-switch to flanking mode to be consistent
+        const radio = document.querySelector('input[name="primerMode"][value="flanking"]');
+        if (radio) radio.checked = true;
+
         const start = interval[0], end = interval[1];
         let binding = '';
         if (region === 'up') binding = (currentSequenceData.upstream_seq || '').substring(start, end);
@@ -1170,6 +1201,12 @@
       }
 
       function useJunction(which, interval, primerSeq, source = 'recommended', silent = false) {
+        // Auto-switch to internal mode to ensure visibility
+        const radio = document.querySelector('input[name="primerMode"][value="internal"]');
+        if (radio) radio.checked = true;
+        // Make sure the panel logic runs (though renderSplicedSequence handles the viewer visibility)
+        document.getElementById('internalJunctionPanel').classList.remove('hidden');
+
         const start = interval[0], end = interval[1];
         const spliced = currentSequenceData.spliced_exons_seq || '';
         const binding = spliced.substring(start, end);
@@ -1382,6 +1419,56 @@
         resultsDiv.innerHTML = `<div class="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50" role="alert">Unknown mode returned by server.</div>`;
       }
 
+      function findAndUsePrimer(seq, type) {
+        if (!currentSequenceData) { alert('No sequence loaded to map against.'); return; }
+
+        const cleanSeq = seq.replace(/[^A-Za-z]/g, '').toUpperCase();
+        const rc = reverseComplement(cleanSeq);
+
+        const up = currentSequenceData.upstream_seq || '';
+        const down = currentSequenceData.downstream_seq || '';
+        const spliced = currentSequenceData.spliced_exons_seq || '';
+
+        // --- SPLICED (Internal/Junction) ---
+        if (type === 'forward' || type === 'unknown') {
+          let idx = spliced.indexOf(cleanSeq);
+          if (idx !== -1) { useJunction('left', [idx, idx + cleanSeq.length], cleanSeq, 'manual'); return; }
+        }
+        if (type === 'reverse' || type === 'unknown') {
+          let idx = spliced.indexOf(rc);
+          if (idx !== -1) { useJunction('right', [idx, idx + rc.length], cleanSeq, 'manual'); return; }
+        }
+
+        // --- FLANKING (WGA) ---
+        // UPSTREAM
+        if (type === 'forward' || type === 'unknown') {
+          let idx = up.indexOf(cleanSeq);
+          if (idx !== -1) { useWGA('forward', 'up', [idx, idx + cleanSeq.length], cleanSeq, 'manual'); return; }
+        }
+        if (type === 'reverse' || type === 'unknown') {
+          let idx = up.indexOf(rc);
+          if (idx !== -1) { useWGA('reverse', 'up', [idx, idx + rc.length], cleanSeq, 'manual'); return; }
+        }
+
+        // DOWNSTREAM
+        if (type === 'forward' || type === 'unknown') {
+          let idx = down.indexOf(cleanSeq);
+          if (idx !== -1) { useWGA('forward', 'down', [idx, idx + cleanSeq.length], cleanSeq, 'manual'); return; }
+        }
+        if (type === 'reverse' || type === 'unknown') {
+          let idx = down.indexOf(rc);
+          if (idx !== -1) { useWGA('reverse', 'down', [idx, idx + rc.length], cleanSeq, 'manual'); return; }
+        }
+
+        alert('Primer binding site not found in current sequence (checked Upstream, Downstream, and Spliced Exons).');
+      }
+
+      // Helper for RC
+      function reverseComplement(seq) {
+        const map = { 'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C', 'N': 'N', 'a': 't', 't': 'a', 'c': 'g', 'g': 'c' };
+        return seq.split('').reverse().map(c => map[c] || c).join('');
+      }
+
       async function designFromSequence() {
         const fwdRegion = normalizeDNA(document.getElementById('fwdRegion').value);
         const revRegion = normalizeDNA(document.getElementById('revRegion').value);
@@ -1421,50 +1508,64 @@
           // Show forward primers
           let html = '';
           if (data.forward_primers && data.forward_primers.length > 0) {
-            html += `<h4>Forward Primers (from forward region)</h4>
-          <div style="overflow-x:auto;"><table>
-            <thead><tr>
-              <th>#</th><th>Sequence (5'→3')</th><th>Len</th><th>Tm</th><th>GC%</th>
-              <th>Hairpin</th><th>HP ΔG</th><th>Homodimer</th><th>HD ΔG</th>
+            html += `<h4 class="text-sm font-semibold text-slate-700 mb-2 mt-4 ml-1">Forward Primers (from forward region)</h4>
+          <div class="overflow-x-auto mb-6 border border-slate-200 rounded-lg">
+          <table class="w-full text-sm text-left text-slate-600">
+            <thead class="text-xs text-slate-700 uppercase bg-slate-50">
+              <tr>
+              <th class="px-4 py-3 border-b">#</th><th class="px-4 py-3 border-b">Sequence (5'→3')</th><th class="px-4 py-3 border-b">Len</th><th class="px-4 py-3 border-b">Tm</th><th class="px-4 py-3 border-b">GC%</th>
+              <th class="px-4 py-3 border-b">Hairpin</th><th class="px-4 py-3 border-b">HP ΔG</th><th class="px-4 py-3 border-b">Homol</th><th class="px-4 py-3 border-b">HD ΔG</th>
+              <th class="px-4 py-3 border-b">Action</th>
             </tr></thead><tbody>`;
             data.forward_primers.forEach((p, i) => {
               const hp = p.hairpin || {};
               const hd = p.homodimer || {};
-              html += `<tr>
-              <td>${i + 1}</td>
-              <td class="mono">${p.sequence}</td>
-              <td>${fmt(p.length)}</td>
-              <td>${fmt(p.tm)}</td>
-              <td>${fmt(p.gc_percent)}</td>
-              <td>${hp.structure_found ? 'Yes' : 'No'}</td>
-              <td>${fmt(hp.dg)}</td>
-              <td>${hd.structure_found ? 'Yes' : 'No'}</td>
-              <td>${fmt(hd.dg)}</td>
+              html += `<tr class="bg-white border-b hover:bg-slate-50 last:border-0 text-xs text-slate-600">
+              <td class="px-4 py-3">${i + 1}</td>
+              <td class="px-4 py-3 font-mono text-slate-800">${p.sequence}</td>
+              <td class="px-4 py-3">${fmt(p.length)}</td>
+              <td class="px-4 py-3">${fmt(p.tm)}</td>
+              <td class="px-4 py-3">${fmt(p.gc_percent)}</td>
+              <td class="px-4 py-3">${hp.structure_found ? 'Yes' : 'No'}</td>
+              <td class="px-4 py-3">${fmt(hp.dg)}</td>
+              <td class="px-4 py-3">${hd.structure_found ? 'Yes' : 'No'}</td>
+              <td class="px-4 py-3">${fmt(hd.dg)}</td>
+              <td class="px-4 py-3">
+                <button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" 
+                   onclick="findAndUsePrimer('${p.sequence}', 'forward')">Use</button>
+              </td>
             </tr>`;
             });
             html += `</tbody></table></div>`;
           }
 
           if (data.reverse_primers && data.reverse_primers.length > 0) {
-            html += `<h4>Reverse Primers (from reverse region)</h4>
-          <div style="overflow-x:auto;"><table>
-            <thead><tr>
-              <th>#</th><th>Sequence (5'→3')</th><th>Len</th><th>Tm</th><th>GC%</th>
-              <th>Hairpin</th><th>HP ΔG</th><th>Homodimer</th><th>HD ΔG</th>
+            html += `<h4 class="text-sm font-semibold text-slate-700 mb-2 mt-4 ml-1">Reverse Primers (from reverse region)</h4>
+          <div class="overflow-x-auto border border-slate-200 rounded-lg">
+          <table class="w-full text-sm text-left text-slate-600">
+            <thead class="text-xs text-slate-700 uppercase bg-slate-50">
+              <tr>
+              <th class="px-4 py-3 border-b">#</th><th class="px-4 py-3 border-b">Sequence (5'→3')</th><th class="px-4 py-3 border-b">Len</th><th class="px-4 py-3 border-b">Tm</th><th class="px-4 py-3 border-b">GC%</th>
+              <th class="px-4 py-3 border-b">Hairpin</th><th class="px-4 py-3 border-b">HP ΔG</th><th class="px-4 py-3 border-b">Homol</th><th class="px-4 py-3 border-b">HD ΔG</th>
+              <th class="px-4 py-3 border-b">Action</th>
             </tr></thead><tbody>`;
             data.reverse_primers.forEach((p, i) => {
               const hp = p.hairpin || {};
               const hd = p.homodimer || {};
-              html += `<tr>
-              <td>${i + 1}</td>
-              <td class="mono">${p.sequence}</td>
-              <td>${fmt(p.length)}</td>
-              <td>${fmt(p.tm)}</td>
-              <td>${fmt(p.gc_percent)}</td>
-              <td>${hp.structure_found ? 'Yes' : 'No'}</td>
-              <td>${fmt(hp.dg)}</td>
-              <td>${hd.structure_found ? 'Yes' : 'No'}</td>
-              <td>${fmt(hd.dg)}</td>
+              html += `<tr class="bg-white border-b hover:bg-slate-50 last:border-0 text-xs text-slate-600">
+              <td class="px-4 py-3">${i + 1}</td>
+              <td class="px-4 py-3 font-mono text-slate-800">${p.sequence}</td>
+              <td class="px-4 py-3">${fmt(p.length)}</td>
+              <td class="px-4 py-3">${fmt(p.tm)}</td>
+              <td class="px-4 py-3">${fmt(p.gc_percent)}</td>
+              <td class="px-4 py-3">${hp.structure_found ? 'Yes' : 'No'}</td>
+              <td class="px-4 py-3">${fmt(hp.dg)}</td>
+              <td class="px-4 py-3">${hd.structure_found ? 'Yes' : 'No'}</td>
+              <td class="px-4 py-3">${fmt(hd.dg)}</td>
+              <td class="px-4 py-3">
+                <button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" 
+                   onclick="findAndUsePrimer('${p.sequence}', 'reverse')">Use</button>
+              </td>
             </tr>`;
             });
             html += `</tbody></table></div>`;
@@ -1472,24 +1573,31 @@
 
           // Best pairing suggestions
           if (data.best_pairs && data.best_pairs.length > 0) {
-            html += `<h4>Best Pair Combinations</h4>
-          <div style="overflow-x:auto;"><table>
-            <thead><tr>
-              <th>#</th><th>Forward</th><th>Fwd Tm</th>
-              <th>Reverse</th><th>Rev Tm</th>
-              <th>ΔTm</th><th>Heterodimer</th><th>Het ΔG</th>
+            html += `<h4 class="text-sm font-semibold text-slate-700 mb-2 mt-4 ml-1">Best Pair Combinations</h4>
+          <div class="overflow-x-auto border border-slate-200 rounded-lg">
+          <table class="w-full text-sm text-left text-slate-600">
+            <thead class="text-xs text-slate-700 uppercase bg-slate-50">
+              <tr>
+              <th class="px-4 py-3 border-b">#</th><th class="px-4 py-3 border-b">Forward</th><th class="px-4 py-3 border-b">Fwd Tm</th>
+              <th class="px-4 py-3 border-b">Reverse</th><th class="px-4 py-3 border-b">Rev Tm</th>
+              <th class="px-4 py-3 border-b">ΔTm</th><th class="px-4 py-3 border-b">Heterodimer</th><th class="px-4 py-3 border-b">Het ΔG</th>
+              <th class="px-4 py-3 border-b">Action</th>
             </tr></thead><tbody>`;
             data.best_pairs.forEach((bp, i) => {
               const het = bp.heterodimer || {};
-              html += `<tr>
-              <td>${i + 1}</td>
-              <td class="mono">${bp.forward_seq}</td>
-              <td>${fmt(bp.forward_tm)}</td>
-              <td class="mono">${bp.reverse_seq}</td>
-              <td>${fmt(bp.reverse_tm)}</td>
-              <td>${fmt(bp.tm_diff)}</td>
-              <td>${het.structure_found ? 'Yes' : 'No'}</td>
-              <td>${fmt(het.dg)}</td>
+              html += `<tr class="bg-white border-b hover:bg-slate-50 last:border-0 text-xs text-slate-600">
+              <td class="px-4 py-3">${i + 1}</td>
+              <td class="px-4 py-3 font-mono text-slate-800">${bp.forward_seq}</td>
+              <td class="px-4 py-3">${fmt(bp.forward_tm)}</td>
+              <td class="px-4 py-3 font-mono text-slate-800">${bp.reverse_seq}</td>
+              <td class="px-4 py-3">${fmt(bp.reverse_tm)}</td>
+              <td class="px-4 py-3">${fmt(bp.tm_diff)}</td>
+              <td class="px-4 py-3">${het.structure_found ? 'Yes' : 'No'}</td>
+              <td class="px-4 py-3">${fmt(het.dg)}</td>
+              <td class="px-4 py-3">
+                <button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" 
+                   onclick="findAndUsePrimer('${bp.forward_seq}', 'forward'); findAndUsePrimer('${bp.reverse_seq}', 'reverse');">Use Both</button>
+              </td>
             </tr>`;
             });
             html += `</tbody></table></div>`;

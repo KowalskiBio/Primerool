@@ -33,7 +33,6 @@ The tool also allows you to identify genomic structure of your sequence based on
 2.  Double-click it.
 3.  A terminal window will open, and the app will launch in your default web browser.
 
-## How to Run (Windows)
 
 ## How to Run (Windows)
 

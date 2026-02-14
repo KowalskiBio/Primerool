@@ -1887,6 +1887,19 @@
               }
             }
           }
+
+          // Correction for CDS-only view (no introns, no UTR):
+          // The annotations/mapping are relative to the full spliced sequence (which includes UTRs).
+          // But the view is restricted to CDS only.
+          // So we must shift coordinates by -utr5_len.
+          if (!data.include_introns && !data.include_utr) {
+            const offset = data.utr5_len || 0;
+            return ranges.map(r => ({
+              start: r.start - offset,
+              end: r.end - offset
+            })).filter(r => r.end > 0 && r.start < data.gene_len);
+          }
+
           return ranges;
         };
 

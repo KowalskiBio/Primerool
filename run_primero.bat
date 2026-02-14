@@ -32,7 +32,8 @@ if %errorlevel% neq 0 (
     ) else (
         :: Fallback: download installer via PowerShell WebClient (compatible with all modern Windows)
         echo [INFO] winget not available. Downloading Python installer via PowerShell...
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe', '%TEMP%\python_installer.exe')"
+        set "PY_INSTALLER=%TEMP%\python_installer.exe"
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe', $env:TEMP + '\python_installer.exe')"
         if %errorlevel% neq 0 (
             echo [ERROR] Download failed. Please install Python manually from:
             echo         https://www.python.org/downloads/windows/
@@ -41,7 +42,7 @@ if %errorlevel% neq 0 (
             exit /b 1
         )
         echo [INFO] Running Python installer...
-        "%TEMP%\python_installer.exe" /passive PrependPath=1
+        "%PY_INSTALLER%" /passive PrependPath=1
         if %errorlevel% neq 0 (
             echo [ERROR] Python installer failed. Please install manually.
             pause

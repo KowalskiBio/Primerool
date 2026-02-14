@@ -152,6 +152,7 @@ def search_gene_route():
                 "name": t["name"],
                 "exon_count": t["exon_count"],
                 "strand": t["strand"],
+                "is_canonical": t.get("is_canonical", False),
             }
             for t in result["transcripts"]
         ],
@@ -256,6 +257,43 @@ def get_sequence():
             cds_ann = cds_annotations_in_transcript_coords(tinfo)
             annotations = [{"start": s, "end": e, "type": "cds"} for (s, e) in cds_ann]
 
+            # Also add "exon" annotations for the spliced blocks so the map has something to render/map against
+            # ... (existing comment) ...
+            curr = 0
+            for start, end in _blocks_for_spliced_sequence(tinfo, feature="exons"):
+                ln = end - start + 1
+                annotations.append({"start": curr, "end": curr + ln, "type": "exon"})
+                curr += ln
+        else:
+            # CDS-only mode: The sequence IS the CDS.
+            # We must provide annotations so the frontend can render the "exons" (which are CDS fragments)
+            # and map primers.
+            # Since gene_seq is contiguous CDS, we can just say there is one big "exon" 0..len?
+            # Or better, preserve the CDS structure (if it's composed of multiple joined CDS parts).
+            # The frontend mapping logic expects 'type="exon"' to walk through.
+            # If we provide the actual CDS blocks (relative to CDS), it preserves the junction visuals.
+            
+            # Get CDS blocks in Transcript coords, then map to CDS-only coords?
+            # Actually, the gene_seq IS the spliced CDS.
+            # So `cds_annotations_in_transcript_coords` is not quite right because that is relative to Transcript (w/ UTR).
+            
+            # Simpler: The backend `build_spliced_sequence(..., feature="cds")` joins the CDS parts.
+            # We can find the lengths of these parts and reconstruct the annotations 0..L1, L1..L2...
+            # This mirrors the structure the user sees (Junctions between CDS exons).
+            
+            cds_blocks = _blocks_for_spliced_sequence(tinfo, feature="cds")
+            curr = 0
+            for start, end in cds_blocks:
+                 ln = end - start + 1
+                 # Add as both 'exon' (for mapping/base color) and 'cds' (for specific color, though same)
+                 annotations.append({"start": curr, "end": curr + ln, "type": "exon"})
+                 annotations.append({"start": curr, "end": curr + ln, "type": "cds"})
+                 curr += ln
+
+
+    # Calculate 5' UTR length for offset correction if UTRs hidden
+    utr5_len = sum(e - s + 1 for s, e in tinfo.get("utr5", []))
+
     return jsonify({
         "gene_name": gene_name,
         "transcript_id": transcript_id,
@@ -266,6 +304,7 @@ def get_sequence():
         "upstream_len": len(upstream_seq),
         "gene_len": len(gene_seq),
         "downstream_len": len(downstream_seq),
+        "utr5_len": utr5_len,
 
         "upstream_seq": upstream_seq,
         "gene_seq": gene_seq,

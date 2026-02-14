@@ -30,9 +30,9 @@ if %errorlevel% neq 0 (
         echo [INFO] Installing Python via winget...
         winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
     ) else (
-        :: Fallback: download installer via curl (built into Windows 10+)
-        echo [INFO] winget not available. Downloading Python installer via curl...
-        curl -L -o "%TEMP%\python_installer.exe" "https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe"
+        :: Fallback: download installer via PowerShell (available on all modern Windows)
+        echo [INFO] winget not available. Downloading Python installer via PowerShell...
+        powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe' -OutFile '%TEMP%\python_installer.exe'"
         if %errorlevel% neq 0 (
             echo [ERROR] Download failed. Please install Python manually from:
             echo         https://www.python.org/downloads/windows/

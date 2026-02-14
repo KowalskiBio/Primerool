@@ -30,21 +30,13 @@ if %errorlevel% neq 0 (
         echo [INFO] Installing Python via winget...
         winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
     ) else (
-        :: Fallback: download installer via PowerShell WebClient (compatible with all modern Windows)
-        echo [INFO] winget not available. Downloading Python installer via PowerShell...
-        set "PY_INSTALLER=%TEMP%\python_installer.exe"
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe', $env:TEMP + '\python_installer.exe')"
+        :: Fallback: use the PowerShell helper script (avoids all quoting issues)
+        echo [INFO] winget not available. Running PowerShell installer script...
+        powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install_python.ps1"
         if %errorlevel% neq 0 (
-            echo [ERROR] Download failed. Please install Python manually from:
+            echo [ERROR] Python installation failed. Please install manually from:
             echo         https://www.python.org/downloads/windows/
             echo         Make sure to check "Add Python to PATH" during installation.
-            pause
-            exit /b 1
-        )
-        echo [INFO] Running Python installer...
-        "%PY_INSTALLER%" /passive PrependPath=1
-        if %errorlevel% neq 0 (
-            echo [ERROR] Python installer failed. Please install manually.
             pause
             exit /b 1
         )

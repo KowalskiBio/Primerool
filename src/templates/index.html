@@ -601,8 +601,8 @@
         <!-- Sequence Info -->
         <div id="sequenceInfo" class="mb-6 text-slate-700"></div>
 
-        <!-- Feature Map Container -->
-        <div class="mb-8">
+        <!-- Feature Map Container (Hidden by Default) -->
+        <div id="featureMapContainer" class="mb-8 hidden">
           <div class="flex items-center justify-between mb-2">
             <h3 class="text-md font-semibold text-slate-800">Feature map</h3>
             <div class="flex gap-2 items-center">
@@ -631,7 +631,17 @@
 
         <!-- Visualizer Container (Sequence Viewers) -->
         <div id="visualizerContainer" class="hidden">
-          <h3 class="text-md font-semibold text-slate-800 mb-2">Sequence map (for WGA / flanking primers)</h3>
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-md font-semibold text-slate-800">Sequence map (for WGA / flanking primers)</h3>
+            <div class="flex gap-2">
+              <button onclick="toggleFeatureMap()"
+                class="px-4 py-2 text-sm font-medium bg-green-600 border border-green-600 rounded hover:bg-green-700 text-white transition-colors shadow-sm">Feature
+                map</button>
+              <button onclick="toggleSplicedMap()"
+                class="px-4 py-2 text-sm font-medium bg-green-600 border border-green-600 rounded hover:bg-green-700 text-white transition-colors shadow-sm">Exon
+                map</button>
+            </div>
+          </div>
           <div
             class="flex flex-wrap gap-4 text-sm mb-4 bg-gradient-to-br from-green-50 to-emerald-50/30 p-3 rounded-lg border border-slate-100 text-slate-600 dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 dark:text-slate-300">
             <div class="flex items-center gap-1.5"><span class="text-slate-400 dark:text-slate-500">■</span> Flanking
@@ -1472,7 +1482,7 @@
           return;
         }
 
-        block.classList.remove('hidden');
+        // block.classList.remove('hidden');
 
         const spliced = currentSequenceData.spliced_exons_seq || '';
         const junctions = currentSequenceData.junctions || [];
@@ -1828,7 +1838,8 @@
           if (first?.right?.interval) useJunction('right', first.right.interval, first.right.sequence, 'recommended', true);
 
           // ensure spliced viewer is visible
-          document.getElementById('splicedViewerBlock').classList.remove('hidden');
+          // ensure spliced viewer is visible - DISABLED (User controls visibility via toggle)
+          // document.getElementById('splicedViewerBlock').classList.remove('hidden');
           renderSplicedSequence();
           showSelectedPrimerInfo();
 
@@ -2042,7 +2053,7 @@
             document.getElementById('internalJunctionPanel').classList.toggle('hidden', mode !== 'internal');
 
             if (mode === 'internal') {
-              document.getElementById('splicedViewerBlock').classList.remove('hidden');
+              // document.getElementById('splicedViewerBlock').classList.remove('hidden');
             } else {
               document.getElementById('splicedViewerBlock').classList.add('hidden');
             }
@@ -2648,6 +2659,8 @@
             el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
           }
 
+
+
           // Flash highlight
           const originalBg = el.style.backgroundColor;
           el.style.backgroundColor = '#fef08a'; // yellow-200
@@ -2661,6 +2674,37 @@
         }
       }
 
+    </script>
+    <script>
+      function toggleFeatureMap() {
+        const el = document.getElementById('featureMapContainer');
+        if (el.classList.contains('hidden')) {
+          el.classList.remove('hidden');
+          // Trigger render if needed, though SVG viewBox handles it.
+          renderFeatureMap();
+        } else {
+          el.classList.add('hidden');
+        }
+      }
+
+      function toggleSplicedMap() {
+        const el = document.getElementById('splicedViewerBlock');
+        const show = el.classList.contains('hidden');
+        el.classList.toggle('hidden');
+
+        // If showing, ensure it's rendered AND switch to internal mode automatically
+        if (show) {
+          // Select internal mode radio
+          const internalRadio = document.querySelector('input[name="primerMode"][value="internal"]');
+          if (internalRadio && !internalRadio.checked) {
+            internalRadio.checked = true;
+            // Trigger change event to update UI panels
+            internalRadio.dispatchEvent(new Event('change'));
+          }
+
+          renderSplicedSequence();
+        }
+      }
     </script>
 </body>
 

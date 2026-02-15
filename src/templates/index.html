@@ -6,10 +6,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Primerool – Cloud Primer Designer</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+    }
+  </script>
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
     rel="stylesheet">
   <script>
+      // Initialize Theme
+      (function () {
+        const theme = localStorage.getItem('theme') || 'light';
+        if (theme === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      })();
+
     // Initialize Density
     (function () {
       const density = localStorage.getItem('density') || 'airy';
@@ -110,14 +125,14 @@
     .seq-utr {
       color: #0f172a;
       /* slate-900 */
-      background-color: #ffedd5;
-      /* orange-100 */
+      background-color: #fed7aa;
+      /* orange-200 */
     }
 
     .seq-cds {
       color: #0f172a;
       font-weight: 700;
-      background-color: #ffedd5;
+      background-color: #fed7aa;
     }
 
     .seq-primer {
@@ -225,6 +240,96 @@
       background-color: #15803d;
       /* green-700 */
     }
+
+    /* Dark Mode Overrides */
+    .dark .bg-white {
+      background-color: #1e293b !important;
+    }
+
+    /* slate-800 */
+    .dark .text-slate-900 {
+      color: #f1f5f9 !important;
+    }
+
+    /* slate-100 */
+    .dark .text-slate-800 {
+      color: #f1f5f9 !important;
+    }
+
+    .dark .text-slate-700 {
+      color: #e2e8f0 !important;
+    }
+
+    /* slate-200 */
+    .dark .text-slate-600 {
+      color: #cbd5e1 !important;
+    }
+
+    /* slate-300 */
+    .dark .text-slate-500 {
+      color: #94a3b8 !important;
+    }
+
+    /* Borders */
+    .dark .border-slate-300 {
+      border-color: #475569 !important;
+      /* slate-600 */
+    }
+
+    .dark .border-slate-200 {
+      border-color: #334155 !important;
+      /* slate-700 */
+    }
+
+    /* slate-400 */
+
+    .dark body {
+      background: #0f172a !important;
+      /* slate-900 */
+      color: #f1f5f9 !important;
+    }
+
+    .dark .card,
+    .dark .container {
+      background-color: #1e293b !important;
+      border-color: #334155 !important;
+    }
+
+    .dark .card-header {
+      background-color: #1e293b !important;
+      border-color: #334155 !important;
+    }
+
+    .dark .card-header:hover {
+      background-color: #334155 !important;
+    }
+
+    .dark input,
+    .dark select,
+    .dark textarea {
+      background-color: #334155 !important;
+      border-color: #475569 !important;
+      color: #f1f5f9 !important;
+    }
+
+    .dark .sequence-viewer {
+      background-color: #0f172a !important;
+      border-color: #334155 !important;
+      color: #e2e8f0 !important;
+    }
+
+    .dark .bg-slate-50 {
+      background-color: #0f172a !important;
+    }
+
+    .dark .hover\:bg-slate-100:hover {
+      background-color: #334155 !important;
+    }
+
+    /* Gradients */
+    .dark .bg-gradient-to-br {
+      background: #0f172a !important;
+    }
   </style>
 </head>
 
@@ -243,6 +348,67 @@
 
       <!-- Density Toggle (Integrated) -->
       <div class="z-20 flex items-center gap-4">
+        <!-- New Button (User Request) -->
+        <!-- Dark Mode Toggle (User Request) -->
+        <!-- Dark Mode Toggle (Switch Style) -->
+        <!-- True Toggle Switch (Sun/Moon on Track) -->
+        <button id="btnTheme" onclick="toggleTheme()" aria-label="Toggle Dark Mode"
+          class="relative inline-flex h-8 w-16 items-center rounded-full transition-colors duration-300 focus:outline-none bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600">
+
+          <span class="sr-only">Toggle Dark Mode</span>
+
+          <!-- Track Icons (Fixed) -->
+          <div class="absolute inset-0 flex items-center justify-between px-2">
+            <!-- Sun (Left) -->
+            <svg xmlns="http://www.w3.org/2000/svg"
+              class="h-4 w-4 text-amber-500 opacity-100 dark:opacity-40 transition-opacity" fill="none"
+              viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+            <!-- Moon (Right) -->
+            <svg xmlns="http://www.w3.org/2000/svg"
+              class="h-4 w-4 text-indigo-400 opacity-40 dark:opacity-100 transition-opacity" fill="none"
+              viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+            </svg>
+          </div>
+
+          <!-- Moving Thumb (White Circle) -->
+          <span id="themeThumb"
+            class="absolute left-1 inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-300 ease-in-out dark:translate-x-8">
+            <!-- Optional: Icon inside thumb? User said "shows the image inside the button". 
+                 But they also said "there has to be a moon and a sun". 
+                 Let's keep the thumb clean or allow transparency to show track? 
+                 Actually, usually "image inside button" refers to the Thumb having the active icon.
+                 BUT user complained about my previous attempt which did exactly that.
+                 Let's try: Track has background icons. Thumb is a simple white circle that covers/reveals?
+                 Or Thumb HAS the current icon?
+                 Let's try Thumb has CURRENT icon, but track is Light.
+                 Wait, "background needs to be light, not dark". 
+                 Okay, `bg-slate-200` with `border` should be very light.
+                 Let's stick to: Track has static icons? No, that might be cluttered.
+                 Let's try: Thumb has the active icon (Sun/Moon). Track is empty but LIGHT.
+                 And ensure specific width logic.
+            -->
+            <span class="flex items-center justify-center w-full h-full">
+              <!-- Sun in Thumb (Light Mode) -->
+              <svg id="thumbSun" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-amber-500 block dark:hidden"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+              <!-- Moon in Thumb (Dark Mode) -->
+              <svg id="thumbMoon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-indigo-500 hidden dark:block"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+              </svg>
+            </span>
+          </span>
+        </button>
+
         <button onclick="toggleDensity()"
           class="p-2 rounded-lg bg-white/50 hover:bg-white text-slate-500 hover:text-green-700 transition-colors border border-transparent hover:border-slate-200 shadow-sm"
           title="Toggle Density">
@@ -263,7 +429,7 @@
 
       <!-- Absolute Logo -->
       <img src="/static/logo.png" alt="Primerool Logo"
-        style="position: absolute; height: 165px; width: auto; top: -30px; right: 35px;"
+        style="position: absolute; height: 165px; width: auto; top: -30px; right: 85px;"
         class="object-contain opacity-90 pointer-events-none hidden sm:block">
     </header>
 
@@ -292,10 +458,10 @@
             <span class="font-medium text-slate-700">Search by Gene Name</span>
           </label>
           <label
-            class="flex items-center gap-2 cursor-pointer bg-gradient-to-br from-green-50 to-emerald-50/30 border border-slate-200 rounded-lg px-4 py-3 hover:bg-slate-100 transition-colors has-[:checked]:border-green-500 has-[:checked]:bg-green-50 has-[:checked]:text-green-700">
+            class="flex items-center gap-2 cursor-pointer bg-gradient-to-br from-green-50 to-emerald-50/30 border border-slate-200 rounded-lg px-4 py-3 hover:bg-slate-100 transition-colors has-[:checked]:border-green-500 has-[:checked]:bg-green-50 has-[:checked]:text-green-700 dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 dark:hover:bg-slate-800 dark:has-[:checked]:bg-green-900/20 dark:has-[:checked]:text-green-400 dark:has-[:checked]:border-green-500">
             <input type="radio" name="inputMode" value="fasta" onchange="toggleInputMode()"
               class="accent-green-600 w-4 h-4">
-            <span class="font-medium text-slate-700">Paste a Sequence (FASTA)</span>
+            <span class="font-medium text-slate-700 dark:text-slate-200">Paste a Sequence (FASTA)</span>
           </label>
         </div>
 
@@ -305,7 +471,7 @@
             or Accession ID</label>
           <div class="flex gap-3">
             <input type="text" id="geneInput" placeholder="e.g., CHAT or NR_132312.2"
-              class="flex-1 rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
+              class="flex-1 rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-400">
             <button
               class="btn-primary hover:bg-green-700 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm"
               onclick="handleGeneSearch()">
@@ -320,7 +486,7 @@
             sequence (raw or
             FASTA format)</label>
           <textarea id="fastaInput" rows="6"
-            class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 font-mono text-sm p-3 border resize-y mb-3"
+            class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 font-mono text-sm p-3 border resize-y mb-3 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-400"
             placeholder=">optional_header&#10;ATGCGTACGATCGATCGATCGATCG..."></textarea>
 
           <button id="blastBtn"
@@ -329,8 +495,7 @@
             Identify Sequence (NCBI BLAST)
           </button>
 
-          <div id="blastProgress"
-            class="hidden mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <div id="blastProgress" class="hidden mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
             <div class="flex items-center gap-2 mb-2">
               <strong class="text-amber-800">Running NCBI BLAST...</strong>
               <span class="text-sm text-amber-700">This may take up to 2 minutes. Please
@@ -346,10 +511,10 @@
         </div>
 
         <div id="geneError"
-          class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-medium">
+          class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-medium dark:bg-red-900/30 dark:border-red-800 dark:text-red-300">
         </div>
         <div id="geneSuccess"
-          class="hidden mt-4 mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm font-medium">
+          class="hidden mt-4 mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm font-medium dark:bg-emerald-900/30 dark:border-emerald-800 dark:text-emerald-300">
         </div>
       </div>
     </div>
@@ -357,7 +522,7 @@
     <!-- Transcript Section -->
     <div class="card hidden" id="transcriptSection">
       <div class="card-header" onclick="toggleCard(this)">
-        <h2 class="text-lg font-semibold text-slate-800 flex items-center gap-2">
+        <h2 class="text-lg font-semibold text-slate-800 flex items-center gap-2 dark:text-slate-200">
           <span>2. Select Transcript & Configure</span>
         </h2>
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 rotate-icon text-slate-400" viewBox="0 0 20 20"
@@ -368,15 +533,13 @@
         </svg>
       </div>
       <div class="card-content">
-        <label for="transcriptSelect"
-          class="block text-sm font-semibold text-slate-700 mb-1">Transcript:</label>
+        <label for="transcriptSelect" class="block text-sm font-semibold text-slate-700 mb-1">Transcript:</label>
         <select id="transcriptSelect"
           class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border mb-6">
           <option value="">-- Select a transcript --</option>
         </select>
 
-        <h3
-          class="text-md font-semibold text-slate-800 mt-6 mb-3 border-t border-slate-100 pt-4">
+        <h3 class="text-md font-semibold text-slate-800 mt-6 mb-3 border-t border-slate-100 pt-4">
           Sequence Options</h3>
 
         <div class="space-y-3 mb-6">
@@ -406,8 +569,8 @@
               class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
           </div>
           <div>
-            <label for="downFlank"
-              class="block text-sm font-semibold text-slate-700 mb-1">Downstream Flank (bp):</label>
+            <label for="downFlank" class="block text-sm font-semibold text-slate-700 mb-1">Downstream Flank
+              (bp):</label>
             <input type="number" id="downFlank" value="200" min="0" onchange="updateSequence()"
               class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
           </div>
@@ -444,7 +607,7 @@
             <h3 class="text-md font-semibold text-slate-800">Feature Map</h3>
             <div class="flex gap-2 items-center">
               <button onclick="resetFeatureMapZoom()"
-                class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1 rounded border border-slate-300 transition-colors">
+                class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1 rounded border border-slate-300 transition-colors dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-600">
                 Reset Zoom
               </button>
 
@@ -470,14 +633,19 @@
         <div id="visualizerContainer" class="hidden">
           <h3 class="text-md font-semibold text-slate-800 mb-2">Sequence Map (WGA / flanking)</h3>
           <div
-            class="flex flex-wrap gap-4 text-sm mb-4 bg-gradient-to-br from-green-50 to-emerald-50/30 p-3 rounded-lg border border-slate-100 text-slate-600">
-            <div class="flex items-center gap-1.5"><span class="text-slate-400">■</span> Flanking regions</div>
-            <div class="flex items-center gap-1.5"><span class="text-slate-500">■</span> Introns</div>
-            <div class="flex items-center gap-1.5"><span class="px-1 bg-orange-100 text-slate-900 rounded">■</span> UTR
+            class="flex flex-wrap gap-4 text-sm mb-4 bg-gradient-to-br from-green-50 to-emerald-50/30 p-3 rounded-lg border border-slate-100 text-slate-600 dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 dark:text-slate-300">
+            <div class="flex items-center gap-1.5"><span class="text-slate-400 dark:text-slate-500">■</span> Flanking
+              regions</div>
+            <div class="flex items-center gap-1.5"><span class="text-slate-500 dark:text-slate-400">■</span> Introns
             </div>
-            <div class="flex items-center gap-1.5"><strong class="px-1 bg-orange-100 text-slate-900 rounded">■</strong>
+            <div class="flex items-center gap-1.5"><span
+                class="px-1 bg-orange-200 text-slate-900 rounded dark:bg-orange-300 dark:text-slate-900">&nbsp;</span>
+              UTR
+            </div>
+            <div class="flex items-center gap-1.5"><strong
+                class="px-1 bg-orange-200 text-slate-900 rounded dark:bg-orange-300 dark:text-slate-900">■</strong>
               CDS</div>
-            <div class="flex items-center gap-1.5"><span class="text-red-600">■</span> Selected primer
+            <div class="flex items-center gap-1.5"><span class="text-red-600 dark:text-red-400">■</span> Selected primer
               binding sites</div>
           </div>
 
@@ -491,10 +659,9 @@
             <h3 class="text-md font-semibold text-slate-800 mb-2">Spliced exon-only template (for
               exon–exon junction
               primers)</h3>
-            <div
-              class="text-sm text-slate-500 mb-3 bg-blue-50 p-2 rounded border border-blue-100">
-              This template is always exon-only. Junction positions in the selector refer to this sequence.
-              Vertical bars indicate exon boundaries.
+            <div class="text-sm text-slate-500 mb-3 bg-blue-50 p-2 rounded border border-blue-100">
+              Junction positions in the sequence map refer to these sequences.
+              Horizontal bars indicate exon boundaries.
             </div>
             <div
               class="sequence-viewer bg-white border border-slate-300 rounded-lg p-4 font-mono text-sm overflow-y-auto max-h-[520px] text-slate-800"
@@ -552,8 +719,7 @@
           class="hidden bg-gradient-to-br from-green-50 to-emerald-50/30 p-4 rounded-xl border border-slate-200 mb-6">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div>
-              <label for="junctionSelect"
-                class="block text-sm font-semibold text-slate-700 mb-1">Choose
+              <label for="junctionSelect" class="block text-sm font-semibold text-slate-700 mb-1">Choose
                 junction:</label>
               <select id="junctionSelect"
                 class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
@@ -561,15 +727,13 @@
               </select>
             </div>
             <div>
-              <label for="overlapMin"
-                class="block text-sm font-semibold text-slate-700 mb-1">Junction overlap min
+              <label for="overlapMin" class="block text-sm font-semibold text-slate-700 mb-1">Junction overlap min
                 (bp):</label>
               <input type="number" id="overlapMin" value="6" min="1"
                 class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
             </div>
             <div>
-              <label for="overlapMax"
-                class="block text-sm font-semibold text-slate-700 mb-1">Junction overlap max
+              <label for="overlapMax" class="block text-sm font-semibold text-slate-700 mb-1">Junction overlap max
                 (bp):</label>
               <input type="number" id="overlapMax" value="12" min="1"
                 class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
@@ -578,15 +742,13 @@
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label for="ampliconMin"
-                class="block text-sm font-semibold text-slate-700 mb-1">Amplicon min
+              <label for="ampliconMin" class="block text-sm font-semibold text-slate-700 mb-1">Amplicon min
                 (bp):</label>
               <input type="number" id="ampliconMin" value="80" min="1"
                 class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
             </div>
             <div>
-              <label for="ampliconMax"
-                class="block text-sm font-semibold text-slate-700 mb-1">Amplicon max
+              <label for="ampliconMax" class="block text-sm font-semibold text-slate-700 mb-1">Amplicon max
                 (bp):</label>
               <input type="number" id="ampliconMax" value="220" min="1"
                 class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border">
@@ -629,7 +791,7 @@
               Primer
               Region:</label>
             <textarea id="fwdRegion" rows="3"
-              class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 font-mono text-sm p-3 border resize-y"
+              class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 font-mono text-sm p-3 border resize-y dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-400"
               placeholder="Paste sequence region for forward primer..."></textarea>
           </div>
           <div>
@@ -637,7 +799,7 @@
               Primer
               Region:</label>
             <textarea id="revRegion" rows="3"
-              class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 font-mono text-sm p-3 border resize-y"
+              class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 font-mono text-sm p-3 border resize-y dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-400"
               placeholder="Paste sequence region for reverse primer..."></textarea>
           </div>
         </div>
@@ -661,6 +823,12 @@
       let currentSpecies = 'homo_sapiens';
       let currentSequenceData = null;
 
+      // Simplified Theme Logic (Relies on CSS classes)
+      function toggleTheme() {
+        const isDark = document.documentElement.classList.toggle('dark');
+        localStorage.setItem('theme', isDark ? 'dark' : 'light');
+      }
+
       function updateDensityIcons() {
         const density = document.documentElement.getAttribute('data-density');
         const isSquish = density === 'squish';
@@ -678,6 +846,7 @@
 
       // Init icons on load
       document.addEventListener('DOMContentLoaded', () => {
+        updateThemeIcons();
         updateDensityIcons();
       });
       // -----------------------------
@@ -1947,7 +2116,8 @@
 
           // Interaction: click to scroll
           // We'll attach onclick to a group or rect
-          svg += `<rect x="${x1}" y="${trackY}" width="${w}" height="${trackHeight}" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1" class="cursor-pointer hover:opacity-80 transition-opacity" onclick="teleportTo(${ex.start})" title="Exon/UTR ${ex.start}-${ex.end}">
+          // Draw Exons (as UTR color base - Peach #fed7aa)
+          svg += `<rect x="${x1}" y="${trackY}" width="${w}" height="${trackHeight}" fill="#fed7aa" stroke="#fbbf24" stroke-width="1" class="cursor-pointer hover:opacity-80 transition-opacity" onclick="teleportTo(${ex.start})" title="Exon/UTR ${ex.start}-${ex.end}">
                       <title>Exon ${ex.start}-${ex.end}</title>
                     </rect>`;
 
@@ -1956,7 +2126,7 @@
           svg += `<text x="${x2}" y="${trackY + trackHeight + 12}" font-size="10" fill="#64748b" text-anchor="middle">${ex.end}</text>`;
         });
 
-        // Overlay CDS (Peachy)
+        // Overlay CDS (Peachy #fed7aa)
         cds.forEach(c => {
           const x1 = scale(c.start);
           const x2 = scale(c.end);
@@ -2136,7 +2306,55 @@
                 stroke: #f59e0b; /* amber-500 */
                 z-index: 10;
             }
-        </style>`;
+        
+    /* Dark Mode Overrides */
+    .dark .bg-white { background-color: #1e293b !important; } /* slate-800 */
+    .dark .text-slate-900 { color: #f1f5f9 !important; } /* slate-100 */
+    .dark .text-slate-800 { color: #f1f5f9 !important; }
+    .dark .text-slate-700 { color: #e2e8f0 !important; } /* slate-200 */
+    .dark .text-slate-600 { color: #cbd5e1 !important; } /* slate-300 */
+    .dark .text-slate-500 { color: #94a3b8 !important; } /* slate-400 */
+    
+    .dark body {
+        background: #0f172a !important; /* slate-900 */
+        color: #f1f5f9 !important;
+    }
+
+    .dark .card, .dark .container {
+        background-color: #1e293b !important;
+        border-color: #334155 !important;
+    }
+
+    .dark .card-header {
+        background-color: #1e293b !important;
+        border-color: #334155 !important;
+    }
+    
+    .dark .card-header:hover {
+        background-color: #334155 !important;
+    }
+
+    .dark input, .dark select, .dark textarea {
+        background-color: #334155 !important;
+        border-color: #475569 !important;
+        color: #f1f5f9 !important;
+    }
+
+    .dark .sequence-viewer {
+        background-color: #0f172a !important;
+        border-color: #334155 !important;
+        color: #e2e8f0 !important;
+    }
+
+    .dark .bg-slate-50 { background-color: #0f172a !important; }
+    .dark .hover\:bg-slate-100:hover { background-color: #334155 !important; }
+    
+    /* Gradients */
+    .dark .bg-gradient-to-br {
+        background: #0f172a !important; 
+    }
+    
+  </style>`;
 
         // 1. Draw backbone (Introns) - Gray line
         svg += `<line x1="${margin}" y1="${trackY + trackHeight / 2}" x2="${width - margin}" y2="${trackY + trackHeight / 2}" stroke="#94a3b8" stroke-width="2" />`;
@@ -2156,7 +2374,7 @@
 
           svg += `<rect class="feature-rect cursor-pointer hover:opacity-100 opacity-90" 
                       x="${x1}" y="${trackY}" width="${w}" height="${trackHeight}" 
-                      fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1"
+                      fill="#fed7aa" stroke="#fbbf24" stroke-width="1"
                       data-start="${ex.start}"
                       onmouseenter="this.setAttribute('height', ${trackHeight + 6}); this.setAttribute('y', ${trackY - 3});"
                       onmouseleave="this.setAttribute('height', ${trackHeight}); this.setAttribute('y', ${trackY});">

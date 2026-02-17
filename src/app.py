@@ -1,6 +1,6 @@
 """
 Primerool – Cloud-based primer design tool.
-Flask app backed by Ensembl REST API (no local genome/annotation files).
+Flask app backed by Ensembl REST API or NCBI E-utilities.
 """
 
 import os
@@ -10,22 +10,29 @@ from flask import Flask, render_template, request, jsonify
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ensembl_api import (
-    search_gene,
-    get_transcript_details,
-    build_spliced_sequence,
-    build_genomic_sequence,
-    get_flanking_sequence,
-    cds_annotations_in_transcript_coords,
-    DEFAULT_SPECIES,
-)
+import ensembl_api
+import ncbi_api
+from ensembl_api import DEFAULT_SPECIES
 from blast_api import run_blast, organism_to_ensembl_species
 from primer_internal import design_primers_for_region
 from primer_flanking import design_primers_for_flanking_regions
 from primer_junction import design_junction_primer_pairs
 
 
+def _api(source: str):
+    """Return the correct API module based on user selection."""
+    return ncbi_api if source == "ncbi" else ensembl_api
+
+
 app = Flask(__name__)
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Return JSON instead of HTML for any unhandled server error."""
+    import traceback
+    traceback.print_exc()
+    return jsonify({"error": f"Server error: {e}"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -136,13 +143,15 @@ def search_gene_route():
     data = request.json or {}
     gene_name = (data.get("gene_name", "") or "").strip().upper()
     species = (data.get("species", "") or "").strip() or DEFAULT_SPECIES
+    api = _api(data.get("api_source", "ensembl"))
 
     if not gene_name:
         return jsonify({"error": "Please provide a gene name"}), 400
 
-    result = search_gene(gene_name, species=species)
+    result = api.search_gene(gene_name, species=species)
     if not result:
-        return jsonify({"error": f"Gene {gene_name} not found in Ensembl (species: {species})"}), 404
+        source_label = "NCBI" if api is ncbi_api else "Ensembl"
+        return jsonify({"error": f"Gene {gene_name} not found in {source_label} (species: {species})"}), 404
 
     return jsonify({
         "gene_name": result["gene_name"],
@@ -166,6 +175,7 @@ def get_sequence():
     gene_name = (data.get("gene_name", "") or "").strip().upper()
     transcript_id = data.get("transcript_id")
     species = (data.get("species", "") or "").strip() or DEFAULT_SPECIES
+    api = _api(data.get("api_source", "ensembl"))
 
     upstream_bp = int(data.get("upstream_bp", 0) or 0)
     downstream_bp = int(data.get("downstream_bp", 0) or 0)
@@ -176,8 +186,8 @@ def get_sequence():
     if not gene_name or not transcript_id:
         return jsonify({"error": "Please provide gene_name and transcript_id"}), 400
 
-    # Get transcript details from Ensembl
-    tinfo = get_transcript_details(transcript_id)
+    # Get transcript details
+    tinfo = api.get_transcript_details(transcript_id)
     if not tinfo:
         return jsonify({"error": f"Transcript {transcript_id} not found in Ensembl"}), 404
 
@@ -189,14 +199,14 @@ def get_sequence():
     strand = tinfo["strand"]
 
     # Flanking sequences
-    upstream_seq, downstream_seq = get_flanking_sequence(
+    upstream_seq, downstream_seq = api.get_flanking_sequence(
         tinfo, upstream_bp, downstream_bp,
         use_cds_anchor=bool(tinfo.get("cds")),
         species=species,
     )
 
     # ALWAYS compute exon-only spliced template for junction primers
-    spliced_exons_seq = build_spliced_sequence(tinfo, feature="exons", species=species) or ""
+    spliced_exons_seq = api.build_spliced_sequence(tinfo, feature="exons", species=species) or ""
     exon_blocks = _blocks_for_spliced_sequence(tinfo, feature="exons")
     junctions = _junctions_from_blocks(exon_blocks)
 
@@ -204,9 +214,9 @@ def get_sequence():
 
     if include_introns:
         # Full genomic span (with introns)
-        gene_seq = build_genomic_sequence(tinfo, species=species)
+        gene_seq = api.build_genomic_sequence(tinfo, species=species)
         if not gene_seq:
-            return jsonify({"error": "Failed to fetch genomic sequence from Ensembl"}), 500
+            return jsonify({"error": "Failed to fetch genomic sequence"}), 500
 
         exon_span_start = min(s for s, e in exons)
         exon_span_end = max(e for s, e in exons)
@@ -237,14 +247,14 @@ def get_sequence():
         annotations.sort(key=lambda a: (a["type"], a["start"]))
 
         feature_display = "exons" if include_utr else "cds"
-        spliced_seq = build_spliced_sequence(tinfo, feature=feature_display, species=species) or ""
+        spliced_seq = api.build_spliced_sequence(tinfo, feature=feature_display, species=species) or ""
         if feature_display == "cds" and not spliced_seq:
             spliced_seq = ""
 
     else:
         # Spliced display mode
         feature_display = "exons" if include_utr else "cds"
-        gene_seq = build_spliced_sequence(tinfo, feature=feature_display, species=species)
+        gene_seq = api.build_spliced_sequence(tinfo, feature=feature_display, species=species)
 
         if not gene_seq:
             if feature_display == "cds":
@@ -254,7 +264,7 @@ def get_sequence():
         spliced_seq = gene_seq
 
         if include_utr:
-            cds_ann = cds_annotations_in_transcript_coords(tinfo)
+            cds_ann = api.cds_annotations_in_transcript_coords(tinfo)
             annotations = [{"start": s, "end": e, "type": "cds"} for (s, e) in cds_ann]
 
             # Also add "exon" annotations for the spliced blocks so the map has something to render/map against

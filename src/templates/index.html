@@ -465,6 +465,17 @@
           </label>
         </div>
 
+        <!-- Data Source toggle -->
+        <div class="mb-3">
+          <label class="block text-sm font-semibold text-slate-700 mb-1 dark:text-slate-300">Data Source</label>
+          <div class="flex gap-2">
+            <button id="srcEnsembl" onclick="setApiSource('ensembl')"
+              class="px-3 py-1 text-xs rounded-full font-medium transition-colors border border-green-500 bg-green-500 text-white">Ensembl</button>
+            <button id="srcNcbi" onclick="setApiSource('ncbi')"
+              class="px-3 py-1 text-xs rounded-full font-medium transition-colors border border-slate-300 bg-white text-slate-600 hover:border-green-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-300">NCBI</button>
+          </div>
+        </div>
+
         <!-- Gene name input (default) -->
         <div id="geneInputPanel">
           <label for="geneInput" class="block text-sm font-semibold text-slate-700 mb-1">Gene Name
@@ -831,6 +842,20 @@
 
       let currentGeneName = '';
       let currentSpecies = 'homo_sapiens';
+      let currentApiSource = 'ensembl';
+
+      function setApiSource(src) {
+        currentApiSource = src;
+        const btnE = document.getElementById('srcEnsembl');
+        const btnN = document.getElementById('srcNcbi');
+        if (src === 'ncbi') {
+          btnN.className = 'px-3 py-1 text-xs rounded-full font-medium transition-colors border border-green-500 bg-green-500 text-white';
+          btnE.className = 'px-3 py-1 text-xs rounded-full font-medium transition-colors border border-slate-300 bg-white text-slate-600 hover:border-green-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-300';
+        } else {
+          btnE.className = 'px-3 py-1 text-xs rounded-full font-medium transition-colors border border-green-500 bg-green-500 text-white';
+          btnN.className = 'px-3 py-1 text-xs rounded-full font-medium transition-colors border border-slate-300 bg-white text-slate-600 hover:border-green-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-300';
+        }
+      }
       let currentSequenceData = null;
 
       // Simplified Theme Logic (Relies on CSS classes)
@@ -1183,7 +1208,7 @@
           const response = await fetch('/search_gene', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ gene_name: geneName, species: species })
+            body: JSON.stringify({ gene_name: geneName, species: species, api_source: currentApiSource })
           });
           const data = await response.json();
 
@@ -1260,7 +1285,8 @@
               downstream_bp: downFlank,
               include_introns: includeIntrons,
               include_utr: includeUTR,
-              species: currentSpecies
+              species: currentSpecies,
+              api_source: currentApiSource
             })
           });
 

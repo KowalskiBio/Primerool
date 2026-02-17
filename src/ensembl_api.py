@@ -17,28 +17,40 @@ _MIN_INTERVAL = 0.07  # ~14 req/s to stay safe
 
 
 def _get(endpoint: str, params: Optional[dict] = None) -> dict:
-    """Make a GET request to the Ensembl REST API with rate limiting."""
+    """Make a GET request to the Ensembl REST API with rate limiting and retry."""
     global _last_request_time
-    now = time.time()
-    wait = _MIN_INTERVAL - (now - _last_request_time)
-    if wait > 0:
-        time.sleep(wait)
 
     url = f"{ENSEMBL_REST}{endpoint}"
-    headers = {"Content-Type": "application/json"}
-    resp = requests.get(url, headers=headers, params=params, timeout=30)
-    _last_request_time = time.time()
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
-    if resp.status_code == 429:
-        # Rate limited — wait and retry once
-        retry_after = float(resp.headers.get("Retry-After", 1))
-        print(f"  Ensembl rate-limited, waiting {retry_after}s...")
-        time.sleep(retry_after)
-        resp = requests.get(url, headers=headers, params=params, timeout=30)
-        _last_request_time = time.time()
+    for attempt in range(3):  # up to 3 attempts
+        now = time.time()
+        wait = _MIN_INTERVAL - (now - _last_request_time)
+        if wait > 0:
+            time.sleep(wait)
 
-    resp.raise_for_status()
-    return resp.json()
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=60)
+            _last_request_time = time.time()
+        except (requests.ConnectionError, requests.Timeout) as e:
+            _last_request_time = time.time()
+            if attempt < 2:
+                backoff = 2 ** (attempt + 1)
+                print(f"  Ensembl timeout (attempt {attempt+1}/3), retrying in {backoff}s...")
+                time.sleep(backoff)
+                continue
+            raise
+
+        if resp.status_code == 429:
+            retry_after = float(resp.headers.get("Retry-After", 2))
+            print(f"  Ensembl rate-limited, waiting {retry_after}s...")
+            time.sleep(retry_after)
+            continue
+
+        resp.raise_for_status()
+        return resp.json()
+
+    raise RuntimeError("Ensembl API request failed after 3 attempts")
 
 
 # ---------------------------------------------------------------------------
@@ -209,13 +221,23 @@ def build_spliced_sequence(tinfo: dict, feature: str = "exons",
                            species: str = DEFAULT_SPECIES) -> Optional[str]:
     """
     Build a spliced (concatenated) sequence from exon or CDS intervals.
-    Fetches each interval from Ensembl and concatenates in transcript order.
+    Tries single-call fetch via /sequence/id/ first, falls back to per-region.
     feature: 'exons' or 'cds'
     """
     intervals = tinfo.get(feature, [])
     if not intervals:
         return None
 
+    transcript_id = tinfo.get("transcript_id", "")
+
+    # --- Fast path: single API call via /sequence/id/ ---
+    if transcript_id:
+        seq_type = "cds" if feature == "cds" else "cdna"
+        seq = get_sequence_by_id(transcript_id, seq_type=seq_type)
+        if seq:
+            return seq.upper()
+
+    # --- Fallback: per-region fetch ---
     chrom = tinfo["chrom"]
     strand = tinfo["strand"]
     intervals_sorted = sorted(intervals)

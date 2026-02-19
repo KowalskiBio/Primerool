@@ -24,12 +24,12 @@ Primerool is not limited to humans. Pick from **6 kingdoms** and **40+ pre-confi
 
 | Kingdom | Example Species |
 |---|---|
-| 🐾 **Animals** | Human, Mouse, Rat, Zebrafish, Chicken, Pig, Cow, Dog, Cat, Sheep, Rabbit, Macaque, Chimpanzee, Frog, Fruit Fly, *C. elegans* |
-| 🌱 **Plants** | *Arabidopsis thaliana*, Rice, Maize, Wheat, Tomato, Soybean, Grape, Potato, Barley, Tobacco |
-| 🦠 **Bacteria** | *E. coli* K-12, *B. subtilis* 168, *S. aureus*, *P. aeruginosa*, *M. tuberculosis*, *S. enterica*, *S. pneumoniae* |
-| 🍄 **Fungi** | *S. cerevisiae*, *S. pombe*, *A. nidulans*, *N. crassa*, *C. albicans* |
-| 🔬 **Protists** | *P. falciparum*, *T. brucei*, *L. major*, *D. discoideum*, *T. gondii* |
-| 🧬 **Viruses** | SARS-CoV-2 |
+| **Animals** | Human, Mouse, Rat, Zebrafish, Chicken, Pig, Cow, Dog, Cat, Sheep, Rabbit, Macaque, Chimpanzee, Frog, Fruit Fly, *C. elegans* |
+| **Plants** | *Arabidopsis thaliana*, Rice, Maize, Wheat, Tomato, Soybean, Grape, Potato, Barley, Tobacco |
+| **Bacteria** | *E. coli* K-12, *B. subtilis* 168, *S. aureus*, *P. aeruginosa*, *M. tuberculosis*, *S. enterica*, *S. pneumoniae* |
+| **Fungi** | *S. cerevisiae*, *S. pombe*, *A. nidulans*, *N. crassa*, *C. albicans* |
+| **Protists** | *P. falciparum*, *T. brucei*, *L. major*, *D. discoideum*, *T. gondii* |
+| **Viruses** | SARS-CoV-2 |
 
 Every kingdom also offers a **Custom** option where you can type in any Ensembl species identifier.
 
@@ -137,7 +137,7 @@ Open **http://127.0.0.1:5050** in your browser.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 Primerool/
@@ -184,6 +184,6 @@ No database. No genome files. Everything is fetched on-the-fly.
 
 ---
 
-## 📄 License
+## License
 
 [CC0 1.0 Universal](LICENSE) — public domain. Use freely for any purpose.

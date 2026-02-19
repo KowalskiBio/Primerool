@@ -169,11 +169,16 @@ def _parse_gene_table(text: str, chrom: str, chr_accession: str,
 
             # First interval is always genomic exon coords
             exon_s, exon_e = int(intervals[0][0]), int(intervals[0][1])
+            # Normalise so start <= end (NCBI reports minus-strand as high-low)
+            if exon_s > exon_e:
+                exon_s, exon_e = exon_e, exon_s
             transcripts[current_tid]["exons"].append((exon_s, exon_e))
 
             # Second interval: genomic coding coords (if it's within the gene range)
             if len(intervals) >= 2:
                 cds_s, cds_e = int(intervals[1][0]), int(intervals[1][1])
+                if cds_s > cds_e:
+                    cds_s, cds_e = cds_e, cds_s
                 # Genomic CDS coords should be within gene boundaries
                 if cds_s >= gene_start - 1 and cds_e <= gene_end + 1:
                     transcripts[current_tid]["cds"].append((cds_s, cds_e))

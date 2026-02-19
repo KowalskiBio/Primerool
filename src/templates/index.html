@@ -466,13 +466,44 @@
         </div>
 
         <!-- Data Source toggle -->
-        <div class="mb-3">
+        <div id="dataSourcePanel" class="mb-3">
           <label class="block text-sm font-semibold text-slate-700 mb-1 dark:text-slate-300">Data Source</label>
           <div class="flex gap-2">
             <button id="srcEnsembl" onclick="setApiSource('ensembl')"
               class="px-3 py-1 text-xs rounded-full font-medium transition-colors border border-green-500 bg-green-500 text-white">Ensembl</button>
             <button id="srcNcbi" onclick="setApiSource('ncbi')"
               class="px-3 py-1 text-xs rounded-full font-medium transition-colors border border-slate-300 bg-white text-slate-600 hover:border-green-400 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-300">NCBI</button>
+          </div>
+        </div>
+
+        <!-- Organism selector -->
+        <div id="organismPanel" class="mb-3">
+          <label class="block text-sm font-semibold text-slate-700 mb-1 dark:text-slate-300">Organism</label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <select id="kingdomSelect" onchange="onKingdomChange()"
+                class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100">
+                <option value="animals">🐾 Animals (Vertebrates)</option>
+                <option value="plants">🌱 Plants</option>
+                <option value="bacteria">🦠 Bacteria / Archaea</option>
+                <option value="fungi">🍄 Fungi</option>
+                <option value="protists">🔬 Protists</option>
+                <option value="viruses">🧬 Viruses</option>
+              </select>
+            </div>
+            <div>
+              <select id="speciesSelect" onchange="onSpeciesChange()"
+                class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100">
+              </select>
+            </div>
+          </div>
+          <div id="customSpeciesRow" class="hidden mt-2">
+            <input type="text" id="customSpeciesInput" placeholder="e.g. escherichia_coli_str_k_12_substr_mg1655"
+              onchange="onCustomSpeciesChange()"
+              class="w-full rounded-lg border-slate-300 bg-white text-slate-900 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100">
+            <p class="text-xs text-slate-400 mt-1">Enter the Ensembl species name (lowercase, underscores). <a
+                href="https://rest.ensembl.org/info/species?content-type=application/json" target="_blank"
+                class="text-green-600 hover:underline">Browse all species</a></p>
           </div>
         </div>
 
@@ -844,6 +875,119 @@
       let currentSpecies = 'homo_sapiens';
       let currentApiSource = 'ensembl';
 
+      // ----- Organism / Species data -----
+      const speciesByKingdom = {
+        animals: [
+          { label: 'Human (Homo sapiens)', value: 'homo_sapiens' },
+          { label: 'Mouse (Mus musculus)', value: 'mus_musculus' },
+          { label: 'Rat (Rattus norvegicus)', value: 'rattus_norvegicus' },
+          { label: 'Zebrafish (Danio rerio)', value: 'danio_rerio' },
+          { label: 'Chicken (Gallus gallus)', value: 'gallus_gallus' },
+          { label: 'Pig (Sus scrofa)', value: 'sus_scrofa' },
+          { label: 'Cow (Bos taurus)', value: 'bos_taurus' },
+          { label: 'Dog (Canis lupus familiaris)', value: 'canis_lupus_familiaris' },
+          { label: 'Cat (Felis catus)', value: 'felis_catus' },
+          { label: 'Sheep (Ovis aries)', value: 'ovis_aries' },
+          { label: 'Rabbit (Oryctolagus cuniculus)', value: 'oryctolagus_cuniculus' },
+          { label: 'Macaque (Macaca mulatta)', value: 'macaca_mulatta' },
+          { label: 'Chimpanzee (Pan troglodytes)', value: 'pan_troglodytes' },
+          { label: 'Frog (Xenopus tropicalis)', value: 'xenopus_tropicalis' },
+          { label: 'Fruit fly (Drosophila melanogaster)', value: 'drosophila_melanogaster' },
+          { label: 'C. elegans', value: 'caenorhabditis_elegans' },
+          { label: 'Custom...', value: '__custom__' },
+        ],
+        plants: [
+          { label: 'Arabidopsis thaliana', value: 'arabidopsis_thaliana' },
+          { label: 'Rice (Oryza sativa Japonica)', value: 'oryza_sativa' },
+          { label: 'Maize (Zea mays)', value: 'zea_mays' },
+          { label: 'Wheat (Triticum aestivum)', value: 'triticum_aestivum' },
+          { label: 'Tomato (Solanum lycopersicum)', value: 'solanum_lycopersicum' },
+          { label: 'Soybean (Glycine max)', value: 'glycine_max' },
+          { label: 'Grape (Vitis vinifera)', value: 'vitis_vinifera' },
+          { label: 'Potato (Solanum tuberosum)', value: 'solanum_tuberosum' },
+          { label: 'Barley (Hordeum vulgare)', value: 'hordeum_vulgare' },
+          { label: 'Tobacco (Nicotiana tabacum)', value: 'nicotiana_tabacum' },
+          { label: 'Custom...', value: '__custom__' },
+        ],
+        bacteria: [
+          { label: 'Escherichia coli K-12 MG1655', value: 'escherichia_coli_str_k_12_substr_mg1655_gca_000005845' },
+          { label: 'Bacillus subtilis 168', value: 'bacillus_subtilis_subsp_subtilis_str_168_gca_000009045' },
+          { label: 'Staphylococcus aureus NCTC 8325', value: 'staphylococcus_aureus_subsp_aureus_nctc_8325_gca_000013425' },
+          { label: 'Pseudomonas aeruginosa PAO1', value: 'pseudomonas_aeruginosa_pao1_gca_000006765' },
+          { label: 'Mycobacterium tuberculosis H37Ra', value: 'mycobacterium_tuberculosis_h37ra_gca_000016145' },
+          { label: 'Salmonella enterica Typhimurium LT2', value: 'salmonella_enterica_subsp_enterica_serovar_typhimurium_str_lt2_gca_000006945' },
+          { label: 'Streptococcus pneumoniae TIGR4', value: 'streptococcus_pneumoniae_tigr4_gca_000006885' },
+          { label: 'Custom...', value: '__custom__' },
+        ],
+        fungi: [
+          { label: 'Saccharomyces cerevisiae (Baker\'s yeast)', value: 'saccharomyces_cerevisiae' },
+          { label: 'Schizosaccharomyces pombe (Fission yeast)', value: 'schizosaccharomyces_pombe' },
+          { label: 'Aspergillus nidulans', value: 'aspergillus_nidulans' },
+          { label: 'Neurospora crassa', value: 'neurospora_crassa' },
+          { label: 'Candida albicans', value: 'candida_albicans' },
+          { label: 'Custom...', value: '__custom__' },
+        ],
+        protists: [
+          { label: 'Plasmodium falciparum 3D7', value: 'plasmodium_falciparum' },
+          { label: 'Trypanosoma brucei', value: 'trypanosoma_brucei' },
+          { label: 'Leishmania major', value: 'leishmania_major' },
+          { label: 'Dictyostelium discoideum', value: 'dictyostelium_discoideum' },
+          { label: 'Toxoplasma gondii', value: 'toxoplasma_gondii_me49' },
+          { label: 'Custom...', value: '__custom__' },
+        ],
+        viruses: [
+          { label: 'SARS-CoV-2', value: 'sars_cov_2' },
+          { label: 'Custom...', value: '__custom__' },
+        ],
+      };
+
+      function onKingdomChange() {
+        const kingdom = document.getElementById('kingdomSelect').value;
+        const speciesSelect = document.getElementById('speciesSelect');
+        const list = speciesByKingdom[kingdom] || [];
+
+        speciesSelect.innerHTML = '';
+        list.forEach(sp => {
+          const opt = document.createElement('option');
+          opt.value = sp.value;
+          opt.textContent = sp.label;
+          speciesSelect.appendChild(opt);
+        });
+
+        // Auto-select first real species
+        if (list.length && list[0].value !== '__custom__') {
+          speciesSelect.value = list[0].value;
+          onSpeciesChange();
+        } else {
+          onSpeciesChange();
+        }
+      }
+
+      function onSpeciesChange() {
+        const val = document.getElementById('speciesSelect').value;
+        const customRow = document.getElementById('customSpeciesRow');
+        if (val === '__custom__') {
+          customRow.classList.remove('hidden');
+          // Use whatever they type
+          const custom = document.getElementById('customSpeciesInput').value.trim();
+          if (custom) currentSpecies = custom;
+        } else {
+          customRow.classList.add('hidden');
+          currentSpecies = val;
+        }
+      }
+
+      function onCustomSpeciesChange() {
+        const custom = document.getElementById('customSpeciesInput').value.trim();
+        if (custom) currentSpecies = custom;
+      }
+
+      // Initialize species dropdown on page load
+      document.addEventListener('DOMContentLoaded', () => {
+        onKingdomChange();
+      });
+
+
       function setApiSource(src) {
         currentApiSource = src;
         const btnE = document.getElementById('srcEnsembl');
@@ -890,6 +1034,9 @@
         const mode = document.querySelector('input[name="inputMode"]:checked').value;
         document.getElementById('geneInputPanel').classList.toggle('hidden', mode !== 'gene');
         document.getElementById('fastaInputPanel').classList.toggle('hidden', mode !== 'fasta');
+        // Hide organism/data-source selectors in FASTA mode (BLAST is organism-agnostic)
+        document.getElementById('dataSourcePanel').classList.toggle('hidden', mode !== 'gene');
+        document.getElementById('organismPanel').classList.toggle('hidden', mode !== 'gene');
         // Clear messages
         document.getElementById('geneError').classList.add('hidden');
         document.getElementById('geneSuccess').classList.add('hidden');
@@ -1003,30 +1150,54 @@
         }
       }
 
+      function syncDropdownsToSpecies(speciesValue) {
+        for (const [kingdom, list] of Object.entries(speciesByKingdom)) {
+          const match = list.find(sp => sp.value === speciesValue);
+          if (match) {
+            document.getElementById('kingdomSelect').value = kingdom;
+            onKingdomChange();
+            document.getElementById('speciesSelect').value = speciesValue;
+            return;
+          }
+        }
+        // Not found in presets — set to animals + custom
+        document.getElementById('kingdomSelect').value = 'animals';
+        onKingdomChange();
+        document.getElementById('speciesSelect').value = '__custom__';
+        document.getElementById('customSpeciesRow').classList.remove('hidden');
+        document.getElementById('customSpeciesInput').value = speciesValue;
+      }
+
       function useBlastHit(geneSymbol, ensemblSpecies, organismName) {
+        // Switch back to gene-input mode and re-show data source / organism panels
+        document.querySelector('input[name="inputMode"][value="gene"]').checked = true;
+        document.getElementById('geneInputPanel').classList.remove('hidden');
+        document.getElementById('fastaInputPanel').classList.add('hidden');
+        document.getElementById('dataSourcePanel').classList.remove('hidden');
+        document.getElementById('organismPanel').classList.remove('hidden');
+
         // If gene symbol is missing, ask the user to input it manually
         if (!geneSymbol) {
-          // Don't block, just focus the input and ask
-          currentSpecies = ensemblSpecies || 'homo_sapiens'; // default if unknown
+          currentSpecies = ensemblSpecies || 'homo_sapiens';
+          syncDropdownsToSpecies(currentSpecies);
           document.getElementById('geneInput').value = '';
           document.getElementById('geneInput').focus();
 
           const infoDiv = document.getElementById('geneSuccess');
           infoDiv.textContent = `Organism identified as ${organismName || 'Unknown'}. Gene symbol not found in BLAST result. Please check the Description and enter the gene name manually above.`;
 
-          // Use error/warning style
           infoDiv.className = 'mt-4 mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm font-medium';
           infoDiv.classList.remove('hidden');
           return;
         }
 
         currentSpecies = ensemblSpecies || 'homo_sapiens';
+        syncDropdownsToSpecies(currentSpecies);
 
         // Fill the gene input and auto-search
         document.getElementById('geneInput').value = geneSymbol;
 
         const successDiv = document.getElementById('geneSuccess');
-        // Reset to success style
         successDiv.className = 'mt-4 mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm font-medium';
         successDiv.textContent = `Identified: ${organismName} — ${geneSymbol}. Searching Ensembl...`;
         successDiv.classList.remove('hidden');

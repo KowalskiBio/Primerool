@@ -63,11 +63,11 @@ def search_gene(gene_name: str, species: str = DEFAULT_SPECIES) -> Optional[Dict
     Look up a gene by symbol. Returns gene info with transcript list.
     Uses: GET /lookup/symbol/{species}/{symbol}?expand=1
     """
-    gene_name = gene_name.strip().upper()
+    gene_name = gene_name.strip()
     try:
         data = _get(f"/lookup/symbol/{species}/{gene_name}", {"expand": "1"})
     except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code == 404:
+        if e.response is not None and e.response.status_code in (400, 404):
             return None
         raise
 

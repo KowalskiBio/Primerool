@@ -19,6 +19,7 @@ _MIN_INTERVAL = 0.34
 
 # Species name mapping
 _SPECIES_MAP = {
+    # Animals / Vertebrates
     "homo_sapiens": "Homo sapiens",
     "mus_musculus": "Mus musculus",
     "rattus_norvegicus": "Rattus norvegicus",
@@ -29,6 +30,43 @@ _SPECIES_MAP = {
     "xenopus_tropicalis": "Xenopus tropicalis",
     "sus_scrofa": "Sus scrofa",
     "bos_taurus": "Bos taurus",
+    "ovis_aries": "Ovis aries",
+    "canis_lupus_familiaris": "Canis lupus familiaris",
+    "felis_catus": "Felis catus",
+    "macaca_mulatta": "Macaca mulatta",
+    "pan_troglodytes": "Pan troglodytes",
+    "oryctolagus_cuniculus": "Oryctolagus cuniculus",
+    # Fungi
+    "saccharomyces_cerevisiae": "Saccharomyces cerevisiae",
+    "schizosaccharomyces_pombe": "Schizosaccharomyces pombe",
+    "aspergillus_nidulans": "Aspergillus nidulans",
+    "neurospora_crassa": "Neurospora crassa",
+    "candida_albicans": "Candida albicans",
+    # Plants
+    "arabidopsis_thaliana": "Arabidopsis thaliana",
+    "oryza_sativa": "Oryza sativa",
+    "zea_mays": "Zea mays",
+    "triticum_aestivum": "Triticum aestivum",
+    "solanum_lycopersicum": "Solanum lycopersicum",
+    "glycine_max": "Glycine max",
+    "vitis_vinifera": "Vitis vinifera",
+    "solanum_tuberosum": "Solanum tuberosum",
+    "hordeum_vulgare": "Hordeum vulgare",
+    "nicotiana_tabacum": "Nicotiana tabacum",
+    # Bacteria (Ensembl Bacteria requires GCA accession suffix)
+    "escherichia_coli_str_k_12_substr_mg1655_gca_000005845": "Escherichia coli",
+    "bacillus_subtilis_subsp_subtilis_str_168_gca_000009045": "Bacillus subtilis",
+    "staphylococcus_aureus_subsp_aureus_nctc_8325_gca_000013425": "Staphylococcus aureus",
+    "pseudomonas_aeruginosa_pao1_gca_000006765": "Pseudomonas aeruginosa",
+    "mycobacterium_tuberculosis_h37ra_gca_000016145": "Mycobacterium tuberculosis",
+    "salmonella_enterica_subsp_enterica_serovar_typhimurium_str_lt2_gca_000006945": "Salmonella enterica",
+    "streptococcus_pneumoniae_tigr4_gca_000006885": "Streptococcus pneumoniae",
+    # Protists
+    "plasmodium_falciparum": "Plasmodium falciparum",
+    "trypanosoma_brucei": "Trypanosoma brucei",
+    "leishmania_major": "Leishmania major",
+    "toxoplasma_gondii_me49": "Toxoplasma gondii",
+    "dictyostelium_discoideum": "Dictyostelium discoideum",
 }
 
 # Cache for transcript details parsed from gene_table
@@ -200,7 +238,7 @@ def search_gene(gene_name: str, species: str = DEFAULT_SPECIES) -> Optional[Dict
     Look up a gene by symbol using NCBI E-utilities.
     Returns gene info with transcript list (same format as ensembl_api).
     """
-    gene_name = gene_name.strip().upper()
+    gene_name = gene_name.strip()
     organism = _SPECIES_MAP.get(species, species.replace("_", " "))
 
     # Step 1: esearch → gene ID
@@ -248,6 +286,23 @@ def search_gene(gene_name: str, species: str = DEFAULT_SPECIES) -> Optional[Dict
         resp.text, chrom, chr_accession, strand, gene_start, gene_end
     )
 
+    # Fallback for prokaryotes: gene_table returns nothing because bacterial
+    # genes have no annotated mRNA transcripts.  Synthesise a single-exon
+    # transcript from the esummary genomic coordinates.
+    if not transcripts_data and gene_start and gene_end:
+        syn_id = f"{gene_name}_CDS"
+        transcripts_data[syn_id] = {
+            "transcript_name": f"{gene_name} (CDS)",
+            "chrom": chrom or chr_accession,
+            "chr_accession": chr_accession,
+            "strand": strand,
+            "exons": [(gene_start, gene_end)],
+            "cds": [(gene_start, gene_end)],
+            "utr5": [],
+            "utr3": [],
+            "utr": [],
+        }
+
     # Cache all transcript details
     for tid, tinfo in transcripts_data.items():
         _transcript_cache[tid] = tinfo
@@ -266,11 +321,13 @@ def search_gene(gene_name: str, species: str = DEFAULT_SPECIES) -> Optional[Dict
     # Sort: NM_ first, then by exon count descending
     transcripts.sort(key=lambda t: (0 if t["id"].startswith("NM_") else 1, -t["exon_count"]))
 
-    # Mark first NM_ as canonical
+    # Mark first NM_ as canonical; if none, mark the first transcript
     for t in transcripts:
         if t["id"].startswith("NM_"):
             t["is_canonical"] = True
             break
+    if transcripts and not any(t["is_canonical"] for t in transcripts):
+        transcripts[0]["is_canonical"] = True
 
     return {
         "gene_name": gene_name,

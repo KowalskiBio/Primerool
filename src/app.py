@@ -141,17 +141,23 @@ def blast_sequence():
 @app.route("/search_gene", methods=["POST"])
 def search_gene_route():
     data = request.json or {}
-    gene_name = (data.get("gene_name", "") or "").strip().upper()
+    gene_name_raw = (data.get("gene_name", "") or "").strip()
     species = (data.get("species", "") or "").strip() or DEFAULT_SPECIES
     api = _api(data.get("api_source", "ensembl"))
 
-    if not gene_name:
+    if not gene_name_raw:
         return jsonify({"error": "Please provide a gene name"}), 400
 
-    result = api.search_gene(gene_name, species=species)
+    # Try original case first (important for bacteria: dnaA, recA, etc.)
+    result = api.search_gene(gene_name_raw, species=species)
+
+    # Fallback: try uppercase (standard for human/animal genes)
+    if not result and gene_name_raw != gene_name_raw.upper():
+        result = api.search_gene(gene_name_raw.upper(), species=species)
+
     if not result:
         source_label = "NCBI" if api is ncbi_api else "Ensembl"
-        return jsonify({"error": f"Gene {gene_name} not found in {source_label} (species: {species})"}), 404
+        return jsonify({"error": f"Gene {gene_name_raw} not found in {source_label} (species: {species})"}), 404
 
     return jsonify({
         "gene_name": result["gene_name"],
@@ -172,7 +178,7 @@ def search_gene_route():
 def get_sequence():
     data = request.json or {}
 
-    gene_name = (data.get("gene_name", "") or "").strip().upper()
+    gene_name = (data.get("gene_name", "") or "").strip()
     transcript_id = data.get("transcript_id")
     species = (data.get("species", "") or "").strip() or DEFAULT_SPECIES
     api = _api(data.get("api_source", "ensembl"))

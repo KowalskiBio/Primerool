@@ -188,6 +188,7 @@ def parse_blast_results(xml_data: str) -> List[Dict[str, Any]]:
 
 # Map common NCBI organism names to Ensembl species codes
 _SPECIES_MAP = {
+    # Animals / Vertebrates
     "homo sapiens": "homo_sapiens",
     "mus musculus": "mus_musculus",
     "rattus norvegicus": "rattus_norvegicus",
@@ -204,7 +205,37 @@ _SPECIES_MAP = {
     "macaca mulatta": "macaca_mulatta",
     "pan troglodytes": "pan_troglodytes",
     "oryctolagus cuniculus": "oryctolagus_cuniculus",
+    # Fungi
     "saccharomyces cerevisiae": "saccharomyces_cerevisiae",
+    "schizosaccharomyces pombe": "schizosaccharomyces_pombe",
+    "aspergillus nidulans": "aspergillus_nidulans",
+    "neurospora crassa": "neurospora_crassa",
+    "candida albicans": "candida_albicans",
+    # Plants
+    "arabidopsis thaliana": "arabidopsis_thaliana",
+    "oryza sativa": "oryza_sativa",
+    "zea mays": "zea_mays",
+    "triticum aestivum": "triticum_aestivum",
+    "solanum lycopersicum": "solanum_lycopersicum",
+    "glycine max": "glycine_max",
+    "vitis vinifera": "vitis_vinifera",
+    "solanum tuberosum": "solanum_tuberosum",
+    "hordeum vulgare": "hordeum_vulgare",
+    "nicotiana tabacum": "nicotiana_tabacum",
+    # Bacteria (Ensembl Bacteria requires GCA accession suffix)
+    "escherichia coli": "escherichia_coli_str_k_12_substr_mg1655_gca_000005845",
+    "bacillus subtilis": "bacillus_subtilis_subsp_subtilis_str_168_gca_000009045",
+    "staphylococcus aureus": "staphylococcus_aureus_subsp_aureus_nctc_8325_gca_000013425",
+    "pseudomonas aeruginosa": "pseudomonas_aeruginosa_pao1_gca_000006765",
+    "mycobacterium tuberculosis": "mycobacterium_tuberculosis_h37ra_gca_000016145",
+    "salmonella enterica": "salmonella_enterica_subsp_enterica_serovar_typhimurium_str_lt2_gca_000006945",
+    "streptococcus pneumoniae": "streptococcus_pneumoniae_tigr4_gca_000006885",
+    # Protists
+    "plasmodium falciparum": "plasmodium_falciparum",
+    "trypanosoma brucei": "trypanosoma_brucei",
+    "leishmania major": "leishmania_major",
+    "toxoplasma gondii": "toxoplasma_gondii_me49",
+    "dictyostelium discoideum": "dictyostelium_discoideum",
 }
 
 

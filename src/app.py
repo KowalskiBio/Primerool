@@ -551,7 +551,21 @@ def design_from_sequence():
     import primer3 as p3
 
     base_args = default_primer3_args()
-    base_args["PRIMER_NUM_RETURN"] = 5
+
+    # Apply user-supplied conditions (if any)
+    cond = data.get("conditions") or {}
+    if cond:
+        base_args["PRIMER_MIN_TM"]  = float(cond.get("tm_min",  base_args["PRIMER_MIN_TM"]))
+        base_args["PRIMER_OPT_TM"]  = float(cond.get("tm_opt",  base_args["PRIMER_OPT_TM"]))
+        base_args["PRIMER_MAX_TM"]  = float(cond.get("tm_max",  base_args["PRIMER_MAX_TM"]))
+        base_args["PRIMER_MIN_SIZE"] = int(cond.get("len_min", base_args["PRIMER_MIN_SIZE"]))
+        base_args["PRIMER_OPT_SIZE"] = int(cond.get("len_opt", base_args["PRIMER_OPT_SIZE"]))
+        base_args["PRIMER_MAX_SIZE"] = int(cond.get("len_max", base_args["PRIMER_MAX_SIZE"]))
+        base_args["PRIMER_MIN_GC"]  = float(cond.get("gc_min",  base_args["PRIMER_MIN_GC"]))
+        base_args["PRIMER_MAX_GC"]  = float(cond.get("gc_max",  base_args["PRIMER_MAX_GC"]))
+
+    num_return = int(cond.get("num_return", 5))
+    base_args["PRIMER_NUM_RETURN"] = num_return
     base_args["PRIMER_PICK_INTERNAL_OLIGO"] = 0
 
     # Forward (LEFT) primers

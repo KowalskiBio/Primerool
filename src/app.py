@@ -27,9 +27,15 @@ def _api(source: str):
 app = Flask(__name__)
 
 
+from werkzeug.exceptions import HTTPException
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     """Return JSON instead of HTML for any unhandled server error."""
+    if isinstance(e, HTTPException):
+        # Simply return the built-in HTTP error messages as JSON
+        return jsonify({"error": e.description}), e.code
+    
     import traceback
     traceback.print_exc()
     return jsonify({"error": f"Server error: {e}"}), 500

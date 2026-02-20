@@ -1,0 +1,2 @@
+# Ensure batch files always use CRLF line endings on checkout and in ZIP downloads
+*.bat text eol=crlf

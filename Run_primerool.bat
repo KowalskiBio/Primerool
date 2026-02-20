@@ -1,9 +1,10 @@
 @echo off
-setlocal
+chcp 65001 >nul 2>&1
+setlocal enabledelayedexpansion
 
 :: Keep window open on any unexpected exit
-if "%1"=="--child" goto :main
-cmd /k "%~f0" --child
+if "%~1"=="--child" goto :main
+cmd /k ""%~f0" --child"
 exit /b
 
 :main

@@ -78,7 +78,7 @@ if [ -f "requirements.txt" ]; then
 fi
 
 # Open browser after a short delay
-(sleep 3 && open "http://127.0.0.1:5050") &
+# (Browser opening removed for desktop app mode)
 
 # Run the application
 echo "Server running at http://127.0.0.1:5050"

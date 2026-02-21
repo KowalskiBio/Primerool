@@ -105,8 +105,8 @@ Every designed primer is automatically checked for:
 
 ### macOS
 
-1. Double-click **`Run_primerool.command`**
-2. A terminal opens, installs dependencies if needed, and launches the app in your browser
+1. Double-click the **`Primerool.app`** application icon.
+2. It will automatically install dependencies if needed, and launch as a native desktop application with a dedicated dock icon.
 
 ### Windows
 

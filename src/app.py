@@ -647,5 +647,29 @@ def design_from_sequence():
     })
 
 
+def set_app_icon():
+    import platform
+    if platform.system() == "Darwin":
+        try:
+            from AppKit import NSApplication, NSImage
+            import os
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "logo.png")
+            if os.path.exists(icon_path):
+                ns_app = NSApplication.sharedApplication()
+                img = NSImage.alloc().initWithContentsOfFile_(icon_path)
+                if img:
+                    ns_app.setApplicationIconImage_(img)
+        except Exception:
+            pass
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5050)
+    import webview
+
+    def on_app_start(window):
+        # Set icon after the window and application loop initialize
+        set_app_icon()
+
+    # Create the native window, passing the Flask app instance directly
+    window = webview.create_window("Primerool", app, width=1280, height=800, min_size=(800, 600))
+    # Start the application loop, firing our callback once NSApplication is regular
+    webview.start(on_app_start, window)

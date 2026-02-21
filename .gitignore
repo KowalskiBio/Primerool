@@ -8,3 +8,9 @@ __pycache__/
 *.pyc
 
 .claude/
+
+# Extra Virtual Environments
+build_venv/
+
+# Application Logs
+*.log

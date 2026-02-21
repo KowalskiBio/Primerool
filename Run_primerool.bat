@@ -138,7 +138,7 @@ echo [INFO] Press Ctrl+C to stop.
 echo.
 
 :: Open browser after a short delay
-start "" "http://127.0.0.1:5050"
+:: (Browser opening removed for desktop app mode)
 
 python src\app.py
 if %errorlevel% neq 0 (

@@ -105,14 +105,21 @@ Every designed primer is automatically checked for:
 
 ### macOS
 
-1. Double-click the **`Primerool.app`** application icon.
-2. It will automatically install dependencies if needed, and launch as a native desktop application with a dedicated dock icon.
+1. Navigate to the `dist/` folder and double-click the **`Primerool.app`** bundle.
+2. It will instantly launch as a native PyInstaller desktop application with a custom dock icon.
+
+**Building for macOS:**
+To compile the standalone OS X application yourself, run the automated packager:
+```bash
+./scripts/build_mac.sh
+```
+This will generate the `dist/Primerool.app` and `Primerool.dmg` installers.
 
 ### Windows
 
 1. Double-click **`Run_primerool.bat`**
 2. If Python isn't installed, it's downloaded automatically — close the window and run the `.bat` again after installation
-3. On the second run, the app launches as a native desktop application
+3. On the second run, the app installs all dependencies and launches as a native desktop application window.
 
 ### Development / Manual Setup
 

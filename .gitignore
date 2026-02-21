@@ -18,3 +18,5 @@ build_venv/
 # PyInstaller Outputs
 build/
 dist/
+*.spec
+

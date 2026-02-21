@@ -26,12 +26,13 @@ def _api(source: str):
 
 def get_resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller."""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
+    if getattr(sys, 'frozen', False):
+        if sys.platform == 'darwin' and '.app/Contents/MacOS' in sys.executable:
+            base_path = os.path.abspath(os.path.join(os.path.dirname(sys.executable), '..', 'Resources'))
+        else:
+            base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    else:
         base_path = os.path.dirname(os.path.abspath(__file__))
-
     return os.path.join(base_path, relative_path)
 
 app = Flask(__name__,

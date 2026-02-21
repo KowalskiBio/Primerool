@@ -24,7 +24,19 @@ def _api(source: str):
     return ncbi_api if source == "ncbi" else ensembl_api
 
 
-app = Flask(__name__)
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller."""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+
+    return os.path.join(base_path, relative_path)
+
+app = Flask(__name__,
+            template_folder=get_resource_path("templates"),
+            static_folder=get_resource_path("static"))
 
 
 from werkzeug.exceptions import HTTPException
@@ -647,29 +659,10 @@ def design_from_sequence():
     })
 
 
-def set_app_icon():
-    import platform
-    if platform.system() == "Darwin":
-        try:
-            from AppKit import NSApplication, NSImage
-            import os
-            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "logo.png")
-            if os.path.exists(icon_path):
-                ns_app = NSApplication.sharedApplication()
-                img = NSImage.alloc().initWithContentsOfFile_(icon_path)
-                if img:
-                    ns_app.setApplicationIconImage_(img)
-        except Exception:
-            pass
-
 if __name__ == "__main__":
     import webview
 
-    def on_app_start(window):
-        # Set icon after the window and application loop initialize
-        set_app_icon()
-
     # Create the native window, passing the Flask app instance directly
     window = webview.create_window("Primerool", app, width=1280, height=800, min_size=(800, 600))
-    # Start the application loop, firing our callback once NSApplication is regular
-    webview.start(on_app_start, window)
+    # Start the application loop
+    webview.start()

@@ -133,8 +133,8 @@ if exist "requirements.txt" (
 :: -----------------------------------------------
 :: 5. Launch app
 :: -----------------------------------------------
-echo [INFO] Server starting at http://127.0.0.1:5050
-echo [INFO] Press Ctrl+C to stop.
+echo [INFO] Booting native desktop window...
+echo [INFO] Press Ctrl+C in this terminal to force quit.
 echo.
 
 :: Open browser after a short delay

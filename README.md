@@ -112,7 +112,7 @@ Every designed primer is automatically checked for:
 
 1. Double-click **`Run_primerool.bat`**
 2. If Python isn't installed, it's downloaded automatically — close the window and run the `.bat` again after installation
-3. On the second run, the app launches in your browser
+3. On the second run, the app launches as a native desktop application
 
 ### Development / Manual Setup
 

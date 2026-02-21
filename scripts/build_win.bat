@@ -14,8 +14,8 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install pyinstaller Pillow
 
-:: Generate ICO file from PNG for the Windows executable icon
-python -c "from PIL import Image; import os; img=Image.open('src/static/logo.png'); img.save('src/static/logo.ico', format='ICO')"
+:: Generate ICO file natively ensuring Windows transparency is retained
+python -c "from PIL import Image; import os; img=Image.open('src/static/logo.png').convert('RGBA'); img.save('src/static/logo.ico', format='ICO', sizes=[(256,256), (128,128), (64,64), (32,32)])"
 
 :: Clean up old builds
 if exist build rmdir /s /q build

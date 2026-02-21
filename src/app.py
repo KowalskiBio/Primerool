@@ -663,6 +663,6 @@ if __name__ == "__main__":
     import webview
 
     # Create the native window, passing the Flask app instance directly
-    window = webview.create_window("Primerool", app, width=1280, height=800, min_size=(800, 600))
+    window = webview.create_window("Primerool", app, width=1280, height=800, min_size=(800, 600), text_select=True)
     # Start the application loop
     webview.start()

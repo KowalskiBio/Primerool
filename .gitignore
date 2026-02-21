@@ -14,3 +14,7 @@ build_venv/
 
 # Application Logs
 *.log
+
+# PyInstaller Outputs
+build/
+dist/

@@ -62,4 +62,8 @@ if sys.platform == 'darwin':
         name='Primerool.app',
         icon=icon_path if os.path.exists(icon_path) else None,
         bundle_identifier='com.primerool.desktop',
+        info_plist={
+            'NSHighResolutionCapable': 'True',
+            'LSBackgroundOnly': 'False',
+        }
     )

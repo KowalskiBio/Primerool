@@ -108,12 +108,22 @@ Every designed primer is automatically checked for:
 1. Navigate to the `dist/` folder and double-click the **`Primerool.app`** bundle.
 2. It will instantly launch as a native PyInstaller desktop application with a custom dock icon.
 
-**Building for macOS:**
-To compile the standalone OS X application yourself, run the automated packager:
-```bash
-./scripts/build_mac.sh
-```
-This will generate the `dist/Primerool.app` and `Primerool.dmg` installers.
+**Building for macOS (.app / .dmg):**
+To compile the standalone OS X application yourself:
+1. Run the automated packager:
+   ```bash
+   ./scripts/build_mac.sh
+   ```
+2. This will generate the **`Primerool.app`** bundle and **`Primerool.dmg`** installer in the `dist/` directory.
+
+**Building for Windows (.exe):**
+To generate a standalone Windows executable, you must run the build on a Windows machine:
+1. Install dependencies: `pip install -r requirements.txt pyinstaller pywebview`
+2. Run PyInstaller:
+   ```bash
+   pyinstaller --noconfirm --clean primerool.spec
+   ```
+3. **Important:** Distribute the entire `dist/Primerool/` folder (zip it). The `Primerool.exe` inside relies on the other files in that directory to run.
 
 ### Windows
 

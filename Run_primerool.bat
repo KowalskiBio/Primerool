@@ -21,11 +21,13 @@ echo.
 :: 1. Check / install Python
 :: -----------------------------------------------
 set "PYTHON_CMD="
-python --version >nul 2>&1
-if not errorlevel 1 set "PYTHON_CMD=python"
+set "PY_CHECK="
+for /f "delims=" %%i in ('python -c "import venv; print('OK')" 2^>nul') do set "PY_CHECK=%%i"
+if "!PY_CHECK!"=="OK" set "PYTHON_CMD=python"
 if not defined PYTHON_CMD (
-    py --version >nul 2>&1
-    if not errorlevel 1 set "PYTHON_CMD=py"
+    set "PY_CHECK="
+    for /f "delims=" %%i in ('py -c "import venv; print('OK')" 2^>nul') do set "PY_CHECK=%%i"
+    if "!PY_CHECK!"=="OK" set "PYTHON_CMD=py"
 )
 
 if not defined PYTHON_CMD (

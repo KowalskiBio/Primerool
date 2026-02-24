@@ -118,18 +118,18 @@ To compile the standalone OS X application yourself:
 
 **Building for Windows (.exe):**
 To generate a standalone Windows executable, you must run the build on a Windows machine:
-1. Install dependencies: `pip install -r requirements.txt pyinstaller pywebview`
-2. Run PyInstaller:
-   ```bash
-   pyinstaller --noconfirm --clean primerool.spec
+1. Run the automated packager:
+   ```batch
+   scripts\build_win.bat
    ```
-3. **Important:** Distribute the entire `dist/Primerool/` folder (zip it). The `Primerool.exe` inside relies on the other files in that directory to run.
+2. *Note: If Python is not installed, the build script will automatically download and install Python 3.12 for you.*
+3. Find the executable output in `dist\Primerool.exe`.
 
 ### Windows
 
 1. Double-click **`Run_primerool.bat`**
-2. If Python isn't installed, it's downloaded automatically — close the window and run the `.bat` again after installation
-3. On the second run, the app installs all dependencies and launches as a native desktop application window.
+2. If Python isn't installed, it's downloaded and installed automatically in the background.
+3. The app installs all dependencies and launches as a native desktop application window.
 
 ### Development / Manual Setup
 

@@ -20,8 +20,15 @@ echo.
 :: -----------------------------------------------
 :: 1. Check / install Python
 :: -----------------------------------------------
+set "PYTHON_CMD="
 python --version >nul 2>&1
-if %errorlevel% neq 0 (
+if not errorlevel 1 set "PYTHON_CMD=python"
+if not defined PYTHON_CMD (
+    py --version >nul 2>&1
+    if not errorlevel 1 set "PYTHON_CMD=py"
+)
+
+if not defined PYTHON_CMD (
     echo  Python is not installed on this computer.
     echo  Primerool requires Python and a few libraries to run.
     echo.
@@ -31,15 +38,9 @@ if %errorlevel% neq 0 (
     echo    - Primer3            (~5 MB)
     echo    - Requests           (~1 MB)
     echo.
-    echo  Make sure you are connected to the internet before continuing.
+    echo  Make sure you are connected to the internet.
     echo.
-    set /p "CONFIRM=  Proceed with installation? (Y/N): "
-    if /i not "%CONFIRM%"=="Y" (
-        echo.
-        echo  Installation cancelled. Exiting.
-        pause
-        exit /b 0
-    )
+    echo [INFO] Commencing automatic Python 3.12 installation...
     echo.
 
     :: Try winget first (Windows 10 1709+ / Windows 11)
@@ -72,7 +73,8 @@ if %errorlevel% neq 0 (
     if defined PYTHON_EXE (
         echo [OK] Found Python at: %PYTHON_EXE%
         :: Add its folder and Scripts subfolder to PATH for this session
-        for %%F in ("%PYTHON_EXE%") do set "PATH=%%~dpF;%%~dpFScripts;%PATH%"
+        for %%F in ("!PYTHON_EXE!") do set "PATH=%%~dpF;%%~dpFScripts;!PATH!"
+        set "PYTHON_CMD=python"
     ) else (
         echo.
         echo  ============================================
@@ -87,7 +89,7 @@ if %errorlevel% neq 0 (
     )
 )
 
-for /f "tokens=*" %%v in ('python --version 2^>^&1') do echo [OK] Found %%v
+for /f "tokens=*" %%v in ('!PYTHON_CMD! --version 2^>^&1') do echo [OK] Found %%v
 echo.
 
 :: -----------------------------------------------
@@ -95,7 +97,7 @@ echo.
 :: -----------------------------------------------
 if not exist "venv" (
     echo [INFO] Creating virtual environment...
-    python -m venv venv
+    !PYTHON_CMD! -m venv venv
     if %errorlevel% neq 0 (
         echo [ERROR] Failed to create virtual environment.
         pause
@@ -140,7 +142,7 @@ echo.
 :: Open browser after a short delay
 :: (Browser opening removed for desktop app mode)
 
-python src\app.py
+!PYTHON_CMD! src\app.py
 if %errorlevel% neq 0 (
     echo.
     echo [ERROR] The application exited with an error (code %errorlevel%).

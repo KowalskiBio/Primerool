@@ -20,3 +20,16 @@ build/
 dist/
 *.spec
 
+# Portable Binaries
+.bin/
+
+# Application builds
+*.app/
+*.exe
+*.dmg
+*.zip
+
+# Temporary/Old Files
+make_pdf.py
+Oligool_and_Primerool_Features.md
+

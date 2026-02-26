@@ -1087,12 +1087,12 @@
 
         <div class="flex flex-wrap gap-2">
           <button
-            class="bg-white border border-slate-300 text-slate-700 hover:bg-gradient-to-br from-green-50 to-emerald-50/30 font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full md:w-auto dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-600"
+            class="bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full md:w-auto"
             onclick="designFromSequence()">
             Design Primers
           </button>
           <button
-            class="bg-white border border-slate-300 text-slate-700 hover:bg-gradient-to-br from-blue-50 to-blue-100/30 font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full md:w-auto dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-600"
+            class="bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full md:w-auto"
             onclick="designProbe()">
             Design TaqMan Probe
           </button>
@@ -2468,7 +2468,7 @@
             const hd = p.homodimer || {};
             const iv = p.interval; // [start,end)
             const btn = iv
-              ? `<button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" onclick='useWGA("${which}","${region}",[${iv[0]},${iv[1]}],"${p.sequence.replace(/"/g, '&quot;')}", "recommended")'>Use</button>`
+              ? `<button class="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" onclick='useWGA("${which}","${region}",[${iv[0]},${iv[1]}],"${p.sequence.replace(/"/g, '&quot;')}", "recommended")'>Use</button>`
               : '-';
 
             const binding = (iv && region === 'up')
@@ -2570,10 +2570,10 @@
             const L = pair.left || {};
             const R = pair.right || {};
             const Lbtn = (L.interval)
-              ? `<button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" onclick='useJunction("left",[${L.interval[0]},${L.interval[1]}],"${L.sequence.replace(/"/g, '&quot;')}","recommended")'>Use L</button>`
+              ? `<button class="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" onclick='useJunction("left",[${L.interval[0]},${L.interval[1]}],"${L.sequence.replace(/"/g, '&quot;')}","recommended")'>Use L</button>`
               : '-';
             const Rbtn = (R.interval)
-              ? `<button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" onclick='useJunction("right",[${R.interval[0]},${R.interval[1]}],"${R.sequence.replace(/"/g, '&quot;')}","recommended")'>Use R</button>`
+              ? `<button class="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" onclick='useJunction("right",[${R.interval[0]},${R.interval[1]}],"${R.sequence.replace(/"/g, '&quot;')}","recommended")'>Use R</button>`
               : '-';
 
             const spliced = currentSequenceData.spliced_exons_seq || '';
@@ -2740,10 +2740,21 @@
 
         // Populate the probe region input for visibility
         const probeInput = document.getElementById('probeRegion');
-        if (probeInput) probeInput.value = probeRegion;
+        if (probeInput) {
+          probeInput.value = probeRegion;
+          probeInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
 
         // Perform design
         const conditions = {
+          probe_tm_min: parseFloat(document.getElementById('probeTmMin').value) || 65,
+          probe_tm_opt: parseFloat(document.getElementById('probeTmOpt').value) || 70,
+          probe_tm_max: parseFloat(document.getElementById('probeTmMax').value) || 75,
+          probe_len_min: parseInt(document.getElementById('probeLenMin').value) || 18,
+          probe_len_opt: parseInt(document.getElementById('probeLenOpt').value) || 22,
+          probe_len_max: parseInt(document.getElementById('probeLenMax').value) || 30,
+          probe_gc_min: parseFloat(document.getElementById('probeGcMin').value) || 30,
+          probe_gc_max: parseFloat(document.getElementById('probeGcMax').value) || 80,
           advanced: {
             mv_conc: document.getElementById('advMvConc').value,
             dv_conc: document.getElementById('advDvConc').value,
@@ -3053,7 +3064,7 @@
               <td class="px-4 py-3">${hd.structure_found ? 'Yes' : 'No'}</td>
               <td class="px-4 py-3">${fmt(hd.dg)}</td>
               <td class="px-4 py-3">
-                <button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" 
+                <button class="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" 
                    onclick="${clickAction}">Use</button>
               </td>
             </tr>`;
@@ -3093,7 +3104,7 @@
               <td class="px-4 py-3">${hd.structure_found ? 'Yes' : 'No'}</td>
               <td class="px-4 py-3">${fmt(hd.dg)}</td>
               <td class="px-4 py-3">
-                <button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" 
+                <button class="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" 
                    onclick="${clickAction}">Use</button>
               </td>
             </tr>`;
@@ -3136,7 +3147,7 @@
               <td class="px-4 py-3">${fmt(bp.tm_diff)}</td>
               <td class="px-4 py-3">${fmt(het.dg)}</td>
               <td class="px-4 py-3">
-                <button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" 
+                <button class="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" 
                    onclick="${bothAction}">Use Both</button>
               </td>
             </tr>`;

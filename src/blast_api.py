@@ -166,7 +166,10 @@ def parse_blast_results(xml_data: str) -> List[Dict[str, Any]]:
         identity = int(get_text("Hsp_identity") or 0)
         align_len = int(get_text("Hsp_align-len") or 1)
         identity_pct = round(100.0 * identity / align_len, 1) if align_len else 0
-        
+        query_from = int(get_text("Hsp_query-from") or 0)
+        query_to = int(get_text("Hsp_query-to") or 0)
+        query_cover = round(100.0 * (abs(query_to - query_from) + 1) / query_len) if query_len else 0
+
         results.append({
             "organism": organism,
             # "taxid": taxid, # Not readily available in standard XML Hit object
@@ -176,8 +179,9 @@ def parse_blast_results(xml_data: str) -> List[Dict[str, Any]]:
             "evalue": float(evalue) if evalue else None,
             "bit_score": float(bit_score) if bit_score else None,
             "identity_pct": identity_pct,
-            "query_from": int(get_text("Hsp_query-from") or 0),
-            "query_to": int(get_text("Hsp_query-to") or 0),
+            "query_cover": query_cover,
+            "query_from": query_from,
+            "query_to": query_to,
             "hit_from": int(get_text("Hsp_hit-from") or 0),
             "hit_to": int(get_text("Hsp_hit-to") or 0),
             "query_len": query_len,

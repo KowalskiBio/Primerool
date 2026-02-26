@@ -122,6 +122,10 @@
       user-select: none;
     }
 
+    .seq-intron-placeholder::before {
+      content: attr(data-label);
+    }
+
     .seq-utr {
       color: #0f172a;
       /* slate-900 */
@@ -1185,7 +1189,7 @@
 
           // Show top hits
           let html = '<h3 class="text-md font-semibold text-slate-800 mb-3">BLAST Results</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-slate-600 border border-slate-200 rounded-lg"><thead class="text-xs text-slate-700 uppercase bg-gradient-to-br from-green-50 to-emerald-50/30"><tr>' +
-            '<th class="px-4 py-3 border-b border-slate-200 resizable-th">#</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Organism</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Gene</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Description</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Accession</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Identity</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">E-value</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Action</th>' +
+            '<th class="px-4 py-3 border-b border-slate-200 resizable-th">#</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Organism</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Gene</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Description</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Accession</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Query Cover</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Identity</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">E-value</th><th class="px-4 py-3 border-b border-slate-200 resizable-th">Action</th>' +
             '</tr></thead><tbody>';
 
           hits.slice(0, 10).forEach((hit, i) => {
@@ -1203,6 +1207,7 @@
               <div class="min-w-[200px]" title="${hit.title}">${hit.title}</div>
             </td>
             <td class="px-4 py-3"><a href="https://www.ncbi.nlm.nih.gov/nuccore/${hit.accession}" target="_blank" class="text-green-600 hover:underline">${hit.accession}</a></td>
+            <td class="px-4 py-3">${hit.query_cover ?? '-'}%</td>
             <td class="px-4 py-3">${hit.identity_pct}%</td>
             <td class="px-4 py-3">${evalue}</td>
             <td class="px-4 py-3"><button class="px-2 py-1 text-xs font-medium text-white bg-slate-800 rounded hover:bg-slate-700 transition" onclick="useBlastHit('${gs}', '${sp}', '${org}')">Use</button></td>
@@ -1674,7 +1679,7 @@
               const truncate = document.getElementById('truncateIntrons')?.checked || false;
               if (truncate) {
                 // Truncate intron display but show length - non-copyable placeholder
-                html += `<span class="seq-intron-placeholder" title="Intron sequence (${intronLen}bp): ${intronSeq.substring(0, 30)}...">...intron ${intronLen}bp...</span>`;
+                html += `<span class="seq-intron-placeholder" title="Intron sequence (${intronLen}bp): ${intronSeq.substring(0, 30)}..." data-label="...intron ${intronLen}bp..."></span>`;
               } else {
                 // Show full intron sequence
                 html += `<span class="seq-intron">${intronSeq}</span>`;
@@ -1707,7 +1712,7 @@
             const truncate = document.getElementById('truncateIntrons')?.checked || false;
             if (truncate) {
               // Truncate trailing intron display but show length - non-copyable placeholder
-              html += `<span class="seq-intron-placeholder" title="Intron sequence (${intronLen}bp): ${intronSeq.substring(0, 30)}...">...intron ${intronLen}bp...</span>`;
+              html += `<span class="seq-intron-placeholder" title="Intron sequence (${intronLen}bp): ${intronSeq.substring(0, 30)}..." data-label="...intron ${intronLen}bp..."></span>`;
             } else {
               // Show full trailing intron sequence
               html += `<span class="seq-intron">${intronSeq}</span>`;

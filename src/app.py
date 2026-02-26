@@ -42,6 +42,15 @@ app = Flask(__name__,
 
 from werkzeug.exceptions import HTTPException
 
+def clean_dna(s):
+    """Remove spaces, newlines, and non-DNA characters."""
+    if not s: return ""
+    s = s.strip().upper().replace(" ", "").replace("\n", "").replace("\r", "")
+    return "".join(c for c in s if c in "ACGTN")
+
+class DataError(Exception):
+    pass
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     """Return JSON instead of HTML for any unhandled server error."""
@@ -229,6 +238,8 @@ def get_sequence():
         use_cds_anchor=bool(tinfo.get("cds")),
         species=species,
     )
+    upstream_seq = clean_dna(upstream_seq)
+    downstream_seq = clean_dna(downstream_seq)
 
     # ALWAYS compute exon-only spliced template for junction primers
     spliced_exons_seq = api.build_spliced_sequence(tinfo, feature="exons", species=species) or ""
@@ -239,7 +250,7 @@ def get_sequence():
 
     if include_introns:
         # Full genomic span (with introns)
-        gene_seq = api.build_genomic_sequence(tinfo, species=species)
+        gene_seq = clean_dna(api.build_genomic_sequence(tinfo, species=species))
         if not gene_seq:
             return jsonify({"error": "Failed to fetch genomic sequence"}), 500
 
@@ -615,7 +626,88 @@ def design_from_sequence():
             base_args["PRIMER_PRODUCT_SIZE_RANGE"] = [[max(50, L - D), L + D]]
         except: pass
 
+    # Unified design if coordinates and template are available
+    fwd_pos = data.get("fwd_pos", -1)
+    rev_pos = data.get("rev_pos", -1)
+    template_seq = clean_dna(data.get("template_seq", ""))
+    fwd_region = clean_dna(fwd_region)
+    rev_region = clean_dna(rev_region)
 
+    if template_seq:
+        # Use a single Primer3 call for accurate pairing and length enforcement if template is available
+        unified_args = dict(base_args)
+        unified_args.update({
+            "PRIMER_PICK_LEFT_PRIMER": 1,
+            "PRIMER_PICK_INTERNAL_OLIGO": 0,
+            "PRIMER_PICK_RIGHT_PRIMER": 1,
+            "PRIMER_NUM_RETURN": num_return,
+        })
+
+        seq_args = {
+            "SEQUENCE_ID": "unified",
+            "SEQUENCE_TEMPLATE": template_seq,
+        }
+
+        # Constrain primers to the user-specified regions using
+        # SEQUENCE_PRIMER_PAIR_OK_REGION_LIST: [[left_start, left_len, right_start, right_len]]
+        # Use -1,-1 for "anywhere" on the unconstrained side.
+        left_start = fwd_pos if fwd_pos != -1 else -1
+        left_len   = len(fwd_region) if fwd_pos != -1 else -1
+        right_start = rev_pos if rev_pos != -1 else -1
+        right_len   = len(rev_region) if rev_pos != -1 else -1
+
+        if left_start != -1 or right_start != -1:
+            seq_args["SEQUENCE_PRIMER_PAIR_OK_REGION_LIST"] = [
+                [left_start, left_len, right_start, right_len]
+            ]
+
+        # design_primers returns pairs in this mode
+        res = p3.design_primers(seq_args, unified_args)
+        
+        num_pairs = int(res.get("PRIMER_PAIR_NUM_RETURNED", 0) or 0)
+        forward_primers = []
+        reverse_primers = []
+        best_pairs = []
+        
+        for i in range(num_pairs):
+            f_seq = res.get(f"PRIMER_LEFT_{i}_SEQUENCE")
+            r_seq = res.get(f"PRIMER_RIGHT_{i}_SEQUENCE")
+            if f_seq and r_seq:
+                f_p = analyze_primer(f_seq, therm_params=therm_params)
+                r_p = analyze_primer(r_seq, therm_params=therm_params)
+                f_coords = res.get(f"PRIMER_LEFT_{i}")
+                r_coords = res.get(f"PRIMER_RIGHT_{i}")
+                
+                forward_primers.append({**f_p, "coords": f_coords})
+                reverse_primers.append({**r_p, "coords": r_coords})
+                
+                pair_info = analyze_pair(f_seq, r_seq, therm_params=therm_params)
+                tm_diff = abs(float(f_p.get("tm") or 0) - float(r_p.get("tm") or 0))
+                het = pair_info.get("heterodimer", {})
+                best_pairs.append({
+                    "forward_seq": f_seq,
+                    "forward_tm": f_p.get("tm"),
+                    "forward_coords": f_coords,
+                    "reverse_seq": r_seq,
+                    "reverse_tm": r_p.get("tm"),
+                    "reverse_coords": r_coords,
+                    "tm_diff": round(tm_diff, 1),
+                    "heterodimer": het,
+                    "product_size": res.get(f"PRIMER_PAIR_{i}_PRODUCT_SIZE"),
+                    "score": res.get(f"PRIMER_PAIR_{i}_PENALTY", 0),
+                })
+        
+        if not best_pairs:
+            explain = res.get("PRIMER_LEFT_EXPLAIN", "") or res.get("PRIMER_PAIR_EXPLAIN", "No valid pairs found.")
+            return jsonify({"error": explain}), 404
+
+        return jsonify({
+            "forward_primers": forward_primers,
+            "reverse_primers": reverse_primers,
+            "best_pairs": best_pairs,
+        })
+
+    # Independent design (deprecated/fallback)
     # Forward (LEFT) primers
     fwd_args = dict(base_args)
     fwd_args["PRIMER_PICK_LEFT_PRIMER"] = 1
@@ -743,9 +835,23 @@ def design_probe():
     })
 
     if cond:
-        # Override with user specified probe-specific Tm/Len if provided
-        # (Though we might just use the same general len/tm for now or dedicated probe inputs)
-        pass
+        # Override with user-specified probe Tm/Len/GC if provided
+        if "probe_tm_min" in cond:
+            base_args["PRIMER_INTERNAL_MIN_TM"] = float(cond["probe_tm_min"])
+        if "probe_tm_opt" in cond:
+            base_args["PRIMER_INTERNAL_OPT_TM"] = float(cond["probe_tm_opt"])
+        if "probe_tm_max" in cond:
+            base_args["PRIMER_INTERNAL_MAX_TM"] = float(cond["probe_tm_max"])
+        if "probe_len_min" in cond:
+            base_args["PRIMER_INTERNAL_MIN_SIZE"] = int(cond["probe_len_min"])
+        if "probe_len_opt" in cond:
+            base_args["PRIMER_INTERNAL_OPT_SIZE"] = int(cond["probe_len_opt"])
+        if "probe_len_max" in cond:
+            base_args["PRIMER_INTERNAL_MAX_SIZE"] = int(cond["probe_len_max"])
+        if "probe_gc_min" in cond:
+            base_args["PRIMER_INTERNAL_MIN_GC"] = float(cond["probe_gc_min"])
+        if "probe_gc_max" in cond:
+            base_args["PRIMER_INTERNAL_MAX_GC"] = float(cond["probe_gc_max"])
 
     base_args.update({
         "PRIMER_PICK_LEFT_PRIMER": 0,
@@ -763,7 +869,9 @@ def design_probe():
     for i in range(num_probes):
         seq = probe_result.get(f"PRIMER_INTERNAL_{i}_SEQUENCE", "")
         if seq:
-            probes.append(analyze_primer(seq, therm_params=therm_params))
+            p_p = analyze_primer(seq, therm_params=therm_params)
+            coords = probe_result.get(f"PRIMER_INTERNAL_{i}")
+            probes.append({**p_p, "coords": coords})
 
     if not probes:
         explain = probe_result.get("PRIMER_INTERNAL_OLIGO_EXPLAIN", "")

@@ -573,6 +573,16 @@ def design_from_sequence():
 
     # Apply user-supplied conditions (if any)
     cond = data.get("conditions") or {}
+    adv = cond.get("advanced") or {}
+
+    # Map advanced/thermo params
+    therm_params = {
+        "mv_conc": float(adv.get("mv_conc", 50.0)),
+        "dv_conc": float(adv.get("dv_conc", 1.5)),
+        "dntp_conc": float(adv.get("dntp_conc", 0.2)),
+        "dna_conc": float(adv.get("dna_conc", 50.0)),
+    }
+
     if cond:
         base_args["PRIMER_MIN_TM"]  = float(cond.get("tm_min",  base_args["PRIMER_MIN_TM"]))
         base_args["PRIMER_OPT_TM"]  = float(cond.get("tm_opt",  base_args["PRIMER_OPT_TM"]))
@@ -584,8 +594,27 @@ def design_from_sequence():
         base_args["PRIMER_MAX_GC"]  = float(cond.get("gc_max",  base_args["PRIMER_MAX_GC"]))
 
     num_return = int(cond.get("num_return", 5))
-    base_args["PRIMER_NUM_RETURN"] = num_return
-    base_args["PRIMER_PICK_INTERNAL_OLIGO"] = 0
+    base_args.update({
+        "PRIMER_NUM_RETURN": num_return,
+        "PRIMER_PICK_INTERNAL_OLIGO": 0,
+        "PRIMER_SALT_MONOVALENT": therm_params["mv_conc"],
+        "PRIMER_SALT_DIVALENT": therm_params["dv_conc"],
+        "PRIMER_DNTP_CONC": therm_params["dntp_conc"],
+        "PRIMER_DNA_CONC": therm_params["dna_conc"],
+        "PRIMER_MAX_POLY_X": int(adv.get("max_poly_x", 5)),
+        "PRIMER_MAX_NS_ACCEPTED": int(adv.get("max_ns", 0)),
+    })
+
+    # Amplicon length constraint
+    amp_len = data.get("amplicon_target")
+    amp_dev = data.get("amplicon_deviation")
+    if amp_len is not None:
+        try:
+            L = int(amp_len)
+            D = int(amp_dev or 50)
+            base_args["PRIMER_PRODUCT_SIZE_RANGE"] = [[max(50, L - D), L + D]]
+        except: pass
+
 
     # Forward (LEFT) primers
     fwd_args = dict(base_args)
@@ -601,7 +630,7 @@ def design_from_sequence():
     for i in range(num_fwd):
         seq = fwd_result.get(f"PRIMER_LEFT_{i}_SEQUENCE", "")
         if seq:
-            forward_primers.append(analyze_primer(seq))
+            forward_primers.append(analyze_primer(seq, therm_params=therm_params))
 
     # Reverse (RIGHT) primers
     rev_args = dict(base_args)
@@ -617,7 +646,7 @@ def design_from_sequence():
     for i in range(num_rev):
         seq = rev_result.get(f"PRIMER_RIGHT_{i}_SEQUENCE", "")
         if seq:
-            reverse_primers.append(analyze_primer(seq))
+            reverse_primers.append(analyze_primer(seq, therm_params=therm_params))
 
     # Manual pairing
     best_pairs = []
@@ -625,7 +654,7 @@ def design_from_sequence():
         combos = []
         for fp in forward_primers:
             for rp in reverse_primers:
-                pair_info = analyze_pair(fp["sequence"], rp["sequence"])
+                pair_info = analyze_pair(fp["sequence"], rp["sequence"], therm_params=therm_params)
                 tm_diff = abs(float(fp.get("tm") or 0) - float(rp.get("tm") or 0))
                 het = pair_info.get("heterodimer", {})
                 het_dg = float(het.get("dg") or 0)
@@ -658,6 +687,90 @@ def design_from_sequence():
         "reverse_primers": reverse_primers,
         "best_pairs": best_pairs,
     })
+
+
+@app.route("/design_probe", methods=["POST"])
+def design_probe():
+    """
+    Design internal oligos (TaqMan probes) from a user-provided sequence region.
+    """
+    data = request.json or {}
+
+    def clean_seq(s):
+        s = (s or "").strip().upper().replace(" ", "").replace("\n", "")
+        return "".join(c for c in s if c in "ACGTN")
+
+    probe_region = clean_seq(data.get("probe_region", ""))
+
+    if len(probe_region) < 15:
+        return jsonify({"error": "Probe region too short (need at least 15 bp)"}), 400
+
+    from primer_utils import default_primer3_args, analyze_primer
+    import primer3 as p3
+
+    base_args = default_primer3_args()
+
+    # TaqMan specific defaults (generally higher Tm than primers)
+    base_args.update({
+        "PRIMER_INTERNAL_MIN_TM": 65.0,
+        "PRIMER_INTERNAL_OPT_TM": 70.0,
+        "PRIMER_INTERNAL_MAX_TM": 75.0,
+        "PRIMER_INTERNAL_MIN_SIZE": 18,
+        "PRIMER_INTERNAL_OPT_SIZE": 22,
+        "PRIMER_INTERNAL_MAX_SIZE": 30,
+        "PRIMER_INTERNAL_MIN_GC": 30.0,
+        "PRIMER_INTERNAL_MAX_GC": 80.0,
+    })
+
+    # Apply user-supplied conditions
+    cond = data.get("conditions") or {}
+    adv = cond.get("advanced") or {}
+    
+    # Map advanced/thermo params
+    therm_params = {
+        "mv_conc": float(adv.get("mv_conc", 50.0)),
+        "dv_conc": float(adv.get("dv_conc", 1.5)),
+        "dntp_conc": float(adv.get("dntp_conc", 0.2)),
+        "dna_conc": float(adv.get("dna_conc", 50.0)),
+    }
+    
+    # Sync base_args with thermo params for Primer3 engine
+    base_args.update({
+        "PRIMER_SALT_MONOVALENT": therm_params["mv_conc"],
+        "PRIMER_SALT_DIVALENT": therm_params["dv_conc"],
+        "PRIMER_DNTP_CONC": therm_params["dntp_conc"],
+        "PRIMER_DNA_CONC": therm_params["dna_conc"],
+    })
+
+    if cond:
+        # Override with user specified probe-specific Tm/Len if provided
+        # (Though we might just use the same general len/tm for now or dedicated probe inputs)
+        pass
+
+    base_args.update({
+        "PRIMER_PICK_LEFT_PRIMER": 0,
+        "PRIMER_PICK_RIGHT_PRIMER": 0,
+        "PRIMER_PICK_INTERNAL_OLIGO": 1,
+        "PRIMER_NUM_RETURN": int(cond.get("num_return", 5)),
+    })
+
+    probe_result = p3.design_primers(
+        {"SEQUENCE_ID": "probe_region", "SEQUENCE_TEMPLATE": probe_region}, base_args
+    )
+    
+    num_probes = int(probe_result.get("PRIMER_INTERNAL_NUM_RETURNED", 0) or 0)
+    probes = []
+    for i in range(num_probes):
+        seq = probe_result.get(f"PRIMER_INTERNAL_{i}_SEQUENCE", "")
+        if seq:
+            probes.append(analyze_primer(seq, therm_params=therm_params))
+
+    if not probes:
+        explain = probe_result.get("PRIMER_INTERNAL_OLIGO_EXPLAIN", "")
+        return jsonify({"error": f"No probes found. {explain}"}), 404
+
+    return jsonify({"probes": probes})
+
 
 
 if __name__ == "__main__":

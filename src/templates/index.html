@@ -896,12 +896,12 @@
                 <div class="grid grid-cols-3 gap-2">
                   <div>
                     <label class="block text-xs text-slate-500 dark:text-slate-400">Min</label>
-                    <input type="number" id="probeTmMin" value="65" step="0.5" min="40" max="90"
+                    <input type="number" id="probeTmMin" value="55" step="0.5" min="40" max="90"
                       class="w-full rounded-md border-slate-300 bg-white text-slate-900 shadow-sm text-xs px-2 py-1 border dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100">
                   </div>
                   <div>
                     <label class="block text-xs text-slate-500 dark:text-slate-400">Optimal</label>
-                    <input type="number" id="probeTmOpt" value="70" step="0.5" min="40" max="90"
+                    <input type="number" id="probeTmOpt" value="60" step="0.5" min="40" max="90"
                       class="w-full rounded-md border-slate-300 bg-white text-slate-900 shadow-sm text-xs px-2 py-1 border dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100">
                   </div>
                   <div>
@@ -928,7 +928,7 @@
                   </div>
                   <div>
                     <label class="block text-xs text-slate-500 dark:text-slate-400">Max</label>
-                    <input type="number" id="probeLenMax" value="30" step="1" min="10" max="50"
+                    <input type="number" id="probeLenMax" value="35" step="1" min="10" max="50"
                       class="w-full rounded-md border-slate-300 bg-white text-slate-900 shadow-sm text-xs px-2 py-1 border dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100">
                   </div>
                 </div>
@@ -939,7 +939,7 @@
                 <div class="grid grid-cols-2 gap-2">
                   <div>
                     <label class="block text-xs text-slate-500 dark:text-slate-400">Min</label>
-                    <input type="number" id="probeGcMin" value="30" step="1" min="0" max="100"
+                    <input type="number" id="probeGcMin" value="20" step="1" min="0" max="100"
                       class="w-full rounded-md border-slate-300 bg-white text-slate-900 shadow-sm text-xs px-2 py-1 border dark:bg-slate-700 dark:border-slate-600 dark:text-slate-100">
                   </div>
                   <div>
@@ -1706,13 +1706,40 @@
 
         if (selectedGeneForward && selectedGeneReverse) {
           const len = selectedGeneReverse.end - selectedGeneForward.start;
-          const isInvalid = (len < 50 || (ampTarget && Math.abs(len - ampTarget) > ampDev));
-          const color = isInvalid ? 'text-red-600 font-bold' : 'text-slate-900';
+          let color = 'text-slate-900';
+          let warningHTML = '';
+
+          if (ampTarget && Math.abs(len - ampTarget) > ampDev) {
+            color = 'text-red-600 font-bold';
+            warningHTML = '<br><span class="text-xs text-red-500">⚠ Outside desired range</span>';
+          }
+          if (len < 50) {
+            color = 'text-red-600 font-bold';
+            warningHTML = '<br><span class="text-xs text-red-500">⚠ Amplicon is too short</span>';
+          }
+
+          let lenHTML = `<strong>Amplicon</strong>: <span class="mono ${color}">${len} bp</span>${warningHTML}`;
+
+          // If showing introns, label the total distance as DNA, and sum only exon lengths for mRNA
+          if (currentSequenceData && currentSequenceData.include_introns) {
+            lenHTML = `<strong>Amplicon (DNA/Genomic)</strong>: <span class="mono ${color}">${len} bp</span>${warningHTML}`;
+            let splicedLen = 0;
+            const exons = (currentSequenceData.annotations || []).filter(a => a.type === 'exon');
+            for (const ex of exons) {
+              const eS = Math.max(selectedGeneForward.start, ex.start);
+              const eE = Math.min(selectedGeneReverse.end, ex.end);
+              if (eE > eS) {
+                splicedLen += (eE - eS);
+              }
+            }
+            if (splicedLen > 0 && splicedLen !== len) {
+              lenHTML += `<br><strong>Amplicon (mRNA/Spliced)</strong>: <span class="mono text-slate-900">${splicedLen} bp</span>`;
+            }
+          }
 
           parts.push(`
             <div style="margin-top:10px; padding-top:10px; border-top: 1px solid #e2e8f0;">
-              <strong>Amplicon</strong>: <span class="mono ${color}">${len} bp</span>
-              ${isInvalid ? '<br><span class="text-xs text-red-500">⚠ Outside desired range</span>' : ''}
+              ${lenHTML}
               <div class="mt-2">
                 <button onclick="findProbesInAmplicon()" class="px-3 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 transition">
                   Find Probes in this Amplicon
@@ -2141,7 +2168,7 @@
               const intronSeq = seq.substring(last, exS);
               const intronLen = intronSeq.length;
               const truncEl6 = document.getElementById('truncateIntrons');
-              const truncate = truncateEl6 ? truncateEl6.checked : false;
+              const truncate = truncEl6 ? truncEl6.checked : false;
               if (truncate) {
                 html += `<span class="seq-intron-placeholder" title="Intron sequence (${intronLen}bp): ${intronSeq.substring(0, 30)}..." data-label="...intron ${intronLen}bp..."></span>`;
               } else {
@@ -2747,13 +2774,13 @@
 
         // Perform design
         const conditions = {
-          probe_tm_min: parseFloat(document.getElementById('probeTmMin').value) || 65,
-          probe_tm_opt: parseFloat(document.getElementById('probeTmOpt').value) || 70,
+          probe_tm_min: parseFloat(document.getElementById('probeTmMin').value) || 55,
+          probe_tm_opt: parseFloat(document.getElementById('probeTmOpt').value) || 60,
           probe_tm_max: parseFloat(document.getElementById('probeTmMax').value) || 75,
           probe_len_min: parseInt(document.getElementById('probeLenMin').value) || 18,
           probe_len_opt: parseInt(document.getElementById('probeLenOpt').value) || 22,
-          probe_len_max: parseInt(document.getElementById('probeLenMax').value) || 30,
-          probe_gc_min: parseFloat(document.getElementById('probeGcMin').value) || 30,
+          probe_len_max: parseInt(document.getElementById('probeLenMax').value) || 35,
+          probe_gc_min: parseFloat(document.getElementById('probeGcMin').value) || 20,
           probe_gc_max: parseFloat(document.getElementById('probeGcMax').value) || 80,
           advanced: {
             mv_conc: document.getElementById('advMvConc').value,
@@ -2969,6 +2996,9 @@
           if (actualLen < (ampTarget - ampDev) || actualLen > (ampTarget + ampDev)) {
             const proceed = confirm(`Warning: The distance between provided regions (${actualLen} bp) is outside your range (${ampTarget} ± ${ampDev} bp). Proceed anyway?`);
             if (!proceed) return;
+            // Ignore strict limits so that primer3 can still return primers within the chosen regions.
+            ampTarget = null;
+            ampDev = null;
           }
         }
 

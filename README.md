@@ -65,16 +65,16 @@ Once a sequence is loaded, Primerool enabels user to use two interactive views:
 
 Click any exon in the Feature Map to jump to it in the Sequence Map.
 
-### 6. Four Primer Design Modes
+### 6. Five Primer Design Modes
 
 #### WGA (Whole-Genome Amplification)
-Designs primer pairs in the **flanking regions** (upstream + downstream) to amplify the entire gene locus. Uses Primer3 with configurable settings.
+Designs primer pairs in the **flanking regions** (upstream + downstream) to amplify the entire gene locus. Uses relaxed GC% (20–80%) and Tm (52–68°C) constraints suited to genomic sequence.
 
 #### Internal (Exon–Exon Junction)
-Designs **splice-spanning primers** that cross exon–exon junctions. Ideal for **qRT-PCR** — ensures that only cDNA (not genomic DNA) is amplified.
+Designs **splice-spanning primers** that cross exon–exon junctions. Ideal for **qRT-PCR** — ensures that only cDNA (not genomic DNA) is amplified. Configurable overlap (default 6–12 bp) and product size (default 80–220 bp).
 
 #### Design from Sequence (Manual)
-Paste any two sequence regions — one for forward, one for reverse — and Primer3 picks the best primers from each. Includes a collapsible **⚙️ Primer Conditions** panel to customise:
+Paste any two sequence regions — one for forward, one for reverse — and Primer3 picks the best primers from each. Supports a **target amplicon length** so you can specify exactly how long the PCR product should be:
 
 | Parameter | Default |
 |---|---|
@@ -82,9 +82,25 @@ Paste any two sequence regions — one for forward, one for reverse — and Prim
 | Primer Length | 18 / 20 / 25 bp (min / opt / max) |
 | GC Content | 40 – 60 % |
 | Max Primers to Return | 5 |
+| **Target Amplicon Length** | *(optional)* |
+| **Amplicon Deviation** | ± 50 bp |
+
+When a target amplicon length is set, Primer3 constrains the product size range to `[target − deviation, target + deviation]`, giving you control over the exact amplicon size.
+
+#### Probe Design (TaqMan)
+Design **internal oligos (TaqMan-style probes)** from any user-provided sequence region. Probes are designed with higher Tm than flanking primers, as required for hydrolysis probe assays. Configurable via a dedicated **⚙️ Probe Conditions** panel:
+
+| Parameter | Default |
+|---|---|
+| Probe Tm | 65 / 70 / 75 °C (min / opt / max) |
+| Probe Length | 18 / 22 / 30 bp (min / opt / max) |
+| Probe GC Content | 30 – 80 % |
+| Max Probes to Return | 5 |
+
+Each returned probe includes Tm, GC%, length, hairpin ΔG, and homodimer ΔG.
 
 #### Automatic Pairing
-All modes return ranked primer pairs with:
+All primer modes return ranked pairs with:
 - Per-primer stats (Tm, GC%, length)
 - Hairpin and self-dimer analysis (ΔG)
 - Heterodimer analysis for each pair
@@ -196,7 +212,7 @@ No database. No genome files. Everything is fetched on-the-fly.
 2. **Search gene** — type a gene symbol or accession ID → get transcript list
 3. **Configure sequence** — choose transcript, toggle introns/UTRs, set flanking bp
 4. **View sequence** — explore the feature map and sequence map
-5. **Design primers** — pick a mode (WGA, Junction, or Manual) → get ranked pairs
+5. **Design primers** — pick a mode (WGA, Junction, Manual, or Probe) → get ranked pairs
 6. **Use primers** — click "Use" to highlight binding sites on the map
 
 ---

@@ -285,7 +285,9 @@ def get_sequence():
         feature_display = "exons" if include_utr else "cds"
         spliced_seq = api.build_spliced_sequence(tinfo, feature=feature_display, species=species) or ""
         if feature_display == "cds" and not spliced_seq:
-            spliced_seq = ""
+            feature_display = "exons"
+            spliced_seq = api.build_spliced_sequence(tinfo, feature=feature_display, species=species) or ""
+            include_utr = True
 
     else:
         # Spliced display mode
@@ -294,8 +296,13 @@ def get_sequence():
 
         if not gene_seq:
             if feature_display == "cds":
-                return jsonify({"error": "CDS-only requested, but this transcript has no CDS (likely non-coding)."}), 400
-            return jsonify({"error": "Transcript sequence extraction failed"}), 500
+                # Fallback to exons if transcript has no CDS (non-coding)
+                feature_display = "exons"
+                gene_seq = api.build_spliced_sequence(tinfo, feature=feature_display, species=species)
+                include_utr = True
+            
+            if not gene_seq:
+                return jsonify({"error": "Transcript sequence extraction failed"}), 500
 
         spliced_seq = gene_seq
 
@@ -624,7 +631,11 @@ def design_from_sequence():
             L = int(amp_len)
             D = int(amp_dev or 50)
             base_args["PRIMER_PRODUCT_SIZE_RANGE"] = [[max(50, L - D), L + D]]
-        except: pass
+        except:
+            base_args["PRIMER_PRODUCT_SIZE_RANGE"] = [[50, 100000]]
+    else:
+        # Override Primer3's strict default constraint (which is normally ~100-300)
+        base_args["PRIMER_PRODUCT_SIZE_RANGE"] = [[50, 100000]]
 
     # Unified design if coordinates and template are available
     fwd_pos = data.get("fwd_pos", -1)

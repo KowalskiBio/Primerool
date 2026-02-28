@@ -36,11 +36,12 @@ Primerool is a cloud-based, local web application that allows molecular biologis
    - **Feature Map:** Zoomable timeline showing exons, introns, CDS, and UTRs.
    - **Sequence Map:** Full nucleotide sequence with colour-coded annotations, primer binding site highlights, and interactive navigation between features.
 
-6. **Four Primer Design Modes**
-   - **WGA (Whole-Genome Amplification):** Primers in flanking regions for amplifying the entire locus.
-   - **Internal (Exon-Exon Junction):** Splice-spanning primers for qRT-PCR.
-   - **Design from Sequence (Manual):** Targeting specific user-provided forward and reverse regions.
-   - **Automatic Pairing:** Configurable conditions (Tm, Length, GC%).
+6. **Five Primer Design Modes**
+   - **WGA (Whole-Genome Amplification):** Primers in flanking regions for amplifying the entire locus. Relaxed GC% (20–80%) and Tm (52–68°C) for AT/GC-rich genomic regions.
+   - **Internal (Exon-Exon Junction):** Splice-spanning primers for qRT-PCR, with configurable junction overlap (default 6–12 bp) and product size (default 80–220 bp).
+   - **Design from Sequence (Manual):** Targeting specific user-provided forward and reverse regions. Supports **target amplicon length** with a configurable deviation (default ±50 bp), constraining Primer3 to produce products of the desired size.
+   - **Probe Design (TaqMan):** Design internal oligos (hydrolysis probes) from any sequence region. Configurable probe Tm (default 65/70/75°C min/opt/max), length (default 18/22/30 bp), and GC% (default 30–80%). Each probe is reported with Tm, GC%, hairpin ΔG, and homodimer ΔG.
+   - **Automatic Pairing:** Configurable conditions (Tm, Length, GC%) applied across all primer modes, with heterodimer cross-check for each returned pair.
 
 7. **Quality Control**
    - Real-time thermodynamic checking for hairpin formation, self-dimer (homodimer), and heterodimer cross-complementarity using Primer3 engine precision.
@@ -69,7 +70,8 @@ Primerool is a cloud-based, local web application that allows molecular biologis
    - Scroll through the Sequence Map to analyze specific sequence ranges.
 
 6. **Design Primers**
-   - Select a primer design mode (e.g., Exon-Exon Junction for expression profiling, or Manual design).
-   - Adjust primer conditions like Tm and GC% if needed.
-   - Click "Design Primers" and review the ranked primer pairs alongside their QC stats (hairpins, dimers).
-   - Click "Use" on a pair to visually highlight their exact binding sites on the Sequence Map.
+   - Select a primer design mode (e.g., Exon-Exon Junction for expression profiling, Manual design with a target amplicon length, or Probe Design for TaqMan assays).
+   - Adjust primer conditions like Tm, GC%, and amplicon size as needed.
+   - For probe design, paste a sequence region and configure probe Tm, length, and GC% in the Probe Conditions panel.
+   - Click "Design Primers" or "Design Probe" and review the ranked results alongside their QC stats (Tm, GC%, hairpins, dimers, heterodimers).
+   - Click "Use" on a primer pair to visually highlight their exact binding sites on the Sequence Map.

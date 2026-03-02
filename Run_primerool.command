@@ -36,10 +36,10 @@ if ! command -v python3 &> /dev/null; then
             sudo apt-get update -qq && sudo apt-get install -y python3 python3-venv python3-pip
         elif command -v dnf &> /dev/null; then
             echo "Installing Python via dnf..."
-            sudo dnf install -y python3
+            sudo dnf install -y python3 python3-virtualenv
         elif command -v pacman &> /dev/null; then
             echo "Installing Python via pacman..."
-            sudo pacman -Sy --noconfirm python
+            sudo pacman -Sy --noconfirm python python-virtualenv
         else
             echo "Could not detect a package manager. Please install Python 3 manually."
             read -p "Press Enter to exit..."
@@ -62,10 +62,24 @@ if ! command -v python3 &> /dev/null; then
     echo "Python installed successfully."
 fi
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
+# Ensure python3-venv is available on Debian/Ubuntu before creating the venv
+if [ "$(uname -s)" = "Linux" ] && command -v apt-get &> /dev/null; then
+    if ! python3 -c "import venv" &> /dev/null; then
+        echo "Installing python3-venv..."
+        sudo apt-get install -y python3-venv python3-full
+    fi
+fi
+
+# Create virtual environment if it doesn't exist or is broken
+if [ ! -f "venv/bin/activate" ]; then
     echo "Creating virtual environment..."
+    rm -rf venv
     python3 -m venv venv
+    if [ ! -f "venv/bin/activate" ]; then
+        echo "Failed to create virtual environment. Please run: sudo apt install python3-venv python3-full"
+        read -p "Press Enter to exit..."
+        exit 1
+    fi
 fi
 
 # Activate virtual environment

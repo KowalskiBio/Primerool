@@ -64,7 +64,7 @@ fi
 
 # Ensure python3-venv is available on Debian/Ubuntu before creating the venv
 if [ "$(uname -s)" = "Linux" ] && command -v apt-get &> /dev/null; then
-    if ! python3 -c "import venv" &> /dev/null; then
+    if ! python3 -c "import ensurepip" &> /dev/null; then
         echo "Installing python3-venv..."
         sudo apt-get install -y python3-venv python3-full
     fi

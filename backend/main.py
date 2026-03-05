@@ -6,7 +6,8 @@ Flask app backed by Ensembl REST API or NCBI E-utilities.
 import os
 import sys
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, send_from_directory, request, jsonify
+from flask_cors import CORS
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -24,20 +25,21 @@ def _api(source: str):
     return ncbi_api if source == "ncbi" else ensembl_api
 
 
-def get_resource_path(relative_path):
-    """Get absolute path to resource, works for dev and for PyInstaller."""
+def get_frontend_dir():
+    """Get absolute path to built frontend, works for dev and for PyInstaller."""
     if getattr(sys, 'frozen', False):
         if sys.platform == 'darwin' and '.app/Contents/MacOS' in sys.executable:
             base_path = os.path.abspath(os.path.join(os.path.dirname(sys.executable), '..', 'Resources'))
         else:
             base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
     else:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, relative_path)
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    return os.path.join(base_path, "frontend", "dist")
 
-app = Flask(__name__,
-            template_folder=get_resource_path("templates"),
-            static_folder=get_resource_path("static"))
+frontend_dir = get_frontend_dir()
+
+app = Flask(__name__, static_folder=os.path.join(frontend_dir, "assets"))
+CORS(app)
 
 
 from werkzeug.exceptions import HTTPException
@@ -103,8 +105,15 @@ def _junctions_from_blocks(blocks: list) -> list:
 # ---------------------------------------------------------------------------
 
 @app.route("/")
-def index():
-    return render_template("index.html")
+def serve_index():
+    return send_from_directory(frontend_dir, "index.html")
+
+@app.route("/<path:filename>")
+def serve_public_files(filename):
+    if os.path.exists(os.path.join(frontend_dir, filename)):
+        return send_from_directory(frontend_dir, filename)
+    from werkzeug.exceptions import NotFound
+    raise NotFound()
 
 
 @app.route("/blast_sequence", methods=["POST"])
@@ -893,9 +902,21 @@ def design_probe():
 
 
 if __name__ == "__main__":
-    import webview
-
-    # Create the native window, passing the Flask app instance directly
-    window = webview.create_window("Primerool", app, width=1280, height=800, min_size=(800, 600), text_select=True)
-    # Start the application loop  
-    webview.start(private_mode=False)
+    try:
+        import webview
+        # Create the native window, passing the Flask app instance directly
+        window = webview.create_window("Primerool", app, width=1280, height=800, min_size=(800, 600), text_select=True)
+        # Start the application loop  
+        webview.start(private_mode=False)
+    except Exception as e:
+        print(f"\n[!] Failed to start native GUI window: {e}")
+        print("[!] Falling back to standard browser mode...\n")
+        
+        import threading
+        import webbrowser
+        
+        # Open browser after a short delay
+        threading.Timer(1.25, lambda: webbrowser.open("http://127.0.0.1:5050")).start()
+        
+        # Run Flask development server directly
+        app.run(host="127.0.0.1", port=5050, debug=False)

@@ -14,6 +14,7 @@ pub mod design_primers;
 pub mod design_probe;
 pub mod gene;
 pub mod idt;
+pub mod lookup_variant;
 pub mod search_variants;
 pub mod sequence;
 

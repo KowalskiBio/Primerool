@@ -11,10 +11,10 @@
 //! `/design_primers`, `/design_from_sequence`, `/design_probe` are all
 //! wired and golden-fixture-tested (`tests/golden.rs`, `tests/design_golden.rs`).
 //! `/align` and `/design_conserved` (Phase 7), `/idt/token`+`/idt/analyze`
-//! (Phase 8), and `/search_variants`+`/design_arms` (the SNP/ARMS-PCR primer
-//! mode) are wired but not golden-fixture-tested (there's no Python
-//! original to capture a fixture from — these are new surface area, see
-//! the plan). The React frontend (Phase 6c) is served as
+//! (Phase 8), and `/search_variants`+`/lookup_variant`+`/design_arms` (the
+//! SNP/ARMS-PCR primer mode) are wired but not golden-fixture-tested
+//! (there's no Python original to capture a fixture from — these are new
+//! surface area, see the plan). The React frontend (Phase 6c) is served as
 //! static files at `/` via `tower-http::ServeDir` — a fallback service, so
 //! every API route above still takes precedence over it. `GET /_health` is
 //! a minimal placeholder/health route independent of whether a frontend
@@ -68,6 +68,7 @@ pub fn build_router(state: state::AppState) -> Router {
         .route("/design_from_sequence", post(routes::design_from_sequence::design_from_sequence))
         .route("/design_probe", post(routes::design_probe::design_probe))
         .route("/search_variants", post(routes::search_variants::search_variants))
+        .route("/lookup_variant", post(routes::lookup_variant::lookup_variant))
         .route("/design_arms", post(routes::design_arms::design_arms))
         .route("/align", post(routes::align::align))
         .route("/design_conserved", post(routes::design_conserved::design_conserved))

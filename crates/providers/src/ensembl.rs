@@ -32,6 +32,7 @@ const MIN_INTERVAL: Duration = Duration::from_millis(70); // ~14 req/s
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VariantHit {
     pub id: String,
+    pub chrom: String,
     /// 1-based inclusive genomic.
     pub start: u64,
     pub end: u64,
@@ -39,6 +40,12 @@ pub struct VariantHit {
     pub strand: i8,
     pub consequence_type: Option<String>,
     pub clinical_significance: Vec<String>,
+    /// Global minor allele frequency, only available from `/variation/:species/:id`
+    /// (i.e. after `lookup_variant_by_id`) — `/overlap/region` doesn't carry
+    /// per-variant frequency, so hits from `search_variants_in_region` always
+    /// have this as `None` until looked up individually by id.
+    pub minor_allele_freq: Option<f64>,
+    pub minor_allele: Option<String>,
 }
 
 pub struct EnsemblProvider {
@@ -47,6 +54,7 @@ pub struct EnsemblProvider {
     search_gene_cache: Mutex<LruCache<(String, String), Option<GeneSearchResult>>>,
     transcript_cache: Mutex<LruCache<String, Option<TranscriptInfo>>>,
     variant_region_cache: Mutex<LruCache<(String, u64, u64, String), Vec<VariantHit>>>,
+    variant_id_cache: Mutex<LruCache<(String, String), Option<VariantHit>>>,
 }
 
 impl Default for EnsemblProvider {
@@ -63,6 +71,7 @@ impl EnsemblProvider {
             search_gene_cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(256).unwrap())),
             transcript_cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(256).unwrap())),
             variant_region_cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(256).unwrap())),
+            variant_id_cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(256).unwrap())),
         }
     }
 
@@ -80,16 +89,82 @@ impl EnsemblProvider {
 
         let hits: Vec<VariantHit> = data
             .as_array()
-            .map(|arr| arr.iter().map(Self::parse_variant_hit).collect())
+            .map(|arr| arr.iter().map(|v| VariantHit { chrom: chrom.to_string(), ..Self::parse_variant_hit(v) }).collect())
             .unwrap_or_default();
 
         self.variant_region_cache.lock().await.put(cache_key, hits.clone());
         Ok(hits)
     }
 
+    /// `GET /variation/:species/:id` — a known variant looked up directly by
+    /// its database id (an Ensembl/dbSNP rsID, or another catalog's id such
+    /// as a HGMD/COSMIC accession Ensembl recognizes as a synonym). `Ok(None)`
+    /// for "no such id" (Ensembl 400/404 on an unknown id), matching
+    /// `search_gene`'s not-found convention.
+    pub async fn lookup_variant_by_id(&self, variant_id: &str, species: &str) -> Result<Option<VariantHit>, ProviderError> {
+        let variant_id = variant_id.trim();
+        let cache_key = (variant_id.to_string(), species.to_string());
+        if let Some(hit) = self.variant_id_cache.lock().await.get(&cache_key) {
+            return Ok(hit.clone());
+        }
+
+        // `pops=1` — without it Ensembl's top-level `MAF`/`minor_allele`
+        // fields are unpopulated (`null`) for essentially every variant;
+        // the real per-population frequency data only comes through in the
+        // `populations` array this flag adds, see `extract_minor_allele`.
+        let result = match self.get_json(&format!("/variation/{species}/{variant_id}"), &[("pops", "1")]).await {
+            Ok(data) => Self::parse_variant_by_id(variant_id, &data),
+            Err(e) if e.is_not_found(&[400, 404]) => None,
+            Err(e) => return Err(e),
+        };
+
+        self.variant_id_cache.lock().await.put(cache_key, result.clone());
+        Ok(result)
+    }
+
+    /// `/variation/:species/:id`'s response shape is unrelated to
+    /// `/overlap/region`'s (a single object with a `mappings` array and
+    /// `allele_string`, not a flat `alleles` array) — parsed separately from
+    /// `parse_variant_hit` rather than force-fit into one function. Only the
+    /// first mapping is used (matches this endpoint's own default of
+    /// returning just the current-assembly mapping for a plain, unqualified
+    /// request); a variant with zero mappings (e.g. withdrawn/merged ids) has
+    /// no location to report, so it's treated as not found.
+    fn parse_variant_by_id(variant_id: &str, data: &Value) -> Option<VariantHit> {
+        let mapping = data.get("mappings").and_then(|v| v.as_array()).and_then(|arr| arr.first())?;
+        let alleles = mapping
+            .get("allele_string")
+            .and_then(|v| v.as_str())
+            .map(|s| s.split('/').map(str::to_string).collect())
+            .unwrap_or_default();
+        let (minor_allele_freq, minor_allele) = extract_minor_allele(data);
+
+        Some(VariantHit {
+            id: data.get("name").and_then(|v| v.as_str()).unwrap_or(variant_id).to_string(),
+            chrom: mapping.get("seq_region_name").map(value_to_display_string).unwrap_or_default(),
+            start: mapping.get("start").and_then(|v| v.as_u64()).unwrap_or(0),
+            end: mapping.get("end").and_then(|v| v.as_u64()).unwrap_or(0),
+            alleles,
+            strand: mapping.get("strand").and_then(|v| v.as_i64()).unwrap_or(1) as i8,
+            consequence_type: data.get("most_severe_consequence").and_then(|v| v.as_str()).map(str::to_string),
+            clinical_significance: data
+                .get("clinical_significance")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|a| a.as_str().map(str::to_string)).collect())
+                .unwrap_or_default(),
+            minor_allele_freq,
+            minor_allele,
+        })
+    }
+
+    /// `chrom` is left empty here — `/overlap/region`'s per-hit JSON doesn't
+    /// reliably carry it, and the caller already knows it (it's the region
+    /// that was searched), so `search_variants_in_region` fills it in via
+    /// struct-update after calling this.
     fn parse_variant_hit(v: &Value) -> VariantHit {
         VariantHit {
             id: v.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+            chrom: String::new(),
             start: v.get("start").and_then(|x| x.as_u64()).unwrap_or(0),
             end: v.get("end").and_then(|x| x.as_u64()).unwrap_or(0),
             alleles: v
@@ -104,6 +179,10 @@ impl EnsemblProvider {
                 .and_then(|x| x.as_array())
                 .map(|arr| arr.iter().filter_map(|a| a.as_str().map(str::to_string)).collect())
                 .unwrap_or_default(),
+            // `/overlap/region` doesn't return per-variant frequency data;
+            // callers fetch it on demand via `lookup_variant_by_id`.
+            minor_allele_freq: None,
+            minor_allele: None,
         }
     }
 
@@ -325,6 +404,44 @@ fn truthy(v: &Value) -> bool {
         Value::Array(a) => !a.is_empty(),
         Value::Object(o) => !o.is_empty(),
     }
+}
+
+/// Ensembl's top-level `MAF`/`minor_allele` fields on `/variation/:species/:id`
+/// are unpopulated (`null`) for essentially every real-world variant — the
+/// actual frequency data only shows up in the `populations` array (present
+/// when the request included `pops=1`), one entry per (population, allele)
+/// pair. Picks the first population from a small preference list that's
+/// actually present, then reports its lowest-frequency allele as "minor" —
+/// standard 1000 Genomes phase 3 first (Ensembl's traditional global-MAF
+/// source), falling back to gnomAD exomes/genomes for variants 1000G didn't
+/// call. Returns `(None, None)` if none of those populations are present.
+fn extract_minor_allele(data: &Value) -> (Option<f64>, Option<String>) {
+    const PREFERRED_POPULATIONS: [&str; 3] = ["1000GENOMES:phase_3:ALL", "gnomADe:ALL", "gnomADg:ALL"];
+
+    let populations = match data.get("populations").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return (None, None),
+    };
+
+    for pop_name in PREFERRED_POPULATIONS {
+        let mut alleles: Vec<(String, f64)> = populations
+            .iter()
+            .filter(|p| p.get("population").and_then(|v| v.as_str()) == Some(pop_name))
+            .filter_map(|p| {
+                let allele = p.get("allele").and_then(|v| v.as_str())?.to_string();
+                let freq = p.get("frequency").and_then(|v| v.as_f64())?;
+                Some((allele, freq))
+            })
+            .collect();
+        if alleles.is_empty() {
+            continue;
+        }
+        alleles.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let (allele, freq) = alleles.into_iter().next().unwrap();
+        return (Some(freq), Some(allele));
+    }
+
+    (None, None)
 }
 
 fn value_to_display_string(v: &Value) -> String {
@@ -562,5 +679,35 @@ mod tests {
         let t = EnsemblProvider::parse_transcript_details("T1", &data);
         assert_eq!(t.utr5, vec![(81, 100)]); // higher coords = 5' on minus strand
         assert_eq!(t.utr3, vec![(1, 50)]);
+    }
+
+    #[test]
+    fn extract_minor_allele_prefers_1000genomes_all_and_picks_lower_frequency_allele() {
+        let data = serde_json::json!({
+            "populations": [
+                {"population": "1000GENOMES:phase_3:ALL", "allele": "C", "frequency": 0.92},
+                {"population": "1000GENOMES:phase_3:ALL", "allele": "T", "frequency": 0.08},
+                {"population": "gnomADe:ALL", "allele": "T", "frequency": 0.11},
+            ]
+        });
+        assert_eq!(extract_minor_allele(&data), (Some(0.08), Some("T".to_string())));
+    }
+
+    #[test]
+    fn extract_minor_allele_falls_back_to_gnomad_when_1000genomes_absent() {
+        let data = serde_json::json!({
+            "populations": [
+                {"population": "gnomADe:afr", "allele": "T", "frequency": 0.3},
+                {"population": "gnomADe:ALL", "allele": "C", "frequency": 0.85},
+                {"population": "gnomADe:ALL", "allele": "T", "frequency": 0.15},
+            ]
+        });
+        assert_eq!(extract_minor_allele(&data), (Some(0.15), Some("T".to_string())));
+    }
+
+    #[test]
+    fn extract_minor_allele_none_when_no_populations_field() {
+        let data = serde_json::json!({"MAF": null, "minor_allele": null});
+        assert_eq!(extract_minor_allele(&data), (None, None));
     }
 }

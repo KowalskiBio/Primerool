@@ -306,6 +306,199 @@ function computeDraggedInterval(session: DragSession, deltaChars: number, seqLen
   return { start, end };
 }
 
+/** Fallback row width used for exactly one render, before the container
+ * has been measured (see `useResponsiveLineWidth` below). */
+const DEFAULT_LINE_WIDTH = 60;
+/** Ceiling only — deliberately no floor above 1. A floor like "never go
+ * below 30 chars" sounds like a reasonable readability guard, but it
+ * directly fights "never horizontal scroll": in a genuinely narrow
+ * container (a phone-width window, a narrow split pane), forcing 30
+ * characters when only, say, 8 fit doesn't make the row more readable —
+ * it makes ~22 of those characters render past the edge, silently clipped
+ * by `overflow-x-hidden` instead of ever being visible. Respecting
+ * whatever the container actually measures, however small, is what keeps
+ * every character of every row on-screen. */
+const MIN_LINE_WIDTH = 1;
+const MAX_LINE_WIDTH = 140;
+
+/** One contiguous run of same-styled text (or a single interactive
+ * character) queued for row-chunking — a resolved, render-ready form of
+ * `Segment`: `buildCells` below already makes every interactive-vs-plain,
+ * dragging-vs-static decision the old per-render logic used to make
+ * inline, so `buildRows` only ever needs to know how to *slice* a cell's
+ * text at a row boundary, never re-derive styling. */
+interface Cell {
+  text: string;
+  className: string;
+  id?: string;
+  startPos: number;
+  isPlaceholder?: boolean;
+  cursorClass?: string;
+  onMouseDown?: (e: React.MouseEvent<HTMLSpanElement>) => void;
+}
+
+interface Row {
+  startPos: number;
+  pieces: Cell[];
+  isPlaceholder: boolean;
+}
+
+/** Resolves every segment into render-ready `Cell`s. Plain segments stay
+ * as one cell each — cheap, since a full genomic view can be ~19,000
+ * characters across only ~20-50 segments — while an editable or
+ * currently-dragging segment explodes into one cell per character,
+ * exactly the granularity the interactive drag handling already needs
+ * (unifying what used to be two separate per-character code paths: the
+ * inline map in the render loop, and `renderEditableChars`). */
+function buildCells(
+  segments: Segment[],
+  interactive: boolean,
+  dragSession: DragSession | null,
+  deltaChars: number,
+  editableKeys: Set<keyof Selections>,
+  data: SequenceData,
+  selections: Selections,
+  startDrag: (e: React.MouseEvent<HTMLSpanElement>, key: keyof Selections, type: 'move' | 'left' | 'right', sel: Selection) => void,
+): Cell[] {
+  const cells: Cell[] = [];
+
+  for (const s of segments) {
+    if (s.className === 'seq-intron-placeholder') {
+      cells.push({ text: s.text, className: s.className, startPos: s.startPos, isPlaceholder: true });
+      continue;
+    }
+
+    const isDraggingThisKey = interactive && dragSession?.selKey === s.key;
+
+    if (interactive && s.key && editableKeys.has(s.key) && !s.isBuffer) {
+      const sel = selections[s.key]!;
+      const live = isDraggingThisKey ? computeDraggedInterval(dragSession!, deltaChars, regionRawSeq(data, sel.region).length) : { start: sel.start, end: sel.end };
+      const chars = Array.from(s.text);
+      chars.forEach((ch, ci) => {
+        const pos = s.startPos + ci;
+        const within = pos >= live.start && pos < live.end;
+        const className = within ? colorClassName(s.key!) : (s.fallbackClassName ?? s.className);
+        const isEdge = ci === 0 || ci === chars.length - 1;
+        const type: 'move' | 'left' | 'right' = ci === 0 ? 'left' : ci === chars.length - 1 ? 'right' : 'move';
+        cells.push({ text: ch, className, startPos: pos, cursorClass: isEdge ? 'cursor-ew-resize' : 'cursor-grab', onMouseDown: (e) => startDrag(e, s.key!, type, sel) });
+      });
+      continue;
+    }
+
+    if (isDraggingThisKey && s.isBuffer) {
+      const sel = selections[s.key!]!;
+      const live = computeDraggedInterval(dragSession!, deltaChars, regionRawSeq(data, sel.region).length);
+      const chars = Array.from(s.text);
+      chars.forEach((ch, ci) => {
+        const pos = s.startPos + ci;
+        const within = pos >= live.start && pos < live.end;
+        const className = within ? colorClassName(s.key!) : (s.fallbackClassName ?? s.className);
+        cells.push({ text: ch, className, startPos: pos });
+      });
+      continue;
+    }
+
+    cells.push({ text: s.text, className: s.className, id: s.id, startPos: s.startPos });
+  }
+
+  return cells;
+}
+
+/** Chunks `cells` into fixed-`lineWidth` rows for the position gutter.
+ * Every cell already carries the real `startPos` its own originating
+ * segment computed (a flank segment resets to 0 at its own start; a gene
+ * segment runs continuously across the whole gene) — a row's number is
+ * just whichever cell (or slice of one) happens to open it, so no
+ * separate running position counter is needed here. An intron-truncation
+ * placeholder always gets its own row: its visible text is far shorter
+ * than the real span it stands in for, so folding it into normal
+ * character counting would make that row's width — and every row after it
+ * mid-row — meaningless. */
+function buildRows(cells: Cell[], lineWidth: number): Row[] {
+  const rows: Row[] = [];
+  let current: Cell[] = [];
+  let currentLen = 0;
+  let rowStart = 0;
+
+  function flush() {
+    if (current.length > 0) {
+      rows.push({ startPos: rowStart, pieces: current, isPlaceholder: false });
+      current = [];
+      currentLen = 0;
+    }
+  }
+
+  for (const cell of cells) {
+    if (cell.isPlaceholder) {
+      flush();
+      rows.push({ startPos: cell.startPos, pieces: [cell], isPlaceholder: true });
+      continue;
+    }
+
+    let remaining = cell.text;
+    let consumed = 0;
+    let firstPiece = true;
+    while (remaining.length > 0) {
+      if (currentLen === 0) rowStart = cell.startPos + consumed;
+      const take = remaining.slice(0, lineWidth - currentLen);
+      current.push({ text: take, className: cell.className, id: firstPiece ? cell.id : undefined, startPos: cell.startPos + consumed, cursorClass: cell.cursorClass, onMouseDown: cell.onMouseDown });
+      firstPiece = false;
+      currentLen += take.length;
+      consumed += take.length;
+      remaining = remaining.slice(take.length);
+      if (currentLen >= lineWidth) flush();
+    }
+  }
+  flush();
+  return rows;
+}
+
+/** Recomputes how many characters fit in one row whenever the container
+ * resizes (window resize, sidebar/density toggle, etc.) by measuring two
+ * hidden probe elements built from the exact same classes the real
+ * gutter/character spans use — more reliable than assuming a pixel width
+ * from font-size, since it automatically tracks the actual rendered font
+ * (loading, zoom, any future style tweak) instead of a guess. */
+function useResponsiveLineWidth(containerRef: React.RefObject<HTMLDivElement | null>, gutterProbeRef: React.RefObject<HTMLSpanElement | null>, charProbeRef: React.RefObject<HTMLSpanElement | null>): number {
+  const [lineWidth, setLineWidth] = useState(DEFAULT_LINE_WIDTH);
+
+  useEffect(() => {
+    function recompute() {
+      const container = containerRef.current;
+      const gutter = gutterProbeRef.current;
+      const char = charProbeRef.current;
+      if (!container || !gutter || !char) return;
+      const charWidth = char.getBoundingClientRect().width;
+      const gutterWidth = gutter.getBoundingClientRect().width;
+      if (!charWidth) return;
+      // Deliberately under-fill by two whole characters' width: one purely
+      // as overflow-safety margin (a "never horizontal scroll" requirement
+      // can't rely on font-metric measurement being pixel-perfect —
+      // sub-pixel layout, a scrollbar appearing/disappearing between
+      // measurements, browser-specific rounding — one character of slack
+      // makes those errors harmless instead of needing to be exactly
+      // right), the other purely cosmetic (filling a row to the very last
+      // pixel reads as cramped — a little unused space on the right is
+      // what makes it look like a designed gutter/margin instead of text
+      // that just happens to stop where the container does).
+      const available = container.clientWidth - gutterWidth - charWidth * 2;
+      const chars = Math.floor(available / charWidth);
+      setLineWidth(Math.min(MAX_LINE_WIDTH, Math.max(MIN_LINE_WIDTH, chars)));
+    }
+
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    if (containerRef.current) ro.observe(containerRef.current);
+    window.addEventListener('resize', recompute);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', recompute);
+    };
+  }, [containerRef, gutterProbeRef, charProbeRef]);
+
+  return lineWidth;
+}
+
 interface Props {
   data: SequenceData;
   selections: Selections;
@@ -327,6 +520,10 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   // especially) can invoke updater functions more than once to verify
   // they're pure, which was silently double-firing the commit/analyze call.
   const deltaCharsRef = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const gutterProbeRef = useRef<HTMLSpanElement>(null);
+  const charProbeRef = useRef<HTMLSpanElement>(null);
+  const lineWidth = useResponsiveLineWidth(containerRef, gutterProbeRef, charProbeRef);
 
   const segments = useMemo(() => {
     const up = flankSegments(data.upstream_seq || '', 'up', data, selections);
@@ -408,19 +605,8 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     setDeltaChars(0);
   }
 
-  function renderEditableChars(s: Segment, segIdx: number, live: { start: number; end: number }) {
-    const chars = Array.from(s.text);
-    return chars.map((ch, ci) => {
-      const pos = s.startPos + ci;
-      const within = pos >= live.start && pos < live.end;
-      const className = within ? colorClassName(s.key!) : (s.fallbackClassName ?? s.className);
-      return (
-        <span key={`${segIdx}-${ci}`} className={className}>
-          {ch}
-        </span>
-      );
-    });
-  }
+  const cells = buildCells(segments, interactive, dragSession, deltaChars, editableKeys, data, selections, startDrag);
+  const rows = buildRows(cells, lineWidth);
 
   const modeText = data.include_introns
     ? 'Genomic DNA (with introns; CDS bold, UTR highlighted)'
@@ -440,48 +626,51 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         <p>
           <strong>Flanking:</strong> {data.upstream_len} bp upstream, {data.downstream_len} bp downstream
         </p>
+        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+          Numbers on the left mark each row's first position — 0-based from the start of its own region (upstream flank, gene, or downstream flank).
+        </p>
       </div>
       <div
         id="sequence-map"
-        className="sequence-viewer bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-4 text-sm overflow-y-auto max-h-[520px] text-slate-800 dark:text-slate-200"
+        ref={containerRef}
+        className="sequence-viewer relative bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-4 text-sm overflow-y-auto overflow-x-hidden max-h-[520px] text-slate-800 dark:text-slate-200"
       >
-        {segments.map((s, i) => {
-          const isDraggingThisKey = interactive && dragSession?.selKey === s.key;
-
-          if (interactive && s.key && editableKeys.has(s.key) && !s.isBuffer) {
-            const sel = selections[s.key]!;
-            const live = isDraggingThisKey ? computeDraggedInterval(dragSession!, deltaChars, regionRawSeq(data, sel.region).length) : { start: sel.start, end: sel.end };
-            const chars = Array.from(s.text);
-            return chars.map((ch, ci) => {
-              const pos = s.startPos + ci;
-              const within = pos >= live.start && pos < live.end;
-              const className = within ? colorClassName(s.key!) : (s.fallbackClassName ?? s.className);
-              const isEdge = ci === 0 || ci === chars.length - 1;
-              const type: 'move' | 'left' | 'right' = ci === 0 ? 'left' : ci === chars.length - 1 ? 'right' : 'move';
-              return (
-                <span
-                  key={`${i}-${ci}`}
-                  className={`${className} ${isEdge ? 'cursor-ew-resize' : 'cursor-grab'}`}
-                  onMouseDown={(e) => startDrag(e, s.key!, type, sel)}
-                >
-                  {ch}
+        {/* Unrendered (out of flow, invisible) — measured only, to figure
+         * out how many characters actually fit in one row of this
+         * container at its current width/font, so rows can fill the
+         * available space instead of wrapping at an arbitrary fixed
+         * count. `relative` on the container above makes it the probes'
+         * (and every row's) positioning/containing-block context, so
+         * nothing here can ever leak width to an ancestor and cause page-
+         * level horizontal scroll; `overflow-x-hidden` (not `-auto`) below
+         * makes "never horizontal scroll" a hard guarantee rather than a
+         * best-effort of the width math above — if a row's content is
+         * ever a hair wider than computed (a rounding edge case), it's
+         * silently clipped instead of ever showing a scrollbar. */}
+        <span ref={gutterProbeRef} aria-hidden className="select-none pl-1 pr-3 text-right tabular-nums shrink-0 min-w-[5.5ch]" style={{ position: 'absolute', visibility: 'hidden', whiteSpace: 'pre' }}>
+          -00000
+        </span>
+        {/* `fontWeight: 700` deliberately — `seq-cds`/`seq-primer`/`seq-probe`
+         * (see `index.css`) all render bold, and bold glyphs are wider than
+         * regular ones even in a true monospace family. Measuring the
+         * widest weight actually used, not just the default one, is what
+         * keeps CDS/primer/probe rows from being sized using a narrower
+         * character than what they actually render. */}
+        <span ref={charProbeRef} aria-hidden style={{ position: 'absolute', visibility: 'hidden', whiteSpace: 'pre', fontWeight: 700 }}>
+          0
+        </span>
+        {rows.map((row, ri) => (
+          <div key={ri} className="flex whitespace-pre">
+            <span className="select-none pl-1 pr-3 text-right text-slate-400 dark:text-slate-600 tabular-nums shrink-0 min-w-[5.5ch]">{row.startPos}</span>
+            <span>
+              {row.pieces.map((p, pi) => (
+                <span key={pi} className={`${p.className}${p.cursorClass ? ` ${p.cursorClass}` : ''}`} id={p.id} onMouseDown={p.onMouseDown}>
+                  {p.text}
                 </span>
-              );
-            });
-          }
-
-          if (isDraggingThisKey && s.isBuffer) {
-            const sel = selections[s.key!]!;
-            const live = computeDraggedInterval(dragSession!, deltaChars, regionRawSeq(data, sel.region).length);
-            return renderEditableChars(s, i, live);
-          }
-
-          return (
-            <span key={i} className={s.className} id={s.id}>
-              {s.text}
+              ))}
             </span>
-          );
-        })}
+          </div>
+        ))}
       </div>
     </div>
   );

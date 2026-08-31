@@ -8,8 +8,8 @@ export interface VariantHit {
   /** 1-based inclusive genomic. */
   start: number;
   end: number;
-  /** Order NOT guaranteed ref-first by Ensembl — the UI must let the user
-   * confirm which allele is ref vs alt, never assume `alleles[0]`. */
+  /** Order NOT guaranteed ref-first by either provider — the UI must let
+   * the user confirm which allele is ref vs alt, never assume `alleles[0]`. */
   alleles: string[];
   strand: number;
   consequence_type: string | null;
@@ -25,6 +25,9 @@ export interface VariantHit {
 export interface SearchVariantsRequest {
   chrom: string;
   species: string;
+  /** 'ensembl' (default) or 'ncbi' — same source toggle used for gene
+   * sequence lookup, see `SequenceData`'s `api_source`. */
+  api_source: string;
   /** 1-based inclusive genomic. */
   start: number;
   end: number;
@@ -39,18 +42,19 @@ export function searchVariants(req: SearchVariantsRequest): Promise<SearchVarian
 }
 
 export interface LookupVariantRequest {
-  /** An Ensembl/dbSNP rsID, or another catalog id Ensembl recognizes
-   * (e.g. a HGMD/COSMIC accession). */
+  /** An rsID, or another catalog id the chosen source recognizes (e.g. a
+   * HGMD/COSMIC accession, Ensembl-only). */
   variant_id: string;
   species: string;
+  api_source: string;
 }
 
 export interface LookupVariantResponse {
   variant: VariantHit;
 }
 
-/** 404s (via `ApiError`) when the id isn't found in Ensembl for the given
- * species — same not-found convention as `searchGene`. */
+/** 404s (via `ApiError`) when the id isn't found in the chosen source for
+ * the given species — same not-found convention as `searchGene`. */
 export function lookupVariant(req: LookupVariantRequest): Promise<LookupVariantResponse> {
   return postJson<LookupVariantResponse>('/lookup_variant', req);
 }

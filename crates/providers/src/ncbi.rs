@@ -22,10 +22,31 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::species_map::ensembl_to_binomial_or_guess;
-use crate::{revcomp, Feature, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo, TranscriptSummary};
+use crate::{revcomp, Feature, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo, TranscriptSummary, VariantHit};
 
 const EUTILS: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const MIN_INTERVAL: Duration = Duration::from_millis(340); // ~3 req/s, no API key
+
+/// Caps how many `db=snp` `esearch` hits a region search will pull details
+/// for. Unlike Ensembl's single `/overlap/region` call, satisfying a region
+/// search here is two round-trips (`esearch` for ids, then one batched
+/// `esummary` for all of them) — a low, single-digit-req/s-rate-limited API
+/// with no retry, so this stays a single `esummary` batch rather than
+/// chunking across many, which would multiply the very latency this
+/// provider exists to avoid. A region with more hits than this is
+/// silently truncated to the first `MAX_REGION_HITS` (dbSNP's own id
+/// order), same trade-off UI-side pagination already makes peace with.
+const MAX_REGION_HITS: usize = 200;
+
+/// Reference cohorts trusted for a "global" minor allele frequency, in
+/// preference order — matches `ensembl::extract_minor_allele`'s own
+/// preference list where the underlying cohorts overlap (1000 Genomes)
+/// specifically so the same variant reports the same frequency regardless
+/// of which provider answered the search. `global_mafs` entries can be a
+/// single handle's one-off submission (e.g. a study with `count: 1`), so
+/// this doesn't fall back to "whatever's present" the way that would
+/// invite noise from a single observation.
+const PREFERRED_STUDIES: [&str; 5] = ["1000Genomes", "1000Genomes_30X", "GnomAD_exomes", "GnomAD_genomes", "TOPMED"];
 
 pub struct NcbiProvider {
     client: reqwest::Client,
@@ -119,6 +140,120 @@ impl NcbiProvider {
         )
         .await
     }
+
+    /// `esearch(db=snp)` by chromosome + position range, then one batched
+    /// `esummary` for every hit's details — the two-round-trip analogue of
+    /// Ensembl's single `/overlap/region?feature=variation` call (dbSNP's
+    /// E-utils has no one-shot spatial-overlap endpoint). An empty result
+    /// is the normal "no known variants here" case, not an error.
+    pub async fn search_variants_in_region(&self, chrom: &str, start: u64, end: u64, species: &str) -> Result<Vec<VariantHit>, ProviderError> {
+        let organism = ensembl_to_binomial_or_guess(species);
+        let term = format!("{chrom}[chr] AND {start}:{end}[chrpos] AND {organism}[orgn]");
+        let retmax = MAX_REGION_HITS.to_string();
+        let esearch = self.get_json(&format!("{EUTILS}/esearch.fcgi"), &[("db", "snp"), ("term", &term), ("retmode", "json"), ("retmax", &retmax)]).await?;
+
+        let ids: Vec<String> = esearch["esearchresult"]["idlist"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let id_list = ids.join(",");
+        let esummary = self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "snp"), ("id", &id_list), ("retmode", "json")]).await?;
+        let result = &esummary["result"];
+
+        Ok(ids.iter().filter_map(|id| parse_esummary_variant(&result[id])).collect())
+    }
+
+    /// `esummary(db=snp)` for a single id — accepts either a bare numeric
+    /// dbSNP id or an `rs`-prefixed one (case-insensitive), matching what a
+    /// user would paste from any dbSNP-derived source. `Ok(None)` for "not
+    /// a real/known id", matching `search_gene`'s not-found convention.
+    pub async fn lookup_variant_by_id(&self, variant_id: &str, _species: &str) -> Result<Option<VariantHit>, ProviderError> {
+        let trimmed = variant_id.trim();
+        let numeric_id = if trimmed.len() > 2 && trimmed[..2].eq_ignore_ascii_case("rs") { &trimmed[2..] } else { trimmed };
+        if numeric_id.is_empty() || !numeric_id.bytes().all(|b| b.is_ascii_digit()) {
+            return Ok(None);
+        }
+
+        let esummary = self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "snp"), ("id", numeric_id), ("retmode", "json")]).await?;
+        Ok(parse_esummary_variant(&esummary["result"][numeric_id]))
+    }
+}
+
+/// One `esummary(db=snp)` record -> `VariantHit`. `None` for a uid that
+/// didn't come back at all (rare: an id NCBI's `esearch` returned but
+/// `esummary` doesn't recognize) or is missing the position data
+/// (`chrpos`) a row can't be meaningfully shown without.
+fn parse_esummary_variant(obj: &Value) -> Option<VariantHit> {
+    let snp_id = obj.get("snp_id").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))?;
+    let chrpos = obj.get("chrpos").and_then(|v| v.as_str())?;
+    let (chrom, pos_str) = chrpos.split_once(':')?;
+    let start: u64 = pos_str.parse().ok()?;
+
+    // SPDI (`seq_id:0-based-pos:deleted:inserted`) gives the reference
+    // ("deleted") allele's length, so a multi-base deletion's genomic span
+    // is reported accurately rather than collapsing every variant to a
+    // single-base row. Falls back to a single-base span if `spdi` is
+    // absent/unparseable — `chrpos` alone has no length information.
+    let mut alleles = Vec::new();
+    let mut end = start;
+    if let Some(spdi) = obj.get("spdi").and_then(|v| v.as_str()) {
+        let parts: Vec<&str> = spdi.split(':').collect();
+        if let [_, _, deleted, inserted] = parts[..] {
+            if !deleted.is_empty() {
+                end = start + deleted.len() as u64 - 1;
+                alleles.push(deleted.to_string());
+            }
+            alleles.push(inserted.to_string());
+        }
+    }
+
+    let consequence_type = obj.get("fxn_class").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.split(',').next().unwrap_or(s).to_string());
+
+    // NCBI hyphenates multi-word terms ("likely-benign"); Ensembl (and
+    // this app's display) uses spaces ("likely benign") — normalized here
+    // so the same term reads identically regardless of data source.
+    let clinical_significance = obj
+        .get("clinical_significance")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.split(',').map(|term| term.trim().replace('-', " ")).collect())
+        .unwrap_or_default();
+
+    let (minor_allele_freq, minor_allele) = obj.get("global_mafs").and_then(|v| v.as_array()).map(|mafs| extract_minor_allele(mafs)).unwrap_or((None, None));
+
+    Some(VariantHit {
+        id: format!("rs{snp_id}"),
+        chrom: chrom.to_string(),
+        start,
+        end,
+        alleles,
+        strand: 1,
+        consequence_type,
+        clinical_significance,
+        minor_allele_freq,
+        minor_allele,
+    })
+}
+
+/// `global_mafs` entries look like `{"study": "1000Genomes", "freq":
+/// "T=0.0750799/376"}` — `allele=frequency/allele_count`. Picks the first
+/// preferred-cohort entry present (see `PREFERRED_STUDIES`), not the
+/// largest or first-listed, so a variant lacking any of those trusted
+/// cohorts reports no frequency at all rather than a single handle's
+/// noisy one-off submission.
+fn extract_minor_allele(global_mafs: &[Value]) -> (Option<f64>, Option<String>) {
+    for &study in PREFERRED_STUDIES.iter() {
+        let Some(freq_str) = global_mafs.iter().find(|m| m.get("study").and_then(|v| v.as_str()) == Some(study)).and_then(|m| m.get("freq")).and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if let Some((allele, freq)) = freq_str.split_once('=').and_then(|(allele, rest)| rest.split_once('/').map(|(freq, _count)| (allele, freq))) {
+            if let Ok(freq) = freq.parse::<f64>() {
+                return (Some(freq), Some(allele.to_string()));
+            }
+        }
+    }
+    (None, None)
 }
 
 #[async_trait::async_trait]
@@ -644,5 +779,72 @@ mod tests {
     fn compute_utrs_no_cds_returns_empty() {
         let (utr5, utr3) = compute_utrs(&[(1, 100)], &[], Strand::Plus);
         assert!(utr5.is_empty() && utr3.is_empty());
+    }
+
+    #[test]
+    fn parse_esummary_variant_extracts_snv_with_frequency() {
+        // Shape of a real `esummary(db=snp)` record for rs7412 (trimmed to
+        // the fields this parser reads).
+        let obj = serde_json::json!({
+            "snp_id": 7412,
+            "chr": "19",
+            "chrpos": "19:44908822",
+            "spdi": "NC_000019.10:44908821:C:T",
+            "fxn_class": "missense_variant,coding_sequence_variant",
+            "clinical_significance": "drug-response,risk-factor,benign,likely-benign",
+            "global_mafs": [
+                {"study": "1000Genomes", "freq": "T=0.0750799/376"},
+                {"study": "TOPMED", "freq": "T=0.0781216/20678"},
+            ],
+        });
+        let hit = parse_esummary_variant(&obj).expect("should parse");
+        assert_eq!(hit.id, "rs7412");
+        assert_eq!(hit.chrom, "19");
+        assert_eq!(hit.start, 44908822);
+        assert_eq!(hit.end, 44908822); // single-base deleted_sequence "C" -> span of 1
+        assert_eq!(hit.alleles, vec!["C".to_string(), "T".to_string()]);
+        assert_eq!(hit.consequence_type.as_deref(), Some("missense_variant"));
+        assert_eq!(hit.clinical_significance, vec!["drug response", "risk factor", "benign", "likely benign"]);
+        assert_eq!(hit.minor_allele.as_deref(), Some("T")); // prefers 1000Genomes over TOPMED
+        assert!((hit.minor_allele_freq.unwrap() - 0.0750799).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_esummary_variant_multibase_deletion_spans_correctly() {
+        let obj = serde_json::json!({
+            "snp_id": 123,
+            "chr": "1",
+            "chrpos": "1:1000",
+            "spdi": "NC_000001.11:999:AAA:A",
+        });
+        let hit = parse_esummary_variant(&obj).expect("should parse");
+        assert_eq!(hit.start, 1000);
+        assert_eq!(hit.end, 1002); // 3-base deletion spans positions 1000-1002
+    }
+
+    #[test]
+    fn parse_esummary_variant_missing_chrpos_returns_none() {
+        let obj = serde_json::json!({"snp_id": 123, "chr": "1"});
+        assert!(parse_esummary_variant(&obj).is_none());
+    }
+
+    #[test]
+    fn extract_minor_allele_skips_unrecognized_singleton_study() {
+        // Only a single-observation study present (e.g. one lab's GNOMAD
+        // submission) — none of PREFERRED_STUDIES matches "SGDP_PRJ", so
+        // this must report no frequency rather than a noisy singleton.
+        let mafs = serde_json::json!([{"study": "SGDP_PRJ", "freq": "C=0.453125/29"}]);
+        assert_eq!(extract_minor_allele(mafs.as_array().unwrap()), (None, None));
+    }
+
+    #[test]
+    fn extract_minor_allele_prefers_1000genomes_over_gnomad() {
+        let mafs = serde_json::json!([
+            {"study": "GnomAD_exomes", "freq": "T=0.0740017/98492"},
+            {"study": "1000Genomes", "freq": "T=0.0750799/376"},
+        ]);
+        let (freq, allele) = extract_minor_allele(mafs.as_array().unwrap());
+        assert_eq!(allele.as_deref(), Some("T"));
+        assert!((freq.unwrap() - 0.0750799).abs() < 1e-6);
     }
 }

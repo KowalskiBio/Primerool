@@ -13,12 +13,13 @@ type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
 interface Props {
   data: SequenceData;
   species: string;
+  apiSource: 'ensembl' | 'ncbi';
   primerMode: PrimerMode;
   onPrimerModeChange: (mode: PrimerMode) => void;
   onSelect: (key: keyof Selections, value: Selection) => void;
 }
 
-export default function AutoDesignPanel({ data, species, primerMode, onPrimerModeChange, onSelect }: Props) {
+export default function AutoDesignPanel({ data, species, apiSource, primerMode, onPrimerModeChange, onSelect }: Props) {
   const [junctionPos, setJunctionPos] = useState('');
   const [overlapMin, setOverlapMin] = useState(6);
   const [overlapMax, setOverlapMax] = useState(12);
@@ -165,7 +166,7 @@ export default function AutoDesignPanel({ data, species, primerMode, onPrimerMod
         </label>
       </div>
 
-      {primerMode === 'arms' && <ArmsDesignPanel data={data} species={species} onSelect={onSelect} />}
+      {primerMode === 'arms' && <ArmsDesignPanel data={data} species={species} apiSource={apiSource} onSelect={onSelect} />}
 
       {primerMode === 'general' && (
         <div className="bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-6">

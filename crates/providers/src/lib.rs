@@ -106,6 +106,34 @@ pub struct GeneSearchResult {
     pub transcripts: Vec<TranscriptSummary>,
 }
 
+/// A known variant (SNP/indel), sourced from either provider's own variant
+/// database (Ensembl's dbSNP-backed `/overlap/region`+`/variation`, or
+/// NCBI's `db=snp` E-utils). Both providers normalize into this one shape
+/// so the server/frontend never need to know which source answered a
+/// given search.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VariantHit {
+    pub id: String,
+    pub chrom: String,
+    /// 1-based inclusive genomic.
+    pub start: u64,
+    pub end: u64,
+    /// Order NOT guaranteed ref-first by either provider; callers must let
+    /// the user confirm which allele is which, never assume `alleles[0]`.
+    pub alleles: Vec<String>,
+    pub strand: i8,
+    pub consequence_type: Option<String>,
+    pub clinical_significance: Vec<String>,
+    /// Global minor allele frequency from a large reference cohort
+    /// (preferring 1000 Genomes phase 3 on both providers, so switching
+    /// data source doesn't change the number for the same variant) — only
+    /// populated by a direct by-id lookup; a region/overlap search always
+    /// returns `None` here (neither provider's region endpoint carries
+    /// per-variant frequency), left for the caller to fetch on demand.
+    pub minor_allele_freq: Option<f64>,
+    pub minor_allele: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TranscriptInfo {
     pub transcript_id: String,

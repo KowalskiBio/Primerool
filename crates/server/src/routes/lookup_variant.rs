@@ -1,9 +1,9 @@
 //! `POST /lookup_variant` — a single known variant looked up directly by its
-//! database id (an rsID, or another catalog id Ensembl recognizes), via
-//! `EnsemblProvider::lookup_variant_by_id`. Complements `/search_variants`
-//! (which scans a region): this is for a user who already has a specific
-//! variant id in hand and wants its location/alleles without picking a
-//! region first. Ensembl-only, same rationale as `search_variants.rs`.
+//! database id (an rsID, or another catalog id the source recognizes), via
+//! `EnsemblProvider::lookup_variant_by_id` or `NcbiProvider::lookup_variant_by_id`
+//! depending on `api_source`. Complements `/search_variants` (which scans a
+//! region): this is for a user who already has a specific variant id in
+//! hand and wants its location/alleles without picking a region first.
 
 use axum::extract::State;
 use axum::Json;
@@ -19,11 +19,12 @@ use crate::state::AppState;
 pub struct LookupVariantRequest {
     pub variant_id: String,
     pub species: String,
+    pub api_source: String,
 }
 
 impl Default for LookupVariantRequest {
     fn default() -> Self {
-        Self { variant_id: String::new(), species: String::new() }
+        Self { variant_id: String::new(), species: String::new(), api_source: String::new() }
     }
 }
 
@@ -37,12 +38,14 @@ pub async fn lookup_variant(State(state): State<AppState>, Json(req): Json<Looku
         let s = req.species.trim();
         if s.is_empty() { DEFAULT_SPECIES } else { s }
     };
+    let api_source = req.api_source.trim();
 
-    let variant = state
-        .ensembl
-        .lookup_variant_by_id(variant_id, species)
-        .await?
-        .ok_or_else(|| AppError::not_found(format!("Variant {variant_id} not found in Ensembl (species: {species})")))?;
+    let variant = if api_source == "ncbi" {
+        state.ncbi.lookup_variant_by_id(variant_id, species).await?
+    } else {
+        state.ensembl.lookup_variant_by_id(variant_id, species).await?
+    }
+    .ok_or_else(|| AppError::not_found(format!("Variant {variant_id} not found in {} (species: {species})", state.provider_label(api_source))))?;
 
     Ok(Json(json!({ "variant": variant })))
 }

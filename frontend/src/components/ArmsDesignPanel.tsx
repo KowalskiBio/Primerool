@@ -114,6 +114,7 @@ function dangerScore(h: VariantHit): number {
 interface Props {
   data: SequenceData;
   species: string;
+  apiSource: 'ensembl' | 'ncbi';
   onSelect: (key: keyof Selections, value: Selection) => void;
 }
 
@@ -135,7 +136,7 @@ interface DesignOutcome {
   error?: string;
 }
 
-export default function ArmsDesignPanel({ data, species, onSelect }: Props) {
+export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: Props) {
   const [regionStart, setRegionStart] = useState(0);
   const [regionEnd, setRegionEnd] = useState(Math.min(500, data.gene_len));
   const [lookupId, setLookupId] = useState('');
@@ -198,6 +199,7 @@ export default function ArmsDesignPanel({ data, species, onSelect }: Props) {
       const res = await searchVariants({
         chrom: data.chrom,
         species,
+        api_source: apiSource,
         start: data.gene_start_genomic + regionStart,
         end: data.gene_start_genomic + regionEnd,
       });
@@ -222,7 +224,7 @@ export default function ArmsDesignPanel({ data, species, onSelect }: Props) {
     setHits(null);
     setPage(0);
     try {
-      const res = await lookupVariant({ variant_id: id, species });
+      const res = await lookupVariant({ variant_id: id, species, api_source: apiSource });
       setHits([res.variant]);
     } catch (e) {
       setSearchError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
@@ -303,7 +305,7 @@ export default function ArmsDesignPanel({ data, species, onSelect }: Props) {
     if (resolvedFreq(h).loading) return;
     setFrequencies((prev) => ({ ...prev, [h.id]: { loading: true, value: null, minorAllele: null } }));
     try {
-      const res = await lookupVariant({ variant_id: h.id, species });
+      const res = await lookupVariant({ variant_id: h.id, species, api_source: apiSource });
       setFrequencies((prev) => ({ ...prev, [h.id]: { loading: false, value: res.variant.minor_allele_freq, minorAllele: res.variant.minor_allele } }));
     } catch {
       // Leave it fetchable again rather than stuck on a failed attempt.
@@ -556,7 +558,7 @@ export default function ArmsDesignPanel({ data, species, onSelect }: Props) {
   return (
     <div>
       <div className="bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-6">
-        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Search known variants (Ensembl)</h3>
+        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Search known variants ({apiSource === 'ncbi' ? 'NCBI dbSNP' : 'Ensembl'})</h3>
         {!canUseVariantSearch && (
           <div className="text-sm text-amber-800 dark:text-amber-300 mb-3 bg-amber-50 dark:bg-amber-950/40 p-2 rounded border border-amber-100 dark:border-amber-900">
             Enable &ldquo;Include introns&rdquo; in step 2 to search for known variants (genomic coordinates only map exactly onto the intron-inclusive gene sequence). You can still enter a variant manually below.

@@ -1,9 +1,8 @@
-//! `POST /search_variants` — known SNPs/indels (dbSNP-backed) overlapping a
-//! genomic region, via `EnsemblProvider::search_variants_in_region`. New
-//! surface area, no Python original (see the primer-mode-revamp plan) —
-//! Ensembl-only per the locked-in product decision, so this always uses
-//! `state.ensembl` directly rather than going through `state.provider()`'s
-//! `api_source`-dispatch (NCBI has no variant-search capability).
+//! `POST /search_variants` — known SNPs/indels overlapping a genomic
+//! region, from either `EnsemblProvider::search_variants_in_region`
+//! (dbSNP-backed, via `/overlap/region`) or
+//! `NcbiProvider::search_variants_in_region` (dbSNP-backed, via E-utils),
+//! selected by `api_source` the same way `/get_sequence` picks a provider.
 
 use axum::extract::State;
 use axum::Json;
@@ -21,6 +20,7 @@ const MAX_REGION_LEN: u64 = 50_000;
 pub struct SearchVariantsRequest {
     pub chrom: String,
     pub species: String,
+    pub api_source: String,
     /// 1-based inclusive genomic.
     pub start: u64,
     pub end: u64,
@@ -28,7 +28,7 @@ pub struct SearchVariantsRequest {
 
 impl Default for SearchVariantsRequest {
     fn default() -> Self {
-        Self { chrom: String::new(), species: String::new(), start: 0, end: 0 }
+        Self { chrom: String::new(), species: String::new(), api_source: String::new(), start: 0, end: 0 }
     }
 }
 
@@ -49,7 +49,11 @@ pub async fn search_variants(State(state): State<AppState>, Json(req): Json<Sear
         if s.is_empty() { DEFAULT_SPECIES } else { s }
     };
 
-    let hits = state.ensembl.search_variants_in_region(chrom, req.start, req.end, species).await?;
+    let hits = if req.api_source.trim() == "ncbi" {
+        state.ncbi.search_variants_in_region(chrom, req.start, req.end, species).await?
+    } else {
+        state.ensembl.search_variants_in_region(chrom, req.start, req.end, species).await?
+    };
 
     Ok(Json(json!({ "variants": hits })))
 }

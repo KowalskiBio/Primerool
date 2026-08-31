@@ -19,34 +19,11 @@ use tokio::sync::Mutex;
 
 use crate::{
     revcomp, Feature, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo,
-    TranscriptSummary,
+    TranscriptSummary, VariantHit,
 };
 
 const ENSEMBL_REST: &str = "https://rest.ensembl.org";
 const MIN_INTERVAL: Duration = Duration::from_millis(70); // ~14 req/s
-
-/// A known variant (SNP/indel) returned by Ensembl's
-/// `/overlap/region?feature=variation` — dbSNP-backed. `alleles` order is
-/// NOT guaranteed ref-first by Ensembl; callers must let the user confirm
-/// which allele is which, never assume `alleles[0]` is the reference.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct VariantHit {
-    pub id: String,
-    pub chrom: String,
-    /// 1-based inclusive genomic.
-    pub start: u64,
-    pub end: u64,
-    pub alleles: Vec<String>,
-    pub strand: i8,
-    pub consequence_type: Option<String>,
-    pub clinical_significance: Vec<String>,
-    /// Global minor allele frequency, only available from `/variation/:species/:id`
-    /// (i.e. after `lookup_variant_by_id`) — `/overlap/region` doesn't carry
-    /// per-variant frequency, so hits from `search_variants_in_region` always
-    /// have this as `None` until looked up individually by id.
-    pub minor_allele_freq: Option<f64>,
-    pub minor_allele: Option<String>,
-}
 
 pub struct EnsemblProvider {
     client: reqwest::Client,

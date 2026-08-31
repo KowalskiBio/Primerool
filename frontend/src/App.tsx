@@ -184,7 +184,7 @@ function App() {
 
         {sequenceData && !isCustomSequence && (
           <Card title="4. Primer Design (Automatic)">
-            <AutoDesignPanel data={sequenceData} species={species} primerMode={primerMode} onPrimerModeChange={setPrimerMode} onSelect={handleSelect} />
+            <AutoDesignPanel data={sequenceData} species={species} apiSource={apiSource} primerMode={primerMode} onPrimerModeChange={setPrimerMode} onSelect={handleSelect} />
           </Card>
         )}
 

@@ -48,7 +48,7 @@ function App() {
 
   const [geneName, setGeneName] = useState('');
   const [species, setSpecies] = useState('homo_sapiens');
-  const [apiSource, setApiSource] = useState<'ensembl' | 'ncbi'>('ensembl');
+  const [apiSource, setApiSource] = useState<'ensembl' | 'ncbi'>('ncbi');
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [sequenceData, setSequenceData] = useState<SequenceData | null>(null);
   const [truncateIntrons, setTruncateIntrons] = useState(false);

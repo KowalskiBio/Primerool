@@ -14,7 +14,7 @@ interface Props {
 
 export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
   const [inputMode, setInputMode] = useState<'gene' | 'fasta'>('gene');
-  const [apiSource, setApiSource] = useState<'ensembl' | 'ncbi'>('ensembl');
+  const [apiSource, setApiSource] = useState<'ensembl' | 'ncbi'>('ncbi');
   const [kingdom, setKingdom] = useState<Kingdom>('animals');
   const [speciesValue, setSpeciesValue] = useState('homo_sapiens');
   const [customSpecies, setCustomSpecies] = useState('');

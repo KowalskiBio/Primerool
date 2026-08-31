@@ -1,0 +1,15 @@
+[package]
+name = "primer3-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Safe Rust wrapper over primer3-sys: calc_tm/calc_hairpin/calc_homodimer/calc_heterodimer and the design_primers picking call."
+
+[dependencies]
+primer3-sys = { path = "../primer3-sys" }
+thiserror.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true

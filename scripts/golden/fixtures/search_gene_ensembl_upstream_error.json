@@ -1,0 +1,18 @@
+{
+  "name": "search_gene_ensembl_upstream_error",
+  "request": {
+    "body": {
+      "api_source": "ensembl",
+      "gene_name": "TP53",
+      "species": "homo_sapiens"
+    },
+    "method": "POST",
+    "path": "/search_gene"
+  },
+  "response": {
+    "body": {
+      "error": "Server error: 503 Server Error: Service Unavailable for url: https://rest.ensembl.org/lookup/symbol/homo_sapiens/TP53?expand=1"
+    },
+    "status": 500
+  }
+}

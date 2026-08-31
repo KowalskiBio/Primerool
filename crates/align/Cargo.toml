@@ -1,0 +1,13 @@
+[package]
+name = "align"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "MAFFT subprocess wrapper, ported from Oligool's alignment.py. Returns raw aligned-FASTA text; no server-side parsing."
+
+[dependencies]
+tokio.workspace = true
+thiserror.workspace = true
+which = "6"
+tempfile = "3"

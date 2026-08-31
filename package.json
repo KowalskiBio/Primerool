@@ -1,0 +1,14 @@
+{
+  "name": "primerool",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "node scripts/run-backend.mjs",
+    "dev:frontend": "npm --prefix frontend run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

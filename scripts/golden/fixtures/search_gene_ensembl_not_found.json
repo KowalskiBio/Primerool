@@ -1,0 +1,18 @@
+{
+  "name": "search_gene_ensembl_not_found",
+  "request": {
+    "body": {
+      "api_source": "ensembl",
+      "gene_name": "totallynotarealgenexyz123",
+      "species": "homo_sapiens"
+    },
+    "method": "POST",
+    "path": "/search_gene"
+  },
+  "response": {
+    "body": {
+      "error": "Server error: 503 Server Error: Service Unavailable for url: https://rest.ensembl.org/lookup/symbol/homo_sapiens/totallynotarealgenexyz123?expand=1"
+    },
+    "status": 500
+  }
+}

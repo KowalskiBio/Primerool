@@ -1,0 +1,195 @@
+{
+  "name": "search_gene_ncbi_tp53",
+  "request": {
+    "body": {
+      "api_source": "ncbi",
+      "gene_name": "TP53",
+      "species": "homo_sapiens"
+    },
+    "method": "POST",
+    "path": "/search_gene"
+  },
+  "response": {
+    "body": {
+      "gene_name": "TP53",
+      "transcripts": [
+        {
+          "exon_count": 12,
+          "id": "NM_001407269.1",
+          "is_canonical": true,
+          "name": "transcript variant 12",
+          "strand": "-"
+        },
+        {
+          "exon_count": 12,
+          "id": "NM_001407268.1",
+          "is_canonical": false,
+          "name": "transcript variant 12",
+          "strand": "-"
+        },
+        {
+          "exon_count": 12,
+          "id": "NM_001276695.3",
+          "is_canonical": false,
+          "name": "transcript variant 4",
+          "strand": "-"
+        },
+        {
+          "exon_count": 12,
+          "id": "NM_001126113.3",
+          "is_canonical": false,
+          "name": "transcript variant 4",
+          "strand": "-"
+        },
+        {
+          "exon_count": 12,
+          "id": "NM_001276696.3",
+          "is_canonical": false,
+          "name": "transcript variant 3",
+          "strand": "-"
+        },
+        {
+          "exon_count": 12,
+          "id": "NM_001126114.3",
+          "is_canonical": false,
+          "name": "transcript variant 3",
+          "strand": "-"
+        },
+        {
+          "exon_count": 12,
+          "id": "NM_001407262.1",
+          "is_canonical": false,
+          "name": "transcript variant 9",
+          "strand": "-"
+        },
+        {
+          "exon_count": 12,
+          "id": "NM_001407263.1",
+          "is_canonical": false,
+          "name": "transcript variant 9",
+          "strand": "-"
+        },
+        {
+          "exon_count": 12,
+          "id": "NM_001407270.1",
+          "is_canonical": false,
+          "name": "transcript variant 13",
+          "strand": "-"
+        },
+        {
+          "exon_count": 12,
+          "id": "NM_001407271.1",
+          "is_canonical": false,
+          "name": "transcript variant 13",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "NM_001276761.3",
+          "is_canonical": false,
+          "name": "transcript variant 2",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "NM_001126112.3",
+          "is_canonical": false,
+          "name": "transcript variant 2",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "NM_000546.6",
+          "is_canonical": false,
+          "name": "transcript variant 1",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "NM_001276760.3",
+          "is_canonical": false,
+          "name": "transcript variant 1",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "NM_001407265.1",
+          "is_canonical": false,
+          "name": "transcript variant 10",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "NM_001407264.1",
+          "is_canonical": false,
+          "name": "transcript variant 10",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "NM_001407266.1",
+          "is_canonical": false,
+          "name": "transcript variant 11",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "NM_001407267.1",
+          "is_canonical": false,
+          "name": "transcript variant 11",
+          "strand": "-"
+        },
+        {
+          "exon_count": 10,
+          "id": "NM_001126118.2",
+          "is_canonical": false,
+          "name": "transcript variant 8",
+          "strand": "-"
+        },
+        {
+          "exon_count": 8,
+          "id": "NM_001276699.3",
+          "is_canonical": false,
+          "name": "transcript variant 7",
+          "strand": "-"
+        },
+        {
+          "exon_count": 8,
+          "id": "NM_001126117.2",
+          "is_canonical": false,
+          "name": "transcript variant 7",
+          "strand": "-"
+        },
+        {
+          "exon_count": 8,
+          "id": "NM_001276698.3",
+          "is_canonical": false,
+          "name": "transcript variant 6",
+          "strand": "-"
+        },
+        {
+          "exon_count": 8,
+          "id": "NM_001126116.2",
+          "is_canonical": false,
+          "name": "transcript variant 6",
+          "strand": "-"
+        },
+        {
+          "exon_count": 7,
+          "id": "NM_001276697.3",
+          "is_canonical": false,
+          "name": "transcript variant 5",
+          "strand": "-"
+        },
+        {
+          "exon_count": 7,
+          "id": "NM_001126115.2",
+          "is_canonical": false,
+          "name": "transcript variant 5",
+          "strand": "-"
+        }
+      ]
+    },
+    "status": 200
+  }
+}

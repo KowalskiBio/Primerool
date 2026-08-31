@@ -1,0 +1,433 @@
+{
+  "name": "search_gene_ensembl_brca1",
+  "request": {
+    "body": {
+      "api_source": "ensembl",
+      "gene_name": "BRCA1",
+      "species": "homo_sapiens"
+    },
+    "method": "POST",
+    "path": "/search_gene"
+  },
+  "response": {
+    "body": {
+      "gene_name": "BRCA1",
+      "transcripts": [
+        {
+          "exon_count": 15,
+          "id": "ENST00000497488",
+          "is_canonical": false,
+          "name": "BRCA1-222",
+          "strand": "-"
+        },
+        {
+          "exon_count": 22,
+          "id": "ENST00000489037",
+          "is_canonical": false,
+          "name": "BRCA1-216",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000478531",
+          "is_canonical": false,
+          "name": "BRCA1-214",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000357654",
+          "is_canonical": true,
+          "name": "BRCA1-203",
+          "strand": "-"
+        },
+        {
+          "exon_count": 21,
+          "id": "ENST00000473961",
+          "is_canonical": false,
+          "name": "BRCA1-211",
+          "strand": "-"
+        },
+        {
+          "exon_count": 22,
+          "id": "ENST00000477152",
+          "is_canonical": false,
+          "name": "BRCA1-213",
+          "strand": "-"
+        },
+        {
+          "exon_count": 22,
+          "id": "ENST00000352993",
+          "is_canonical": false,
+          "name": "BRCA1-201",
+          "strand": "-"
+        },
+        {
+          "exon_count": 22,
+          "id": "ENST00000493919",
+          "is_canonical": false,
+          "name": "BRCA1-220",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000494123",
+          "is_canonical": false,
+          "name": "BRCA1-221",
+          "strand": "-"
+        },
+        {
+          "exon_count": 24,
+          "id": "ENST00000471181",
+          "is_canonical": false,
+          "name": "BRCA1-209",
+          "strand": "-"
+        },
+        {
+          "exon_count": 24,
+          "id": "ENST00000652672",
+          "is_canonical": false,
+          "name": "BRCA1-232",
+          "strand": "-"
+        },
+        {
+          "exon_count": 21,
+          "id": "ENST00000634433",
+          "is_canonical": false,
+          "name": "BRCA1-228",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000476777",
+          "is_canonical": false,
+          "name": "BRCA1-212",
+          "strand": "-"
+        },
+        {
+          "exon_count": 3,
+          "id": "ENST00000700081",
+          "is_canonical": false,
+          "name": "BRCA1-233",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000470026",
+          "is_canonical": false,
+          "name": "BRCA1-208",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000713676",
+          "is_canonical": false,
+          "name": "BRCA1-241",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000618469",
+          "is_canonical": false,
+          "name": "BRCA1-226",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000461574",
+          "is_canonical": false,
+          "name": "BRCA1-205",
+          "strand": "-"
+        },
+        {
+          "exon_count": 24,
+          "id": "ENST00000644555",
+          "is_canonical": false,
+          "name": "BRCA1-231",
+          "strand": "-"
+        },
+        {
+          "exon_count": 22,
+          "id": "ENST00000468300",
+          "is_canonical": false,
+          "name": "BRCA1-207",
+          "strand": "-"
+        },
+        {
+          "exon_count": 2,
+          "id": "ENST00000700082",
+          "is_canonical": false,
+          "name": "BRCA1-234",
+          "strand": "-"
+        },
+        {
+          "exon_count": 24,
+          "id": "ENST00000644379",
+          "is_canonical": false,
+          "name": "BRCA1-230",
+          "strand": "-"
+        },
+        {
+          "exon_count": 21,
+          "id": "ENST00000484087",
+          "is_canonical": false,
+          "name": "BRCA1-215",
+          "strand": "-"
+        },
+        {
+          "exon_count": 8,
+          "id": "ENST00000586385",
+          "is_canonical": false,
+          "name": "BRCA1-223",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "ENST00000591534",
+          "is_canonical": false,
+          "name": "BRCA1-224",
+          "strand": "-"
+        },
+        {
+          "exon_count": 5,
+          "id": "ENST00000591849",
+          "is_canonical": false,
+          "name": "BRCA1-225",
+          "strand": "-"
+        },
+        {
+          "exon_count": 22,
+          "id": "ENST00000493795",
+          "is_canonical": false,
+          "name": "BRCA1-219",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000461221",
+          "is_canonical": false,
+          "name": "BRCA1-204",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000491747",
+          "is_canonical": false,
+          "name": "BRCA1-217",
+          "strand": "-"
+        },
+        {
+          "exon_count": 2,
+          "id": "ENST00000472490",
+          "is_canonical": false,
+          "name": "BRCA1-210",
+          "strand": "-"
+        },
+        {
+          "exon_count": 14,
+          "id": "ENST00000700182",
+          "is_canonical": false,
+          "name": "BRCA1-236",
+          "strand": "-"
+        },
+        {
+          "exon_count": 3,
+          "id": "ENST00000621897",
+          "is_canonical": false,
+          "name": "BRCA1-227",
+          "strand": "-"
+        },
+        {
+          "exon_count": 10,
+          "id": "ENST00000354071",
+          "is_canonical": false,
+          "name": "BRCA1-202",
+          "strand": "-"
+        },
+        {
+          "exon_count": 12,
+          "id": "ENST00000700183",
+          "is_canonical": false,
+          "name": "BRCA1-237",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "ENST00000492859",
+          "is_canonical": false,
+          "name": "BRCA1-218",
+          "strand": "-"
+        },
+        {
+          "exon_count": 11,
+          "id": "ENST00000642945",
+          "is_canonical": false,
+          "name": "BRCA1-229",
+          "strand": "-"
+        },
+        {
+          "exon_count": 6,
+          "id": "ENST00000700184",
+          "is_canonical": false,
+          "name": "BRCA1-238",
+          "strand": "-"
+        },
+        {
+          "exon_count": 7,
+          "id": "ENST00000461798",
+          "is_canonical": false,
+          "name": "BRCA1-206",
+          "strand": "-"
+        },
+        {
+          "exon_count": 2,
+          "id": "ENST00000700083",
+          "is_canonical": false,
+          "name": "BRCA1-235",
+          "strand": "-"
+        },
+        {
+          "exon_count": 4,
+          "id": "ENST00000700185",
+          "is_canonical": false,
+          "name": "BRCA1-239",
+          "strand": "-"
+        },
+        {
+          "exon_count": 3,
+          "id": "ENST00000700186",
+          "is_canonical": false,
+          "name": "BRCA1-240",
+          "strand": "-"
+        },
+        {
+          "exon_count": 21,
+          "id": "ENST00000899954",
+          "is_canonical": false,
+          "name": "BRCA1-242",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000921914",
+          "is_canonical": false,
+          "name": "BRCA1-243",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000921915",
+          "is_canonical": false,
+          "name": "BRCA1-244",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000921916",
+          "is_canonical": false,
+          "name": "BRCA1-245",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000945268",
+          "is_canonical": false,
+          "name": "BRCA1-246",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00000945269",
+          "is_canonical": false,
+          "name": "BRCA1-247",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00001010568",
+          "is_canonical": false,
+          "name": "BRCA1-248",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00001010569",
+          "is_canonical": false,
+          "name": "BRCA1-249",
+          "strand": "-"
+        },
+        {
+          "exon_count": 15,
+          "id": "ENST00001010570",
+          "is_canonical": false,
+          "name": "BRCA1-250",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00001076718",
+          "is_canonical": false,
+          "name": "BRCA1-251",
+          "strand": "-"
+        },
+        {
+          "exon_count": 21,
+          "id": "ENST00001076719",
+          "is_canonical": false,
+          "name": "BRCA1-252",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00001076720",
+          "is_canonical": false,
+          "name": "BRCA1-253",
+          "strand": "-"
+        },
+        {
+          "exon_count": 21,
+          "id": "ENST00001076721",
+          "is_canonical": false,
+          "name": "BRCA1-254",
+          "strand": "-"
+        },
+        {
+          "exon_count": 21,
+          "id": "ENST00001076722",
+          "is_canonical": false,
+          "name": "BRCA1-255",
+          "strand": "-"
+        },
+        {
+          "exon_count": 21,
+          "id": "ENST00001076723",
+          "is_canonical": false,
+          "name": "BRCA1-256",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00001076724",
+          "is_canonical": false,
+          "name": "BRCA1-257",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00001076725",
+          "is_canonical": false,
+          "name": "BRCA1-258",
+          "strand": "-"
+        },
+        {
+          "exon_count": 23,
+          "id": "ENST00001136804",
+          "is_canonical": false,
+          "name": "BRCA1-259",
+          "strand": "-"
+        }
+      ]
+    },
+    "status": 200
+  }
+}

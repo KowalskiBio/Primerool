@@ -11,6 +11,7 @@ __pycache__/
 .claude/
 
 # Frontend
+node_modules/
 frontend/node_modules/
 frontend/dist/
 
@@ -37,4 +38,9 @@ dist/
 # Temporary/Old Files
 make_pdf.py
 Oligool_and_Primerool_Features.md
+
+# Rust
+/target/
+crates/*/target/
+src-tauri/target/
 

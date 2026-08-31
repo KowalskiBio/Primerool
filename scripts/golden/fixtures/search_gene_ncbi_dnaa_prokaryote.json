@@ -1,0 +1,27 @@
+{
+  "name": "search_gene_ncbi_dnaa_prokaryote",
+  "request": {
+    "body": {
+      "api_source": "ncbi",
+      "gene_name": "dnaA",
+      "species": "escherichia_coli_str_k_12_substr_mg1655"
+    },
+    "method": "POST",
+    "path": "/search_gene"
+  },
+  "response": {
+    "body": {
+      "gene_name": "dnaA",
+      "transcripts": [
+        {
+          "exon_count": 1,
+          "id": "dnaA_CDS",
+          "is_canonical": true,
+          "name": "dnaA (CDS)",
+          "strand": "-"
+        }
+      ]
+    },
+    "status": 200
+  }
+}

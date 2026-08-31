@@ -149,24 +149,25 @@ To generate a standalone Windows executable, you must run the build on a Windows
 
 ### Development / Manual Setup
 
+Requires Node.js and Python 3 on your PATH.
+
 ```bash
 # Clone the repo
 git clone https://github.com/your-username/Primerool.git
 cd Primerool
 
-# Create and activate a virtual environment
-python3 -m venv venv
-source venv/bin/activate        # macOS/Linux
-# venv\Scripts\activate         # Windows
+# One-time setup: creates the Python venv, installs backend deps,
+# and installs frontend deps
+npm run setup
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Run
-python src/app.py
+# Start backend + frontend together, with hot reload
+npm run dev
 ```
 
-Open **http://127.0.0.1:5050** in your browser.
+This starts the Flask API on `http://127.0.0.1:5050` and the Vite dev server
+on `http://localhost:5173` (opened automatically), which proxies API calls to
+the backend. Use the `:5173` URL while developing — it's the one with live
+frontend reload.
 
 ---
 

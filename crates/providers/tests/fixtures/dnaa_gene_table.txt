@@ -1,0 +1,5 @@
+dnaA chromosomal replication initiator protein DnaA[Escherichia coli str. K-12 substr. MG1655]
+Gene ID: 948217, created on 1-Aug-2003
+
+
+There is no table for this gene because it has no annotated transcribed products.

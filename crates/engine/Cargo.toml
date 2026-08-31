@@ -1,0 +1,17 @@
+[package]
+name = "engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Dual-backend (Primer3-FFI / Strider-native) thermodynamics trait, plus the backend-agnostic candidate scan/score/rank design algorithms."
+
+[dependencies]
+thermo-core = { path = "../thermo-core" }
+primer3-ffi = { path = "../primer3-ffi" }
+thiserror.workspace = true
+rayon = "1"
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

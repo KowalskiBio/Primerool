@@ -1,0 +1,20 @@
+[package]
+name = "primerool-tauri"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Tauri desktop shell embedding crates/server in-process, matching the current pywebview.create_window setup."
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tokio.workspace = true
+axum = "0.7"
+server = { path = "../crates/server" }
+
+[[bin]]
+name = "primerool"
+path = "src/main.rs"

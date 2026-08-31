@@ -1,0 +1,23 @@
+{
+  "name": "get_sequence_brca1_default",
+  "request": {
+    "body": {
+      "api_source": "ensembl",
+      "downstream_bp": 200,
+      "gene_name": "BRCA1",
+      "include_introns": false,
+      "include_utr": true,
+      "species": "homo_sapiens",
+      "transcript_id": "ENST00000357654",
+      "upstream_bp": 200
+    },
+    "method": "POST",
+    "path": "/get_sequence"
+  },
+  "response": {
+    "body": {
+      "error": "Server error: 500 Server Error: Internal Server Error for url: https://rest.ensembl.org/lookup/id/ENST00000357654?expand=1"
+    },
+    "status": 500
+  }
+}

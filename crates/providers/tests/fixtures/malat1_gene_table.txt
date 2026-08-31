@@ -1,0 +1,28 @@
+MALAT1 metastasis associated lung adenocarcinoma transcript 1[Homo sapiens]
+Gene ID: 378938, updated on 5-Aug-2026
+
+
+Reference GRCh38.p14 Primary Assembly NC_000011.10  from: 65497738 to: 65506516
+ncRNA transcript variant 2 NR_144567.1, 2 exons,  total annotated spliced exon length: 8545
+
+Exon table for  ncRNA  NR_144567.1
+Genomic Interval Exon		Gene Interval Exon		Exon Length	Intron Length
+-------------------------------------------------------------------------------------------------
+65497738-65498734		1-997		997		234
+65498969-65506516		1232-8779		7548
+
+ncRNA transcript variant 3 NR_144568.1, 3 exons,  total annotated spliced exon length: 8302
+
+Exon table for  ncRNA  NR_144568.1
+Genomic Interval Exon		Gene Interval Exon		Exon Length	Intron Length
+-------------------------------------------------------------------------------------------------
+65497738-65498734		1-997		997		234
+65498969-65502393		1232-4656		3425		243
+65502637-65506516		4900-8779		3880
+
+ncRNA transcript variant 1 NR_002819.5, 1 exon,  total annotated spliced exon length: 7472
+
+Exon table for  ncRNA  NR_002819.5
+Genomic Interval Exon		Gene Interval Exon		Exon Length	Intron Length
+-------------------------------------------------------------------------------------------------
+65499045-65506516		1308-8779		7472

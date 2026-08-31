@@ -1,0 +1,15 @@
+[package]
+name = "thermo-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Plain-Rust DNA thermodynamics core (Tm, salt corrections, dimer/hairpin ΔG), ported from Strider's native/ crate with PyO3 stripped out."
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+primer3-ffi = { path = "../primer3-ffi" }

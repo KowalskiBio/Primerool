@@ -1,0 +1,41 @@
+{
+  "name": "search_gene_ncbi_malat1_noncoding",
+  "request": {
+    "body": {
+      "api_source": "ncbi",
+      "gene_name": "MALAT1",
+      "species": "homo_sapiens"
+    },
+    "method": "POST",
+    "path": "/search_gene"
+  },
+  "response": {
+    "body": {
+      "gene_name": "MALAT1",
+      "transcripts": [
+        {
+          "exon_count": 3,
+          "id": "NR_144568.1",
+          "is_canonical": true,
+          "name": "transcript variant 3",
+          "strand": "+"
+        },
+        {
+          "exon_count": 2,
+          "id": "NR_144567.1",
+          "is_canonical": false,
+          "name": "transcript variant 2",
+          "strand": "+"
+        },
+        {
+          "exon_count": 1,
+          "id": "NR_002819.5",
+          "is_canonical": false,
+          "name": "transcript variant 1",
+          "strand": "+"
+        }
+      ]
+    },
+    "status": 200
+  }
+}

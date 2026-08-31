@@ -1,0 +1,3 @@
+[submodule "vendor/primer3-py"]
+	path = vendor/primer3-py
+	url = https://github.com/libnano/primer3-py.git

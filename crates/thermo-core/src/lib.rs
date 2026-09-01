@@ -19,8 +19,12 @@
 
 pub mod dimer;
 pub mod hairpin;
+pub mod mathews2004;
+pub mod mathews2004_fold;
 pub mod salt;
+pub mod structure_thermo;
 pub mod tables;
+pub mod thermo;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ThermoError {

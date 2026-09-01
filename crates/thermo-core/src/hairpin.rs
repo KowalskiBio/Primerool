@@ -37,7 +37,7 @@ const INF: f64 = f64::INFINITY;
 const MAX_LOOP: usize = 4; // matches dimer.rs's interior-loop/bulge search width
 const MIN_HAIRPIN_LOOP: usize = 3; // shortest physically foldable loop; HAIRPIN_SIZE[0..=1] are unused placeholders
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HairpinMfeResult {
     /// Free energy at 37°C (kcal/mol) of the minimum-free-energy hairpin.
     pub dg: f64,
@@ -45,6 +45,11 @@ pub struct HairpinMfeResult {
     pub stem_start: usize,
     /// 0-based index of the 3' base of the closing (outermost) pair.
     pub stem_end: usize,
+    /// Every nested base pair of the fold, outermost-first — `(stem_start,
+    /// stem_end)` is always `pairs[0]`. Needed by `structure_thermo`'s
+    /// per-element walk (Tm derivation), which requires the full structure,
+    /// not just the closing pair.
+    pub pairs: Vec<(usize, usize)>,
 }
 
 /// Loop-closing energy for a hairpin loop of `seq[i+1..j]` (i.e. `j-i-1`
@@ -102,6 +107,8 @@ pub fn hairpin_mfe(seq: &[u8]) -> Option<HairpinMfeResult> {
     // Filled for decreasing i, increasing j - i (mirrors dimer.rs's
     // inside-out fill order, adapted to a single triangular table).
     let mut inner = vec![INF; n * n];
+    // Trace: None = stop here (hairpin-loop closure at this cell), Some((ip, jp)).
+    let mut trace: Vec<Option<(usize, usize)>> = vec![None; n * n];
 
     for i in (0..n).rev() {
         // j must leave room for at least a MIN_HAIRPIN_LOOP-sized loop.
@@ -113,6 +120,7 @@ pub fn hairpin_mfe(seq: &[u8]) -> Option<HairpinMfeResult> {
             let stop_val = terminal_penalty(at(i), at(j)) + hairpin_loop_energy(seq, i, j);
 
             let mut best_continue = INF;
+            let mut best_next: Option<(usize, usize)> = None;
             for nl in 0..=MAX_LOOP {
                 for nr in 0..=(MAX_LOOP - nl) {
                     let ip = i + 1 + nl;
@@ -136,27 +144,49 @@ pub fn hairpin_mfe(seq: &[u8]) -> Option<HairpinMfeResult> {
                     let cand = e + inner_next;
                     if cand < best_continue {
                         best_continue = cand;
+                        best_next = Some((ip, jp));
                     }
                 }
             }
 
-            inner[idx(i, j)] = stop_val.min(best_continue);
+            if best_next.is_none() || stop_val <= best_continue {
+                inner[idx(i, j)] = stop_val;
+                trace[idx(i, j)] = None;
+            } else {
+                inner[idx(i, j)] = best_continue;
+                trace[idx(i, j)] = best_next;
+            }
         }
     }
 
-    let mut best: Option<HairpinMfeResult> = None;
+    let mut best_outer: Option<(usize, usize, f64)> = None;
     for i in 0..n {
         for j in (i + MIN_HAIRPIN_LOOP + 1)..n {
             let val = inner[idx(i, j)];
             if !val.is_finite() {
                 continue;
             }
-            if best.map(|b| val < b.dg).unwrap_or(true) {
-                best = Some(HairpinMfeResult { dg: val, stem_start: i, stem_end: j });
+            if best_outer.map(|(_, _, b)| val < b).unwrap_or(true) {
+                best_outer = Some((i, j, val));
             }
         }
     }
-    best
+
+    best_outer.map(|(i, j, dg)| {
+        let mut pairs = Vec::new();
+        let (mut ci, mut cj) = (i, j);
+        loop {
+            pairs.push((ci, cj));
+            match trace[idx(ci, cj)] {
+                None => break,
+                Some((ip, jp)) => {
+                    ci = ip;
+                    cj = jp;
+                }
+            }
+        }
+        HairpinMfeResult { dg, stem_start: i, stem_end: j, pairs }
+    })
 }
 
 #[cfg(test)]

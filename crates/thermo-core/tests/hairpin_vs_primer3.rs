@@ -69,14 +69,14 @@ fn native_hairpin_vs_primer3_ffi_report() {
             agree_on_found += 1;
         }
 
-        let (native_dg_s, native_found_s) = match native {
+        let (native_dg_s, native_found_s) = match &native {
             Some(r) => (format!("{:.2}", r.dg), "yes".to_string()),
             None => ("-".to_string(), "no".to_string()),
         };
         let p3_dg_raw = p3.dg.unwrap_or(0.0);
         let p3_dg_scaled = p3_dg_raw / 1000.0;
 
-        let diff_s = if let (Some(n), true) = (native, p3.structure_found) {
+        let diff_s = if let (Some(n), true) = (&native, p3.structure_found) {
             both_found += 1;
             let diff = (n.dg - p3_dg_scaled).abs();
             abs_diffs.push(diff);

@@ -10,13 +10,12 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use engine::backend::ThermoParams;
-use engine::backend_primer3::Primer3Backend;
 use engine::design_flanking::design_primers_for_flanking_regions;
 use engine::design_internal::design_primers_for_region;
 use engine::design_junction::{design_junction_primer_pairs, JunctionError, JunctionParams};
 
 use crate::error::AppError;
-use crate::routes::{analysis_json_with, normalized_tuple, raw_tuple};
+use crate::routes::{analysis_json_with, normalized_tuple, raw_tuple, select_backend};
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -35,6 +34,7 @@ pub struct DesignPrimersRequest {
     pub junction_max_candidates: i64,
     pub upstream_seq: Option<String>,
     pub downstream_seq: Option<String>,
+    pub engine: String,
 }
 
 impl Default for DesignPrimersRequest {
@@ -54,6 +54,7 @@ impl Default for DesignPrimersRequest {
             junction_max_candidates: 25,
             upstream_seq: None,
             downstream_seq: None,
+            engine: "primer3".to_string(),
         }
     }
 }
@@ -90,15 +91,15 @@ pub async fn design_primers(Json(req): Json<DesignPrimersRequest>) -> Result<Jso
 
 fn design_primers_sync(req: &DesignPrimersRequest) -> Result<Json<Value>, AppError> {
     let mode = if req.mode.is_empty() { "internal".to_string() } else { req.mode.clone() };
-    let backend = Primer3Backend;
+    let backend = select_backend(&req.engine);
 
     if mode == "internal" && req.junction_pos.is_some() {
-        return design_junction_mode(req, &backend);
+        return design_junction_mode(req, backend.as_ref());
     }
     if mode == "internal" {
         return design_internal_mode(req);
     }
-    design_flanking_mode(req, &backend)
+    design_flanking_mode(req, backend.as_ref())
 }
 
 fn design_internal_mode(req: &DesignPrimersRequest) -> Result<Json<Value>, AppError> {
@@ -139,7 +140,7 @@ fn design_internal_mode(req: &DesignPrimersRequest) -> Result<Json<Value>, AppEr
     })))
 }
 
-fn design_junction_mode(req: &DesignPrimersRequest, backend: &Primer3Backend) -> Result<Json<Value>, AppError> {
+fn design_junction_mode(req: &DesignPrimersRequest, backend: &dyn engine::backend::ThermoBackend) -> Result<Json<Value>, AppError> {
     let template = clean_template(&req.sequence);
     if template.is_empty() {
         return Err(AppError::bad_request("No template sequence provided"));
@@ -226,7 +227,7 @@ fn design_junction_mode(req: &DesignPrimersRequest, backend: &Primer3Backend) ->
     })))
 }
 
-fn design_flanking_mode(req: &DesignPrimersRequest, backend: &Primer3Backend) -> Result<Json<Value>, AppError> {
+fn design_flanking_mode(req: &DesignPrimersRequest, backend: &dyn engine::backend::ThermoBackend) -> Result<Json<Value>, AppError> {
     let upstream = req.upstream_seq.as_deref().unwrap_or("");
     let downstream = req.downstream_seq.as_deref().unwrap_or("");
     if upstream.is_empty() || downstream.is_empty() {

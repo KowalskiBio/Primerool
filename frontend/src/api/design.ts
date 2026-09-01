@@ -48,6 +48,14 @@ export interface AdvancedThermo {
   max_ns?: number;
 }
 
+/** `"primer3"` (default) uses the real primer3 C library via FFI;
+ * `"native"` uses thermo-core's from-scratch Rust engine — now
+ * Mathews2004-accurate for hairpin/dimer Tm (matching Oligool's own
+ * default `parameter_set="mathews2004-dna"`), though it still ranks
+ * *candidate* primers differently than primer3 (see
+ * crates/engine/native_vs_primer3_report.md). */
+export type DesignEngine = 'primer3' | 'native';
+
 // ---------------------------------------------------------------------
 // /design_primers — classic internal (SEQUENCE_TARGET)
 // ---------------------------------------------------------------------
@@ -74,6 +82,9 @@ export interface InternalDesignResponse {
 }
 
 export function designInternal(sequence: string, target_start: number, target_end: number): Promise<InternalDesignResponse> {
+  // No `engine` param: classic-internal mode (`design_internal_mode` server-side)
+  // never runs analyze_primer/hairpin/dimer QC at all — it's a raw primer3
+  // SEQUENCE_TARGET call with no ThermoBackend involved, so there's nothing to select.
   return postJson<InternalDesignResponse>('/design_primers', { mode: 'internal', sequence, target_start, target_end });
 }
 
@@ -115,6 +126,7 @@ export interface JunctionDesignParams {
   junction_left_pad?: number;
   junction_right_pad?: number;
   junction_max_candidates?: number;
+  engine?: DesignEngine;
 }
 
 export function designJunction(params: JunctionDesignParams): Promise<JunctionDesignResponse> {
@@ -160,8 +172,8 @@ export interface FlankingDesignResponse {
   };
 }
 
-export function designFlanking(upstream_seq: string, downstream_seq: string): Promise<FlankingDesignResponse> {
-  return postJson<FlankingDesignResponse>('/design_primers', { mode: 'flanking', upstream_seq, downstream_seq });
+export function designFlanking(upstream_seq: string, downstream_seq: string, engine?: DesignEngine): Promise<FlankingDesignResponse> {
+  return postJson<FlankingDesignResponse>('/design_primers', { mode: 'flanking', upstream_seq, downstream_seq, engine });
 }
 
 // ---------------------------------------------------------------------
@@ -193,6 +205,7 @@ export interface DesignFromSequenceRequest {
   amplicon_target?: number;
   amplicon_deviation?: number;
   conditions?: FromSequenceConditions;
+  engine?: DesignEngine;
 }
 
 export interface FromSequencePrimerResult extends PrimerAnalysis {
@@ -252,8 +265,8 @@ export interface DesignProbeResponse {
   probes: ProbeResult[];
 }
 
-export function designProbe(probe_region: string, conditions?: ProbeConditions): Promise<DesignProbeResponse> {
-  return postJson<DesignProbeResponse>('/design_probe', { probe_region, conditions });
+export function designProbe(probe_region: string, conditions?: ProbeConditions, engine?: DesignEngine): Promise<DesignProbeResponse> {
+  return postJson<DesignProbeResponse>('/design_probe', { probe_region, conditions, engine });
 }
 
 // ---------------------------------------------------------------------
@@ -293,6 +306,7 @@ export interface DesignArmsRequest {
   product_max?: number;
   max_common_candidates?: number;
   advanced?: AdvancedThermo;
+  engine?: DesignEngine;
 }
 
 export interface DesignArmsResponse {

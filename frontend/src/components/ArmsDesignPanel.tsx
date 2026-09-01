@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { SequenceData } from '../api/sequence';
 import { lookupVariant, searchVariants, type VariantHit } from '../api/variants';
-import { designArms, type ArmsAllelePrimerResult, type ArmsCommonCandidateResult, type DesignArmsResponse } from '../api/design';
+import { designArms, type ArmsAllelePrimerResult, type ArmsCommonCandidateResult, type DesignArmsResponse, type DesignEngine } from '../api/design';
+import EngineSelect from './EngineSelect';
 import { ApiError } from '../api/client';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { normalizedTupleToInterval } from '../utils/coords';
@@ -175,6 +176,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: 
 
   const [mismatchEnabled, setMismatchEnabled] = useState(true);
   const [mismatchOffset, setMismatchOffset] = useState(3);
+  const [engine, setEngine] = useState<DesignEngine>('primer3');
 
   const [designLoading, setDesignLoading] = useState(false);
   const [designError, setDesignError] = useState<string | null>(null);
@@ -369,18 +371,14 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: 
                 Select
               </button>
             ) : (
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 w-full max-w-[10rem]">
                 <div className="flex items-center gap-1">
-                  <span className="text-xs">Ref:</span>
-                  <select className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700" value={hitRefAllele[h.id] ?? orientedAlleles(h)[0] ?? ''} onChange={(e) => setHitRefAllele((prev) => ({ ...prev, [h.id]: e.target.value }))}>
-                    {orientedAlleles(h).map((a) => (
-                      <option key={a} value={a}>
-                        {a}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-xs">Alt:</span>
-                  <select className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700" value={hitAltAllele[h.id] ?? orientedAlleles(h)[1] ?? ''} onChange={(e) => setHitAltAllele((prev) => ({ ...prev, [h.id]: e.target.value }))}>
+                  <span className="text-xs shrink-0">Ref:</span>
+                  <select
+                    className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 flex-1 min-w-0"
+                    value={hitRefAllele[h.id] ?? orientedAlleles(h)[0] ?? ''}
+                    onChange={(e) => setHitRefAllele((prev) => ({ ...prev, [h.id]: e.target.value }))}
+                  >
                     {orientedAlleles(h).map((a) => (
                       <option key={a} value={a}>
                         {a}
@@ -388,7 +386,21 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: 
                     ))}
                   </select>
                 </div>
-                <button className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" onClick={() => confirmHitSelection(h)}>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs shrink-0">Alt:</span>
+                  <select
+                    className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 flex-1 min-w-0"
+                    value={hitAltAllele[h.id] ?? orientedAlleles(h)[1] ?? ''}
+                    onChange={(e) => setHitAltAllele((prev) => ({ ...prev, [h.id]: e.target.value }))}
+                  >
+                    {orientedAlleles(h).map((a) => (
+                      <option key={a} value={a}>
+                        {a}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition mt-1" onClick={() => confirmHitSelection(h)}>
                   Add Variant
                 </button>
               </div>
@@ -539,6 +551,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: 
           alt_allele: variant.altAllele,
           mismatch_enabled: mismatchEnabled,
           mismatch_offset: mismatchOffset,
+          engine,
         });
         outcomes.push({ variant, response: res });
       } catch (e) {
@@ -610,7 +623,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: 
                 {sort ? `Sorted by ${visibleColumns[sort.columnIndex]?.column.header ?? ''} (${sort.direction})` : 'Sorted by clinical relevance'} — showing {pagedHits.length ? clampedPage * pageSize + 1 : 0}–
                 {clampedPage * pageSize + pagedHits.length} of {sortedHits.length}
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {pageMissingFreq && (
                   <button
                     disabled={bulkFreqLoading}
@@ -734,6 +747,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: 
             <input type="number" min={1} value={mismatchOffset} onChange={(e) => setMismatchOffset(parseInt(e.target.value, 10) || 1)} className="w-32 rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border" />
           </div>
         )}
+        <EngineSelect value={engine} onChange={setEngine} />
         <button disabled={designLoading || selectedVariants.length === 0} onClick={() => void runDesign()} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm">
           {designLoading ? `Designing… (${results.length}/${selectedVariants.length})` : `Design ARMS Primers${selectedVariants.length > 1 ? ` (${selectedVariants.length})` : ''}`}
         </button>

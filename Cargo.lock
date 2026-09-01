@@ -3487,6 +3487,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "thermo-core",
  "thiserror 1.0.69",
  "tokio",
  "tower",

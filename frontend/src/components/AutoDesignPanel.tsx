@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { SequenceData } from '../api/sequence';
-import { designFlanking, designInternal, designJunction, type FlankingOligoResult, type InternalDesignPair, type JunctionPairResult } from '../api/design';
+import { designFlanking, designInternal, designJunction, type DesignEngine, type FlankingOligoResult, type InternalDesignPair, type JunctionPairResult } from '../api/design';
+import EngineSelect from './EngineSelect';
 import { ApiError } from '../api/client';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { rawTupleToInterval } from '../utils/coords';
@@ -29,6 +30,7 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
   const [targetEnd, setTargetEnd] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [engine, setEngine] = useState<DesignEngine>('primer3');
   const [flankingResult, setFlankingResult] = useState<{ forward: FlankingOligoResult[]; reverse: FlankingOligoResult[]; pairDg: number | null; pairFound: boolean } | null>(null);
   const [junctionPairs, setJunctionPairs] = useState<JunctionPairResult[] | null>(null);
   const [generalPairs, setGeneralPairs] = useState<InternalDesignPair[] | null>(null);
@@ -56,7 +58,7 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
     setJunctionPairs(null);
     setGeneralPairs(null);
     try {
-      const res = await designFlanking(data.upstream_seq, data.downstream_seq);
+      const res = await designFlanking(data.upstream_seq, data.downstream_seq, engine);
       const fwd = res.primers.forward.primers;
       const rev = res.primers.reverse.primers;
       if (!fwd.length || !rev.length) {
@@ -97,6 +99,7 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
         junction_overlap_max: overlapMax,
         amplicon_min: ampliconMin,
         amplicon_max: ampliconMax,
+        engine,
       });
       const pairs = res.primers.pairs;
       if (!pairs.length) {
@@ -220,6 +223,12 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
               <input type="number" min={1} value={ampliconMax} onChange={(e) => setAmpliconMax(parseInt(e.target.value, 10) || 1)} className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border" />
             </div>
           </div>
+        </div>
+      )}
+
+      {(primerMode === 'flanking' || primerMode === 'junction') && (
+        <div className="mb-4">
+          <EngineSelect value={engine} onChange={setEngine} />
         </div>
       )}
 

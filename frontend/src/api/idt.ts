@@ -1,5 +1,5 @@
 import { postJson } from './client';
-import type { PrimerAnalysis, PairAnalysis } from './design';
+import type { PrimerAnalysis, PairAnalysis, DesignEngine } from './design';
 
 // Matches `crates/server/src/routes/idt.rs` (Phase 8).
 
@@ -31,6 +31,22 @@ export interface IdtAnalyzeRequest {
   dntp_conc?: number;
   oligo_conc?: number;
   idt_region: 'us' | 'eu';
+  /** Which backend computes the "local" recompute alongside IDT's numbers.
+   * `"native"` also populates `native_hairpin`/`native_self_dimer_subopt`/
+   * `native_hetero_dimer_subopt` below — data with no primer3 equivalent
+   * (primer3's `thal()` has no suboptimal-structure enumeration). */
+  engine?: DesignEngine;
+}
+
+/** A single folded structure from `thermo_core::thermo` (hairpin or dimer),
+ * only ever populated when `engine: "native"` was requested. */
+export interface NativeThermoStructure {
+  tm: number;
+  dh: number;
+  ds: number;
+  dg37: number;
+  n_pairs: number;
+  structure: string;
 }
 
 /** IDT's raw per-endpoint JSON, or `{error: string}` if that one call
@@ -48,6 +64,10 @@ export interface IdtAnalyzeSide {
     self_dimer_delta_g: number | null;
   };
   local: PrimerAnalysis;
+  /** `null` unless `engine: "native"` was requested. */
+  native_hairpin: NativeThermoStructure | null;
+  /** Top suboptimal self-dimer alignments; `[]` unless `engine: "native"`. */
+  native_self_dimer_subopt: NativeThermoStructure[];
 }
 
 export interface IdtAnalyzeResponse {
@@ -59,6 +79,8 @@ export interface IdtAnalyzeResponse {
       hetero_dimer_delta_g: number | null;
     };
     local: PairAnalysis;
+    /** Top suboptimal heterodimer alignments; `[]` unless `engine: "native"`. */
+    native_hetero_dimer_subopt: NativeThermoStructure[];
   };
 }
 

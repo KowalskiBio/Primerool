@@ -19,6 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 engine = { path = "../engine" }
+thermo-core = { path = "../thermo-core" }
 primer3-ffi = { path = "../primer3-ffi" }
 providers = { path = "../providers" }
 blast = { path = "../blast" }

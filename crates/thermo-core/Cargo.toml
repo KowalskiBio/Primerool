@@ -8,8 +8,8 @@ description = "Plain-Rust DNA thermodynamics core (Tm, salt corrections, dimer/h
 
 [dependencies]
 thiserror.workspace = true
-
-[dev-dependencies]
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
 primer3-ffi = { path = "../primer3-ffi" }

@@ -4,11 +4,15 @@
 //! has no logging of its own at all).
 //!
 //! `/idt/analyze` merges IDT's raw results with a local `engine::analyze`
-//! recompute (`Primer3Backend`, matching every other route in this app) —
-//! a deliberately simpler merge than Oligool's own `_run_strider_analysis`
-//! (which layers on ViennaRNA dot-bracket structures and Strider ensemble/
-//! competition thermodynamics Primerool has no equivalent of); see the
-//! rewrite plan's Phase 8 notes.
+//! recompute, using whichever `engine` the request selects (`"primer3"`
+//! default, or `"native"` — see `crate::routes::select_backend`). When
+//! `engine="native"`, the response also carries suboptimal-dimer and
+//! dot-bracket structure data straight from `thermo_core::thermo`
+//! (`dimer_thermo_subopt`/`hairpin_thermo`) — the piece of Oligool's own
+//! `_run_strider_analysis` (ViennaRNA-style structure enumeration) that a
+//! plain `Primer3Backend` recompute has no equivalent of, since primer3's
+//! `thal()` reports only a single MFE structure with no subopt path.
+
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -18,11 +22,55 @@ use serde_json::{json, Value};
 
 use engine::analyze::{analyze_pair, analyze_primer};
 use engine::backend::ThermoParams;
-use engine::backend_primer3::Primer3Backend;
 use idt::{analyze as idt_analyze, extract_delta_g, get_token, AnalyzeParams, IdtError};
+use thermo_core::thermo::{dimer_thermo_subopt, hairpin_thermo, DimerThermo};
 
 use crate::error::AppError;
+use crate::routes::select_backend;
 use crate::state::AppState;
+
+const NATIVE_SUBOPT_COUNT: usize = 5;
+
+fn dimer_thermo_json(d: &DimerThermo) -> Value {
+    json!({
+        "tm": d.tm_celsius,
+        "dh": d.dh,
+        "ds": d.ds,
+        "dg37": d.dg37,
+        "n_pairs": d.n_pairs,
+        "structure": d.structure,
+    })
+}
+
+/// Native-only enrichment: real suboptimal dimer alignments (self and
+/// hetero) plus each primer's own hairpin structure/Tm, straight from
+/// `thermo_core::thermo` — bypassing the generic `ThermoBackend` trait
+/// (whose `DimerResult` has no structure field, shared as it is by
+/// `Primer3Backend`) since this data has no primer3 equivalent to report
+/// instead. `None` if the sequence doesn't fold under the requested salt
+/// conditions — a normal outcome (e.g. no self-complementarity at all),
+/// not an error.
+fn native_enrichment(p1_seq: &str, p2_seq: &str, mv_conc: f64, mg_conc: f64, dntp_conc: f64, oligo_conc_um: f64) -> Value {
+    let sodium_m = mv_conc / 1000.0;
+    let magnesium_m = ((mg_conc - dntp_conc) / 1000.0).max(0.0);
+    let strand_conc_m = oligo_conc_um * 1e-6;
+
+    let hairpin_json = |seq: &str| match hairpin_thermo(seq, sodium_m, magnesium_m, 2) {
+        Ok(h) => json!({"tm": h.tm_celsius, "dh": h.dh, "ds": h.ds, "dg37": h.dg37, "n_pairs": h.n_pairs, "structure": h.structure}),
+        Err(_) => Value::Null,
+    };
+    let subopt_json = |seq1: &str, seq2: Option<&str>| -> Vec<Value> {
+        dimer_thermo_subopt(seq1, seq2, NATIVE_SUBOPT_COUNT, sodium_m, magnesium_m, strand_conc_m, 0).iter().map(dimer_thermo_json).collect()
+    };
+
+    json!({
+        "m1_hairpin": hairpin_json(p1_seq),
+        "m2_hairpin": hairpin_json(p2_seq),
+        "m1_self_dimer_subopt": subopt_json(p1_seq, None),
+        "m2_self_dimer_subopt": subopt_json(p2_seq, None),
+        "hetero_dimer_subopt": subopt_json(p1_seq, Some(p2_seq)),
+    })
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -64,11 +112,12 @@ pub struct IdtAnalyzeRequest {
     pub dntp_conc: f64,
     pub oligo_conc: f64,
     pub idt_region: String,
+    pub engine: String,
 }
 
 impl Default for IdtAnalyzeRequest {
     fn default() -> Self {
-        Self { p1_seq: String::new(), p2_seq: String::new(), token: String::new(), mv_conc: 50.0, mg_conc: 10.0, dntp_conc: 0.8, oligo_conc: 0.25, idt_region: "eu".to_string() }
+        Self { p1_seq: String::new(), p2_seq: String::new(), token: String::new(), mv_conc: 50.0, mg_conc: 10.0, dntp_conc: 0.8, oligo_conc: 0.25, idt_region: "eu".to_string(), engine: "primer3".to_string() }
     }
 }
 
@@ -91,10 +140,17 @@ pub async fn idt_analyze_route(State(state): State<AppState>, Json(req): Json<Id
     // `PRIMER_DNTP_CONC` pair needs replicated). `oligo_conc` is IDT's
     // µM convention; primer3's `dna_conc` is nM, hence the ×1000.
     let thermo = ThermoParams { mv_conc: req.mv_conc, dv_conc: req.mg_conc, dntp_conc: req.dntp_conc, dna_conc: req.oligo_conc * 1000.0 };
-    let backend = Primer3Backend;
-    let m1_local = analyze_primer(&backend, &req.p1_seq, thermo);
-    let m2_local = analyze_primer(&backend, &req.p2_seq, thermo);
-    let pair_local = analyze_pair(&backend, &req.p1_seq, &req.p2_seq, thermo);
+    let backend = select_backend(&req.engine);
+    let m1_local = analyze_primer(backend.as_ref(), &req.p1_seq, thermo);
+    let m2_local = analyze_primer(backend.as_ref(), &req.p2_seq, thermo);
+    let pair_local = analyze_pair(backend.as_ref(), &req.p1_seq, &req.p2_seq, thermo);
+
+    let native = if req.engine.eq_ignore_ascii_case("native") {
+        Some(native_enrichment(&req.p1_seq, &req.p2_seq, req.mv_conc, req.mg_conc, req.dntp_conc, req.oligo_conc))
+    } else {
+        None
+    };
+    let native_field = |key: &str| native.as_ref().and_then(|v| v.get(key)).cloned().unwrap_or(Value::Null);
 
     Ok(Json(json!({
         "m1": {
@@ -106,6 +162,8 @@ pub async fn idt_analyze_route(State(state): State<AppState>, Json(req): Json<Id
                 "self_dimer_delta_g": extract_delta_g(&idt_result.m1_selfdimer),
             },
             "local": m1_local,
+            "native_hairpin": native_field("m1_hairpin"),
+            "native_self_dimer_subopt": native_field("m1_self_dimer_subopt"),
         },
         "m2": {
             "idt": {
@@ -116,6 +174,8 @@ pub async fn idt_analyze_route(State(state): State<AppState>, Json(req): Json<Id
                 "self_dimer_delta_g": extract_delta_g(&idt_result.m2_selfdimer),
             },
             "local": m2_local,
+            "native_hairpin": native_field("m2_hairpin"),
+            "native_self_dimer_subopt": native_field("m2_self_dimer_subopt"),
         },
         "pairwise": {
             "idt": {
@@ -123,6 +183,7 @@ pub async fn idt_analyze_route(State(state): State<AppState>, Json(req): Json<Id
                 "hetero_dimer_delta_g": extract_delta_g(&idt_result.hetero),
             },
             "local": pair_local,
+            "native_hetero_dimer_subopt": native_field("hetero_dimer_subopt"),
         },
     })))
 }

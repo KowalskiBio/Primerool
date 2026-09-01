@@ -4,17 +4,17 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use engine::backend_primer3::Primer3Backend;
 use engine::design_probe::{design_probe as engine_design_probe, ProbeDesignOverrides};
 
 use crate::error::AppError;
-use crate::routes::{analysis_json_with, clean_seq, raw_tuple, AdvancedThermo};
+use crate::routes::{analysis_json_with, clean_seq, raw_tuple, select_backend, AdvancedThermo};
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct DesignProbeRequest {
     pub probe_region: String,
     pub conditions: Option<ProbeConditions>,
+    pub engine: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -59,9 +59,10 @@ pub async fn design_probe(Json(req): Json<DesignProbeRequest>) -> Result<Json<Va
     // it directly on an async handler would block that tokio worker thread
     // for the whole call, starving other requests; `spawn_blocking` moves
     // it onto tokio's blocking thread pool instead.
+    let engine_name = req.engine.clone();
     tokio::task::spawn_blocking(move || {
-        let backend = Primer3Backend;
-        let (probes, explain) = engine_design_probe(&backend, &probe_region, thermo, overrides).map_err(|e| AppError::server_error(format!("Server error: {e}")))?;
+        let backend = select_backend(&engine_name);
+        let (probes, explain) = engine_design_probe(backend.as_ref(), &probe_region, thermo, overrides).map_err(|e| AppError::server_error(format!("Server error: {e}")))?;
 
         if probes.is_empty() {
             // Preserves a real bug in `main.py`: it reads

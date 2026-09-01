@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SequenceData } from '../api/sequence';
-import { designFromSequence, designProbe, type BestPairResult, type FromSequencePrimerResult, type ProbeResult } from '../api/design';
+import { designFromSequence, designProbe, type BestPairResult, type DesignEngine, type FromSequencePrimerResult, type ProbeResult } from '../api/design';
+import EngineSelect from './EngineSelect';
 import { ApiError } from '../api/client';
 import { cleanDNA, reverseComplement } from '../utils/dna';
 import { rawTupleToInterval } from '../utils/coords';
@@ -64,6 +65,7 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [engine, setEngine] = useState<DesignEngine>('primer3');
   const [fromSeqResult, setFromSeqResult] = useState<{ forward: FromSequencePrimerResult[]; reverse: FromSequencePrimerResult[]; bestPairs: BestPairResult[]; offset: number } | null>(null);
   const [probeResult, setProbeResult] = useState<{ probes: ProbeResult[]; offset: number } | null>(null);
   // A ref, not state: this just remembers which request we've already
@@ -206,6 +208,7 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
         amplicon_target: target ?? undefined,
         amplicon_deviation: dev ?? undefined,
         conditions: { tm_min: tmMin, tm_opt: tmOpt, tm_max: tmMax, len_min: lenMin, len_opt: lenOpt, len_max: lenMax, gc_min: gcMin, gc_max: gcMax, num_return: numReturn, advanced },
+        engine,
       });
       setFromSeqResult({ forward: res.forward_primers, reverse: res.reverse_primers, bestPairs: res.best_pairs, offset: -upstreamLen });
     } catch (e) {
@@ -236,7 +239,7 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
         probe_gc_max: probeGcMax || PROBE_DEFAULTS_STANDALONE.gcMax,
         advanced,
         num_return: numReturn,
-      });
+      }, engine);
       const idx = (data.gene_seq || '').indexOf(probeRegion);
       setProbeResult({ probes: res.probes, offset: idx !== -1 ? idx : 0 });
     } catch (e) {
@@ -263,7 +266,7 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
         probe_gc_max: probeGcMax || PROBE_DEFAULTS_IN_AMPLICON.gcMax,
         advanced,
         num_return: 5,
-      });
+      }, engine);
       setProbeResult({ probes: res.probes, offset });
     } catch (e) {
       setError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
@@ -352,9 +355,12 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
           <NumberTriple label="Melting Temperature (Tm, °C)" min={tmMin} opt={tmOpt} max={tmMax} onMin={setTmMin} onOpt={setTmOpt} onMax={setTmMax} step={0.5} />
           <NumberTriple label="Primer Length (bp)" min={lenMin} opt={lenOpt} max={lenMax} onMin={setLenMin} onOpt={setLenOpt} onMax={setLenMax} step={1} />
           <NumberPair label="GC Content (%)" min={gcMin} max={gcMax} onMin={setGcMin} onMax={setGcMax} />
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Max Options to Return</label>
-            <input type="number" step={1} min={1} max={20} value={numReturn} onChange={(e) => setNumReturn(parseInt(e.target.value, 10) || 5)} className="w-24 rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border" />
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Max Options to Return</label>
+              <input type="number" step={1} min={1} max={20} value={numReturn} onChange={(e) => setNumReturn(parseInt(e.target.value, 10) || 5)} className="w-24 rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border" />
+            </div>
+            <EngineSelect value={engine} onChange={setEngine} />
           </div>
 
           <details className="mt-2 border-t border-slate-100 dark:border-slate-700 pt-2">

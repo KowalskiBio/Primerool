@@ -19,11 +19,30 @@ pub mod search_variants;
 pub mod sequence;
 
 use engine::analyze::PrimerAnalysis;
-use engine::backend::ThermoParams;
+use engine::backend::{ThermoBackend, ThermoParams};
+use engine::backend_native::NativeBackend;
+use engine::backend_primer3::Primer3Backend;
 use serde::Deserialize;
 use serde_json::Value;
 
 pub(crate) const DEFAULT_SPECIES: &str = "homo_sapiens";
+
+/// Every design route's `engine` request field: `"primer3"` (default,
+/// matching Oligool's own default) selects the real primer3 C library via
+/// FFI; `"native"` selects `thermo-core`'s from-scratch Rust engine (now
+/// Mathews2004-parameter-set-accurate for hairpin/dimer Tm — see
+/// `crates/thermo-core/tests/mathews2004_parity.rs` — though it still
+/// ranks *candidate* primers differently than primer3, per
+/// `crates/engine/native_vs_primer3_report.md`). Boxed rather than generic
+/// because each route's request is only known at runtime, and the
+/// `design_*` engine functions already take `&dyn ThermoBackend`.
+pub(crate) fn select_backend(requested: &str) -> Box<dyn ThermoBackend> {
+    if requested.eq_ignore_ascii_case("native") {
+        Box::new(NativeBackend)
+    } else {
+        Box::new(Primer3Backend)
+    }
+}
 
 /// `cond.advanced` in every design route's request body — the same
 /// four-key thermo shape everywhere (`primer_utils.py::_thermo_kwargs`'s

@@ -4,13 +4,12 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use engine::backend_primer3::Primer3Backend;
 use engine::design_from_sequence::{
     design_from_sequence as engine_design_from_sequence, AmpliconTarget, DesignFromSequenceError, FromSequenceOverrides, RegionPosition,
 };
 
 use crate::error::AppError;
-use crate::routes::{analysis_json_with, raw_tuple, AdvancedThermo};
+use crate::routes::{analysis_json_with, raw_tuple, select_backend, AdvancedThermo};
 
 fn clean_dna(s: &str) -> String {
     s.trim().to_uppercase().chars().filter(|c| matches!(c, 'A' | 'C' | 'G' | 'T' | 'N')).collect()
@@ -27,6 +26,7 @@ pub struct DesignFromSequenceRequest {
     pub amplicon_target: Option<i32>,
     pub amplicon_deviation: Option<i32>,
     pub conditions: Option<FromSequenceConditions>,
+    pub engine: String,
 }
 
 impl Default for DesignFromSequenceRequest {
@@ -40,6 +40,7 @@ impl Default for DesignFromSequenceRequest {
             amplicon_target: None,
             amplicon_deviation: None,
             conditions: None,
+            engine: "primer3".to_string(),
         }
     }
 }
@@ -93,16 +94,17 @@ pub async fn design_from_sequence(Json(req): Json<DesignFromSequenceRequest>) ->
 
     let fwd = if req.fwd_pos != -1 { RegionPosition { pos: req.fwd_pos, len: fwd_region.len() as i32 } } else { RegionPosition::unspecified() };
     let rev = if req.rev_pos != -1 { RegionPosition { pos: req.rev_pos, len: rev_region.len() as i32 } } else { RegionPosition::unspecified() };
+    let engine_name = req.engine.clone();
 
     // CPU-bound FFI work — see `design_probe.rs`'s identical comment on why
     // this runs via `spawn_blocking` rather than directly on the async
     // handler.
     tokio::task::spawn_blocking(move || {
-        let backend = Primer3Backend;
+        let backend = select_backend(&engine_name);
         let template = if template_seq.is_empty() { None } else { Some(template_seq.as_str()) };
         let is_unified = template.is_some();
 
-        let result = engine_design_from_sequence(&backend, &fwd_region, &rev_region, template, fwd, rev, amplicon, overrides, thermo).map_err(|e| match e {
+        let result = engine_design_from_sequence(backend.as_ref(), &fwd_region, &rev_region, template, fwd, rev, amplicon, overrides, thermo).map_err(|e| match e {
             DesignFromSequenceError::NoPairsFound(msg) => AppError::not_found(msg),
             DesignFromSequenceError::Primer3(e) => AppError::server_error(format!("Server error: {e}")),
         })?;

@@ -93,6 +93,16 @@
     background-color: #eff6ff;
   }
 
+  .seq-search-hit {
+    border-radius: 2px;
+    box-shadow: 0 0 0 2px #eab308; /* yellow-500 */
+  }
+
+  .seq-search-hit-active {
+    box-shadow: 0 0 0 2px #c2410c; /* orange-700 */
+    background-color: #fdba74; /* orange-300 */
+  }
+
   .exon-label {
     display: block;
     color: #64748b;

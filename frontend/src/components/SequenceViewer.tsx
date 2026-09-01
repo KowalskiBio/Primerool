@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SequenceData } from '../api/sequence';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { mapPrimerToGenomic } from '../utils/regionMapping';
-import { reverseComplement } from '../utils/dna';
+import { cleanDNA, reverseComplement } from '../utils/dna';
 import { analyzePrimer } from '../api/design';
 
 interface Segment {
@@ -24,6 +24,12 @@ interface Segment {
    * its first character — for editable segments this is always in the same
    * coordinate space as the owning `Selection.start`/`end`. */
   startPos: number;
+  /** Which raw sequence `startPos` is local to — 'up'/'down' reset to 0 at
+   * their own flank's start, 'gene' runs continuously across the whole
+   * gene block. Needed by the sequence-search highlighter below to look up
+   * match intervals (computed once per region against `data.*_seq`)
+   * against the right coordinate space. */
+  region: 'up' | 'gene' | 'down';
 }
 
 /** Extra characters carved out on each side of an editable primer/probe's
@@ -51,11 +57,11 @@ const DRAG_BUFFER = 15;
  * editable), up to `DRAG_BUFFER` extra characters immediately before/after
  * it are carved out as separate "buffer" segments tagged with the same
  * `key` — see `DRAG_BUFFER`'s doc comment. */
-function sliceWithIntervals(rawSeq: string, intervals: { start: number; end: number; className: string; id?: string; key?: keyof Selections }[], baseClassName: string, baseOffset = 0): Segment[] {
+function sliceWithIntervals(rawSeq: string, intervals: { start: number; end: number; className: string; id?: string; key?: keyof Selections }[], baseClassName: string, baseOffset = 0): Omit<Segment, 'region'>[] {
   if (intervals.length === 0) return [{ text: rawSeq, className: baseClassName, startPos: baseOffset }];
 
   const sorted = [...intervals].sort((a, b) => a.start - b.start);
-  const segments: Segment[] = [];
+  const segments: Omit<Segment, 'region'>[] = [];
   let cur = 0;
   for (const iv of sorted) {
     const s = Math.max(0, Math.max(cur, iv.start));
@@ -125,7 +131,7 @@ function flankSegments(rawSeq: string, regionName: 'up' | 'down', data: Sequence
   const inner = sliceWithIntervals(rawSeq, intervals, '');
   // Wrap the whole flank in `seq-flank` (matches legacy: unhighlighted text
   // is flank-gray, highlighted spans override with seq-primer).
-  return inner.map((s) => (s.className ? s : { ...s, className: 'seq-flank', fallbackClassName: s.key ? 'seq-flank' : s.fallbackClassName }));
+  return inner.map((s) => ({ ...(s.className ? s : { ...s, className: 'seq-flank', fallbackClassName: s.key ? 'seq-flank' : s.fallbackClassName }), region: regionName }));
 }
 
 function isInCDS(pos: number, cdsIntervals: [number, number][]): boolean {
@@ -169,7 +175,7 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
 
   function wrapHighlights(segmentSeq: string, startOffset: number, baseClassName: string, id?: string): Segment[] {
     const intervals = highlightIntervalsFor(startOffset, segmentSeq.length);
-    const inner = sliceWithIntervals(segmentSeq, intervals, baseClassName, startOffset);
+    const inner: Segment[] = sliceWithIntervals(segmentSeq, intervals, baseClassName, startOffset).map((s) => ({ ...s, region: 'gene' as const }));
     if (id && inner.length > 0) inner[0] = { ...inner[0], id };
     return inner;
   }
@@ -188,7 +194,7 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
 
     const pushIntron = (intronSeq: string, offset: number) => {
       if (truncateIntrons) {
-        segments.push({ text: `...intron ${intronSeq.length}bp...`, className: 'seq-intron-placeholder', startPos: offset });
+        segments.push({ text: `...intron ${intronSeq.length}bp...`, className: 'seq-intron-placeholder', startPos: offset, region: 'gene' });
       } else {
         segments.push(...wrapHighlights(intronSeq, offset, 'seq-intron'));
       }
@@ -335,6 +341,15 @@ interface Cell {
   isPlaceholder?: boolean;
   cursorClass?: string;
   onMouseDown?: (e: React.MouseEvent<HTMLSpanElement>) => void;
+  /** Which raw sequence `startPos` is local to — see `Segment.region`.
+   * Absent on placeholder cells (they don't correspond to real characters
+   * a search could land on). */
+  region?: Segment['region'];
+  /** Set by `applySearchHighlight` (post-`buildCells`, pre-`buildRows`) for
+   * any cell/sub-cell landing inside a "find in sequence" match. */
+  isSearchHit?: boolean;
+  isActiveSearchHit?: boolean;
+  searchIdx?: number;
 }
 
 interface Row {
@@ -380,7 +395,7 @@ function buildCells(
         const className = within ? colorClassName(s.key!) : (s.fallbackClassName ?? s.className);
         const isEdge = ci === 0 || ci === chars.length - 1;
         const type: 'move' | 'left' | 'right' = ci === 0 ? 'left' : ci === chars.length - 1 ? 'right' : 'move';
-        cells.push({ text: ch, className, startPos: pos, cursorClass: isEdge ? 'cursor-ew-resize' : 'cursor-grab', onMouseDown: (e) => startDrag(e, s.key!, type, sel) });
+        cells.push({ text: ch, className, startPos: pos, cursorClass: isEdge ? 'cursor-ew-resize' : 'cursor-grab', onMouseDown: (e) => startDrag(e, s.key!, type, sel), region: s.region });
       });
       continue;
     }
@@ -393,15 +408,95 @@ function buildCells(
         const pos = s.startPos + ci;
         const within = pos >= live.start && pos < live.end;
         const className = within ? colorClassName(s.key!) : (s.fallbackClassName ?? s.className);
-        cells.push({ text: ch, className, startPos: pos });
+        cells.push({ text: ch, className, startPos: pos, region: s.region });
       });
       continue;
     }
 
-    cells.push({ text: s.text, className: s.className, id: s.id, startPos: s.startPos });
+    cells.push({ text: s.text, className: s.className, id: s.id, startPos: s.startPos, region: s.region });
   }
 
   return cells;
+}
+
+interface SearchMatch {
+  start: number;
+  end: number;
+  region: 'up' | 'gene' | 'down';
+  idx: number;
+}
+
+const SEARCH_REGION_ORDER: Record<SearchMatch['region'], number> = { up: 0, gene: 1, down: 2 };
+
+/** Finds every occurrence of `query` (and, optionally, its reverse
+ * complement) in each of the sequence's three raw regions independently —
+ * matches are reported in each region's own local coordinates, matching
+ * `Segment`/`Cell.startPos`'s coordinate space, so `applySearchHighlight`
+ * can look them up against a cell without any region-to-region offset
+ * math. Ordered up -> gene -> down, by start within each, so match index 0
+ * is always the first hit a reader would scroll past. */
+function computeSearchMatches(data: SequenceData, query: string, includeRevComp: boolean): SearchMatch[] {
+  const q = cleanDNA(query);
+  if (!q) return [];
+  const terms = includeRevComp ? Array.from(new Set([q, reverseComplement(q)])) : [q];
+
+  function matchesIn(raw: string, region: SearchMatch['region']): Omit<SearchMatch, 'idx'>[] {
+    const haystack = raw.toUpperCase();
+    const out: Omit<SearchMatch, 'idx'>[] = [];
+    for (const term of terms) {
+      if (!term) continue;
+      let i = haystack.indexOf(term);
+      while (i !== -1) {
+        out.push({ start: i, end: i + term.length, region });
+        i = haystack.indexOf(term, i + 1);
+      }
+    }
+    return out;
+  }
+
+  const all = [...matchesIn(data.upstream_seq || '', 'up'), ...matchesIn(data.gene_seq || '', 'gene'), ...matchesIn(data.downstream_seq || '', 'down')];
+  all.sort((a, b) => SEARCH_REGION_ORDER[a.region] - SEARCH_REGION_ORDER[b.region] || a.start - b.start);
+  return all.map((m, idx) => ({ ...m, idx }));
+}
+
+/** Splits any cell that overlaps a search match into up to three pieces
+ * (before / hit / after), tagging the hit piece for styling — the same
+ * merge-and-slice shape as `sliceWithIntervals`, one level later in the
+ * pipeline (over already-built `Cell`s instead of raw sequence, since a
+ * match can land inside any kind of cell: flank, CDS, an already-selected
+ * primer, even a single dragged character). Placeholder cells (truncated
+ * introns) are left alone — nothing to show inside a collapsed intron. */
+function applySearchHighlight(cells: Cell[], matches: SearchMatch[], activeIdx: number): Cell[] {
+  if (matches.length === 0) return cells;
+  const out: Cell[] = [];
+
+  for (const cell of cells) {
+    if (cell.isPlaceholder || !cell.region) {
+      out.push(cell);
+      continue;
+    }
+
+    const cellStart = cell.startPos;
+    const cellEnd = cellStart + cell.text.length;
+    const relevant = matches.filter((m) => m.region === cell.region && m.end > cellStart && m.start < cellEnd).sort((a, b) => a.start - b.start);
+    if (relevant.length === 0) {
+      out.push(cell);
+      continue;
+    }
+
+    let cur = cellStart;
+    for (const m of relevant) {
+      const s = Math.max(cellStart, cur, m.start);
+      const e = Math.min(cellEnd, m.end);
+      if (e <= s) continue;
+      if (s > cur) out.push({ ...cell, text: cell.text.slice(cur - cellStart, s - cellStart), startPos: cur });
+      out.push({ ...cell, text: cell.text.slice(s - cellStart, e - cellStart), startPos: s, isSearchHit: true, isActiveSearchHit: m.idx === activeIdx, searchIdx: m.idx });
+      cur = e;
+    }
+    if (cur < cellEnd) out.push({ ...cell, text: cell.text.slice(cur - cellStart), startPos: cur });
+  }
+
+  return out;
 }
 
 /** Chunks `cells` into fixed-`lineWidth` rows for the position gutter.
@@ -441,7 +536,17 @@ function buildRows(cells: Cell[], lineWidth: number): Row[] {
     while (remaining.length > 0) {
       if (currentLen === 0) rowStart = cell.startPos + consumed;
       const take = remaining.slice(0, lineWidth - currentLen);
-      current.push({ text: take, className: cell.className, id: firstPiece ? cell.id : undefined, startPos: cell.startPos + consumed, cursorClass: cell.cursorClass, onMouseDown: cell.onMouseDown });
+      current.push({
+        text: take,
+        className: cell.className,
+        id: firstPiece ? cell.id : undefined,
+        startPos: cell.startPos + consumed,
+        cursorClass: cell.cursorClass,
+        onMouseDown: cell.onMouseDown,
+        isSearchHit: cell.isSearchHit,
+        isActiveSearchHit: cell.isActiveSearchHit,
+        searchIdx: cell.searchIdx,
+      });
       firstPiece = false;
       currentLen += take.length;
       consumed += take.length;
@@ -548,6 +653,50 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     return keys;
   }, [segments, interactive]);
 
+  // "Find in sequence" — lets a reader locate a pasted primer/probe (or any
+  // sequence) within the map below, forward and/or reverse-complement.
+  const [searchQuery, setSearchQuery] = useState('');
+  const [includeRevComp, setIncludeRevComp] = useState(true);
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+
+  // A newly loaded sequence invalidates any in-progress search, and a
+  // changed query/checkbox should always land back on its first hit rather
+  // than keep whatever numeric index the previous search happened to be
+  // on. Adjusted here (render-time), not in an effect — React's documented
+  // pattern for "reset state when a prop/derived value changes" — so it
+  // resolves before this render paints instead of costing an extra one.
+  const [prevData, setPrevData] = useState(data);
+  const searchKey = `${searchQuery} ${includeRevComp}`;
+  const [prevSearchKey, setPrevSearchKey] = useState(searchKey);
+  if (data !== prevData) {
+    setPrevData(data);
+    if (searchQuery !== '') setSearchQuery('');
+  } else if (searchKey !== prevSearchKey) {
+    setPrevSearchKey(searchKey);
+    if (activeMatchIndex !== 0) setActiveMatchIndex(0);
+  }
+
+  const searchMatches = useMemo(() => computeSearchMatches(data, searchQuery, includeRevComp), [data, searchQuery, includeRevComp]);
+  const activeSearchIdx = searchMatches.length > 0 ? Math.min(activeMatchIndex, searchMatches.length - 1) : -1;
+
+  // Scrolling the active match into view is a real effect: it reaches out
+  // to the DOM (an external system) rather than deriving React state.
+  useEffect(() => {
+    if (activeSearchIdx < 0 || !containerRef.current) return;
+    const el = containerRef.current.querySelector(`[data-search-idx="${activeSearchIdx}"]`);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [activeSearchIdx, searchMatches]);
+
+  function gotoNextMatch() {
+    if (searchMatches.length === 0) return;
+    setActiveMatchIndex((i) => (Math.min(i, searchMatches.length - 1) + 1) % searchMatches.length);
+  }
+
+  function gotoPrevMatch() {
+    if (searchMatches.length === 0) return;
+    setActiveMatchIndex((i) => (Math.min(i, searchMatches.length - 1) - 1 + searchMatches.length) % searchMatches.length);
+  }
+
   function commitDrag(session: DragSession, finalDeltaChars: number) {
     if (finalDeltaChars === 0) return; // a click with no drag — leave the selection untouched
     const sel = selections[session.selKey];
@@ -605,7 +754,8 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     setDeltaChars(0);
   }
 
-  const cells = buildCells(segments, interactive, dragSession, deltaChars, editableKeys, data, selections, startDrag);
+  const rawCells = buildCells(segments, interactive, dragSession, deltaChars, editableKeys, data, selections, startDrag);
+  const cells = applySearchHighlight(rawCells, searchMatches, activeSearchIdx);
   const rows = buildRows(cells, lineWidth);
 
   const modeText = data.include_introns
@@ -630,6 +780,62 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
           Numbers on the left mark each row's first position — 0-based from the start of its own region (upstream flank, gene, or downstream flank).
         </p>
       </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-3 bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+        <label htmlFor="sequence-search-input" className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+          Find in sequence:
+        </label>
+        <input
+          id="sequence-search-input"
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            if (e.shiftKey) gotoPrevMatch();
+            else gotoNextMatch();
+          }}
+          placeholder="Paste a primer or sequence to locate..."
+          className="flex-1 min-w-[220px] rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-1.5 border font-mono"
+        />
+        <label className="inline-flex items-center gap-1 text-xs cursor-pointer text-slate-600 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={includeRevComp}
+            onChange={(e) => setIncludeRevComp(e.target.checked)}
+            className="h-3.5 w-3.5 text-green-600 rounded border-slate-300 focus:ring-green-500"
+          />
+          Include reverse complement
+        </label>
+        <button
+          type="button"
+          onClick={gotoPrevMatch}
+          title="Previous match"
+          className="px-2 py-1 text-xs font-medium bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-slate-200 rounded hover:bg-slate-100 dark:hover:bg-slate-600"
+        >
+          &#8592; Prev
+        </button>
+        <button
+          type="button"
+          onClick={gotoNextMatch}
+          title="Next match"
+          className="px-2 py-1 text-xs font-medium bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-slate-200 rounded hover:bg-slate-100 dark:hover:bg-slate-600"
+        >
+          Next &#8594;
+        </button>
+        <button
+          type="button"
+          onClick={() => setSearchQuery('')}
+          className="px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 border border-slate-200 dark:border-slate-600 rounded hover:border-red-200 dark:hover:border-red-900 bg-white dark:bg-slate-700"
+        >
+          Clear
+        </button>
+        <span className="text-xs text-slate-500 dark:text-slate-400">
+          {searchQuery === '' ? '' : searchMatches.length === 0 ? 'No matches found' : `${activeSearchIdx + 1} of ${searchMatches.length} match${searchMatches.length === 1 ? '' : 'es'}`}
+        </span>
+      </div>
+
       <div
         id="sequence-map"
         ref={containerRef}
@@ -664,7 +870,13 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
             <span className="select-none pl-1 pr-3 text-right text-slate-400 dark:text-slate-600 tabular-nums shrink-0 min-w-[5.5ch]">{row.startPos}</span>
             <span>
               {row.pieces.map((p, pi) => (
-                <span key={pi} className={`${p.className}${p.cursorClass ? ` ${p.cursorClass}` : ''}`} id={p.id} onMouseDown={p.onMouseDown}>
+                <span
+                  key={pi}
+                  className={`${p.className}${p.cursorClass ? ` ${p.cursorClass}` : ''}${p.isSearchHit ? ' seq-search-hit' : ''}${p.isActiveSearchHit ? ' seq-search-hit-active' : ''}`}
+                  id={p.id}
+                  data-search-idx={p.searchIdx}
+                  onMouseDown={p.onMouseDown}
+                >
                   {p.text}
                 </span>
               ))}

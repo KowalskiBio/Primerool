@@ -20,11 +20,21 @@ impl Default for ThermoParams {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct DimerResult {
     pub structure_found: bool,
     pub tm: Option<f64>,
     pub dg: Option<f64>,
+    /// The single MFE dot-bracket structure — `Some` only from
+    /// `NativeBackend` (`thermo-core` computes it as part of the same Tm/ΔG
+    /// walk); always `None` from `Primer3Backend`, whose `thal()` FFI result
+    /// isn't extracted this deep. For a dimer, defined over the
+    /// concatenation `seq1 + seq2` (see `DimerSvg`'s doc comment on the
+    /// frontend). `/idt/analyze`'s own native enrichment computes a ranked
+    /// list of *suboptimal* structures straight from `thermo_core::thermo`
+    /// for the same reason this field can't: `DimerResult` is shared with
+    /// `Primer3Backend` and only ever carries the one MFE fold.
+    pub structure: Option<String>,
 }
 
 /// `Sync` is a supertrait, not an afterthought: `engine::picker` scores

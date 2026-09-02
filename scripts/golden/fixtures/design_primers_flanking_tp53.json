@@ -4,7 +4,8 @@
     "body": {
       "downstream_seq": "AGAGAGCATGAAAATGGTTCTATGACTTTGCCTGATACAGATGCTACTTGACTTACGATGGTGTTACTTCCTGATAAACTCGTCGTAAGTTGAAAATATTGTAAGTTGAAAATGGATTTAATACACCTAATCTAAGGAACATCATAGCTTAGCCTAGCCTGCTTTTTTTTTTTTTTTTTTTGGAGACAGAGTCTCACTCT",
       "mode": "flanking",
-      "upstream_seq": "TGGGAAGCGAAAATTCCATGGGACTGACTTTCTGCTCTTGTCTTTCAGACTTCCTGAAAACAACGTTCTGGTAAGGACAAGGGTTGGGCTGGGGACCTGGAGGGCTGGGGACCTGGAGGGCTGGGGGGCTGGGGGGCTGAGGACCTGGTCCTCTGACTGCTCTTTTCACCCATCTACAGTCCCCCTTGCCGTCCCAAGCA"
+      "upstream_seq": "TGGGAAGCGAAAATTCCATGGGACTGACTTTCTGCTCTTGTCTTTCAGACTTCCTGAAAACAACGTTCTGGTAAGGACAAGGGTTGGGCTGGGGACCTGGAGGGCTGGGGACCTGGAGGGCTGGGGGGCTGGGGGGCTGAGGACCTGGTCCTCTGACTGCTCTTTTCACCCATCTACAGTCCCCCTTGCCGTCCCAAGCA",
+      "engine": "primer3"
     },
     "method": "POST",
     "path": "/design_primers"
@@ -22,12 +23,14 @@
               "hairpin": {
                 "dg": 0.0,
                 "structure_found": false,
-                "tm": 0.0
+                "tm": 0.0,
+                "structure": null
               },
               "homodimer": {
-                "dg": -1922.7,
+                "dg": -1.9,
                 "structure_found": true,
-                "tm": -48.0
+                "tm": -48.0,
+                "structure": null
               },
               "interval": [
                 173,
@@ -55,14 +58,16 @@
             {
               "gc_percent": 60.0,
               "hairpin": {
-                "dg": 154.6,
+                "dg": 0.2,
                 "structure_found": true,
-                "tm": 34.4
+                "tm": 34.4,
+                "structure": null
               },
               "homodimer": {
-                "dg": -2207.2,
+                "dg": -2.2,
                 "structure_found": true,
-                "tm": -38.9
+                "tm": -38.9,
+                "structure": null
               },
               "interval": [
                 72,
@@ -92,12 +97,14 @@
               "hairpin": {
                 "dg": 0.0,
                 "structure_found": false,
-                "tm": 0.0
+                "tm": 0.0,
+                "structure": null
               },
               "homodimer": {
-                "dg": -1922.7,
+                "dg": -1.9,
                 "structure_found": true,
-                "tm": -48.0
+                "tm": -48.0,
+                "structure": null
               },
               "interval": [
                 171,
@@ -127,12 +134,14 @@
               "hairpin": {
                 "dg": 0.0,
                 "structure_found": false,
-                "tm": 0.0
+                "tm": 0.0,
+                "structure": null
               },
               "homodimer": {
-                "dg": -1922.7,
+                "dg": -1.9,
                 "structure_found": true,
-                "tm": -48.0
+                "tm": -48.0,
+                "structure": null
               },
               "interval": [
                 172,
@@ -160,14 +169,16 @@
             {
               "gc_percent": 57.1,
               "hairpin": {
-                "dg": 154.6,
+                "dg": 0.2,
                 "structure_found": true,
-                "tm": 34.4
+                "tm": 34.4,
+                "structure": null
               },
               "homodimer": {
-                "dg": -2207.2,
+                "dg": -2.2,
                 "structure_found": true,
-                "tm": -38.9
+                "tm": -38.9,
+                "structure": null
               },
               "interval": [
                 71,
@@ -196,9 +207,10 @@
         },
         "pair_metrics": {
           "heterodimer": {
-            "dg": -4918.4,
+            "dg": -4.9,
             "structure_found": true,
-            "tm": 2.1
+            "tm": 2.1,
+            "structure": null
           }
         },
         "reverse": {
@@ -208,14 +220,16 @@
             {
               "gc_percent": 50.0,
               "hairpin": {
-                "dg": -312.8,
+                "dg": -0.3,
                 "structure_found": true,
-                "tm": 42.2
+                "tm": 42.2,
+                "structure": null
               },
               "homodimer": {
-                "dg": -6681.4,
+                "dg": -6.7,
                 "structure_found": true,
-                "tm": 21.9
+                "tm": 21.9,
+                "structure": null
               },
               "interval": [
                 145,
@@ -243,14 +257,16 @@
             {
               "gc_percent": 50.0,
               "hairpin": {
-                "dg": -484.7,
+                "dg": -0.5,
                 "structure_found": true,
-                "tm": 42.7
+                "tm": 42.7,
+                "structure": null
               },
               "homodimer": {
-                "dg": -7585.2,
+                "dg": -7.6,
                 "structure_found": true,
-                "tm": 25.0
+                "tm": 25.0,
+                "structure": null
               },
               "interval": [
                 141,
@@ -278,14 +294,16 @@
             {
               "gc_percent": 47.6,
               "hairpin": {
-                "dg": -312.8,
+                "dg": -0.3,
                 "structure_found": true,
-                "tm": 42.2
+                "tm": 42.2,
+                "structure": null
               },
               "homodimer": {
-                "dg": -6681.4,
+                "dg": -6.7,
                 "structure_found": true,
-                "tm": 21.9
+                "tm": 21.9,
+                "structure": null
               },
               "interval": [
                 145,
@@ -313,14 +331,16 @@
             {
               "gc_percent": 52.4,
               "hairpin": {
-                "dg": -484.7,
+                "dg": -0.5,
                 "structure_found": true,
-                "tm": 42.7
+                "tm": 42.7,
+                "structure": null
               },
               "homodimer": {
-                "dg": -7651.9,
+                "dg": -7.7,
                 "structure_found": true,
-                "tm": 20.2
+                "tm": 20.2,
+                "structure": null
               },
               "interval": [
                 141,
@@ -348,14 +368,16 @@
             {
               "gc_percent": 52.4,
               "hairpin": {
-                "dg": -484.7,
+                "dg": -0.5,
                 "structure_found": true,
-                "tm": 42.7
+                "tm": 42.7,
+                "structure": null
               },
               "homodimer": {
-                "dg": -7585.2,
+                "dg": -7.6,
                 "structure_found": true,
-                "tm": 25.0
+                "tm": 25.0,
+                "structure": null
               },
               "interval": [
                 142,

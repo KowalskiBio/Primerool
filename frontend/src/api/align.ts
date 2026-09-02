@@ -62,7 +62,7 @@ export interface DesignConservedRequest {
   col_end: number;
   target_start?: number;
   target_end?: number;
-  backend?: 'primer3' | 'native';
+  backend?: 'primer3' | 'strider';
   size_min?: number;
   size_opt?: number;
   size_max?: number;

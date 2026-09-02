@@ -53,7 +53,7 @@ impl Default for DesignArmsRequest {
             product_max: defaults.product_max as i64,
             max_common_candidates: defaults.max_common_candidates as i64,
             advanced: AdvancedThermo::default(),
-            engine: "primer3".to_string(),
+            engine: "strider".to_string(),
         }
     }
 }

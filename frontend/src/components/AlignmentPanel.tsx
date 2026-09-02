@@ -26,7 +26,7 @@ export default function AlignmentPanel() {
   const [useTarget, setUseTarget] = useState(false);
   const [targetStart, setTargetStart] = useState(0);
   const [targetEnd, setTargetEnd] = useState(0);
-  const [backend, setBackend] = useState<'primer3' | 'native'>('primer3');
+  const [backend, setBackend] = useState<'primer3' | 'strider'>('strider');
   const [designing, setDesigning] = useState(false);
   const [designError, setDesignError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<ConservedCandidate[] | null>(null);
@@ -151,9 +151,9 @@ export default function AlignmentPanel() {
 
             <div className="mb-3">
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Calculation engine</label>
-              <select value={backend} onChange={(e) => setBackend(e.target.value as 'primer3' | 'native')} className="rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border">
+              <select value={backend} onChange={(e) => setBackend(e.target.value as 'primer3' | 'strider')} className="rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border">
+                <option value="strider">Strider (fast)</option>
                 <option value="primer3">Primer3 (FFI)</option>
-                <option value="native">Native (Strider-derived)</option>
               </select>
             </div>
 

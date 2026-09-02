@@ -7,7 +7,7 @@ import InputPanel from './components/InputPanel';
 import TranscriptPanel from './components/TranscriptPanel';
 import SequenceFeaturesPanel from './components/SequenceFeaturesPanel';
 import AutoDesignPanel from './components/AutoDesignPanel';
-import ManualDesignPanel, { type ProbeSearchRequest } from './components/ManualDesignPanel';
+import ManualDesignPanel from './components/ManualDesignPanel';
 import AlignmentPanel from './components/AlignmentPanel';
 import IdtSettingsPanel, { type IdtCredentials } from './components/IdtSettingsPanel';
 
@@ -56,8 +56,6 @@ function App() {
   const [primerMode, setPrimerMode] = useState<'flanking' | 'junction' | 'general' | 'arms'>('flanking');
   const [ampTarget, setAmpTarget] = useState(150);
   const [ampDev, setAmpDev] = useState(50);
-  const [probeSearchRequest, setProbeSearchRequest] = useState<ProbeSearchRequest | null>(null);
-  const [probeSearchNonce, setProbeSearchNonce] = useState(0);
 
   // IDT OligoAnalyzer credentials — five discrete `localStorage` keys,
   // matching Oligool's own storage shape exactly (the rewrite plan's
@@ -116,20 +114,6 @@ function App() {
 
   const isCustomSequence = sequenceData?.transcript_id === 'custom';
 
-  function handleFindProbesInAmplicon() {
-    const { geneForward, geneReverse } = selections;
-    if (!geneForward || !geneReverse || !sequenceData) return;
-    const start = geneForward.end;
-    const end = geneReverse.start;
-    if (end - start < 20) {
-      window.alert('Amplicon region between primers is too short to design a probe.');
-      return;
-    }
-    const nonce = probeSearchNonce + 1;
-    setProbeSearchNonce(nonce);
-    setProbeSearchRequest({ probeRegion: sequenceData.gene_seq.substring(start, end), offset: start, nonce });
-  }
-
   return (
     <div className="min-h-screen py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
@@ -173,10 +157,6 @@ function App() {
               primerMode={primerMode}
               onPrimerModeChange={setPrimerMode}
               onClearSelections={() => setSelections(EMPTY_SELECTIONS)}
-              ampTarget={ampTarget}
-              ampDev={ampDev}
-              onFindProbesInAmplicon={handleFindProbesInAmplicon}
-              idtCredentials={hasIdtCredentials ? idtCredentials : undefined}
               onSelect={handleSelect}
             />
           </Card>
@@ -184,7 +164,15 @@ function App() {
 
         {sequenceData && !isCustomSequence && (
           <Card title="4. Primer Design (Automatic)">
-            <AutoDesignPanel data={sequenceData} species={species} apiSource={apiSource} primerMode={primerMode} onPrimerModeChange={setPrimerMode} onSelect={handleSelect} />
+            <AutoDesignPanel
+              data={sequenceData}
+              species={species}
+              apiSource={apiSource}
+              primerMode={primerMode}
+              onPrimerModeChange={setPrimerMode}
+              onSelect={handleSelect}
+              idtCredentials={hasIdtCredentials ? idtCredentials : undefined}
+            />
           </Card>
         )}
 
@@ -197,7 +185,7 @@ function App() {
               ampDev={ampDev}
               onAmpTargetChange={setAmpTarget}
               onAmpDevChange={setAmpDev}
-              probeSearchRequest={probeSearchRequest}
+              idtCredentials={hasIdtCredentials ? idtCredentials : undefined}
             />
           </Card>
         )}

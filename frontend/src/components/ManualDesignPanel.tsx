@@ -1,26 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { SequenceData } from '../api/sequence';
 import { designFromSequence, designProbe, type BestPairResult, type DesignEngine, type FromSequencePrimerResult, type ProbeResult } from '../api/design';
 import EngineSelect from './EngineSelect';
 import { ApiError } from '../api/client';
 import { cleanDNA, reverseComplement } from '../utils/dna';
 import { rawTupleToInterval } from '../utils/coords';
-import { fmt, yesNo } from '../utils/format';
+import { fmt } from '../utils/format';
 import type { Selection, Selections } from '../utils/regionMapping';
 import ResultsTable from './ResultsTable';
+import PrimerCard from './PrimerCard';
+import type { IdtCredentials } from './IdtSettingsPanel';
 
-/** The two probe-parameter presets confirmed in the legacy source (see the
- * rewrite plan's Phase 6c section) — genuinely different fallback defaults
- * at two call sites that happen to share one input panel today. Both stay
- * distinct here rather than being unified into one constant. */
+/** Probe-parameter presets confirmed in the legacy source (see the rewrite
+ * plan's Phase 6c section) for the standalone TaqMan probe design flow. */
 const PROBE_DEFAULTS_STANDALONE = { tmMin: 65, tmOpt: 70, tmMax: 75, lenMin: 18, lenOpt: 22, lenMax: 30, gcMin: 30, gcMax: 80 };
-const PROBE_DEFAULTS_IN_AMPLICON = { tmMin: 55, tmOpt: 60, tmMax: 75, lenMin: 18, lenOpt: 22, lenMax: 35, gcMin: 20, gcMax: 80 };
-
-export interface ProbeSearchRequest {
-  probeRegion: string;
-  offset: number;
-  nonce: number;
-}
 
 interface Props {
   data: SequenceData;
@@ -29,10 +22,10 @@ interface Props {
   ampDev: number;
   onAmpTargetChange: (v: number) => void;
   onAmpDevChange: (v: number) => void;
-  probeSearchRequest: ProbeSearchRequest | null;
+  idtCredentials?: IdtCredentials;
 }
 
-export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, onAmpTargetChange, onAmpDevChange, probeSearchRequest }: Props) {
+export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, onAmpTargetChange, onAmpDevChange, idtCredentials }: Props) {
   const [fwdRegionText, setFwdRegionText] = useState('');
   const [revRegionText, setRevRegionText] = useState('');
   const [probeRegionText, setProbeRegionText] = useState('');
@@ -65,13 +58,12 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [engine, setEngine] = useState<DesignEngine>('primer3');
+  const [engine, setEngine] = useState<DesignEngine>('strider');
   const [fromSeqResult, setFromSeqResult] = useState<{ forward: FromSequencePrimerResult[]; reverse: FromSequencePrimerResult[]; bestPairs: BestPairResult[]; offset: number } | null>(null);
   const [probeResult, setProbeResult] = useState<{ probes: ProbeResult[]; offset: number } | null>(null);
-  // A ref, not state: this just remembers which request we've already
-  // fired, it doesn't drive rendering — mutating it inside the effect
-  // below is the sanctioned pattern (unlike calling setState there).
-  const lastHandledProbeNonceRef = useRef(0);
+  const [usedFwdSeq, setUsedFwdSeq] = useState<string | null>(null);
+  const [usedRevSeq, setUsedRevSeq] = useState<string | null>(null);
+  const [usedProbeSeq, setUsedProbeSeq] = useState<string | null>(null);
 
   const advanced = { mv_conc: mvConc, dv_conc: dvConc, dntp_conc: dntpConc, dna_conc: dnaConc, max_poly_x: maxPolyX, max_ns: maxNs };
 
@@ -250,45 +242,6 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
     }
   }
 
-  async function runFindProbesInAmplicon(probeRegion: string, offset: number) {
-    setError(null);
-    setProbeRegionText(probeRegion);
-    setLoading(true);
-    try {
-      const res = await designProbe(probeRegion, {
-        probe_tm_min: probeTmMin || PROBE_DEFAULTS_IN_AMPLICON.tmMin,
-        probe_tm_opt: probeTmOpt || PROBE_DEFAULTS_IN_AMPLICON.tmOpt,
-        probe_tm_max: probeTmMax || PROBE_DEFAULTS_IN_AMPLICON.tmMax,
-        probe_len_min: probeLenMin || PROBE_DEFAULTS_IN_AMPLICON.lenMin,
-        probe_len_opt: probeLenOpt || PROBE_DEFAULTS_IN_AMPLICON.lenOpt,
-        probe_len_max: probeLenMax || PROBE_DEFAULTS_IN_AMPLICON.lenMax,
-        probe_gc_min: probeGcMin || PROBE_DEFAULTS_IN_AMPLICON.gcMin,
-        probe_gc_max: probeGcMax || PROBE_DEFAULTS_IN_AMPLICON.gcMax,
-        advanced,
-        num_return: 5,
-      }, engine);
-      setProbeResult({ probes: res.probes, offset });
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
-      setProbeResult(null);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Responds to Card 3's "Find Probes in this Amplicon" button (App.tsx
-  // computes the amplicon region from `selections` and hands it down here
-  // as a nonce-tagged request, since the two components are siblings, not
-  // parent/child). Triggering an async fetch in response to a prop change
-  // is exactly what `useEffect` is for — this isn't mirroring a prop into
-  // state synchronously (the pattern the lint rule warns about).
-  useEffect(() => {
-    if (probeSearchRequest && probeSearchRequest.nonce !== lastHandledProbeNonceRef.current) {
-      lastHandledProbeNonceRef.current = probeSearchRequest.nonce;
-      void runFindProbesInAmplicon(probeSearchRequest.probeRegion, probeSearchRequest.offset);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [probeSearchRequest]);
 
   return (
     <div>
@@ -394,35 +347,51 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
             {fromSeqResult.forward.length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4 ml-1">Forward Primers (from forward region)</h4>
-                <ResultsTable
-                  rows={fromSeqResult.forward}
-                  keyOf={(p, i) => `fp-${i}-${p.sequence}`}
-                  columns={primerAnalysisColumns((p) => {
-                    if (p.coords) {
-                      const [s, e] = rawTupleToInterval(p.coords, false);
-                      selectManualGene('forward', [s + fromSeqResult.offset, e + fromSeqResult.offset], p.sequence, 'manual');
-                    } else {
-                      findAndUsePrimer(p.sequence, 'forward', fromSeqResult.offset);
-                    }
-                  })}
-                />
+                <div className="space-y-2">
+                  {fromSeqResult.forward.map((p, i) => (
+                    <PrimerCard
+                      key={`fp-${i}-${p.sequence}`}
+                      index={i}
+                      primer={p}
+                      idtCredentials={idtCredentials}
+                      selected={usedFwdSeq === p.sequence}
+                      onUse={() => {
+                        setUsedFwdSeq(p.sequence);
+                        if (p.coords) {
+                          const [s, e] = rawTupleToInterval(p.coords, false);
+                          selectManualGene('forward', [s + fromSeqResult.offset, e + fromSeqResult.offset], p.sequence, 'manual');
+                        } else {
+                          findAndUsePrimer(p.sequence, 'forward', fromSeqResult.offset);
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
               </div>
             )}
             {fromSeqResult.reverse.length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4 ml-1">Reverse Primers (from reverse region)</h4>
-                <ResultsTable
-                  rows={fromSeqResult.reverse}
-                  keyOf={(p, i) => `rp-${i}-${p.sequence}`}
-                  columns={primerAnalysisColumns((p) => {
-                    if (p.coords) {
-                      const [s, e] = rawTupleToInterval(p.coords, true);
-                      selectManualGene('reverse', [s + fromSeqResult.offset, e + fromSeqResult.offset], p.sequence, 'manual');
-                    } else {
-                      findAndUsePrimer(p.sequence, 'reverse', fromSeqResult.offset);
-                    }
-                  })}
-                />
+                <div className="space-y-2">
+                  {fromSeqResult.reverse.map((p, i) => (
+                    <PrimerCard
+                      key={`rp-${i}-${p.sequence}`}
+                      index={i}
+                      primer={p}
+                      idtCredentials={idtCredentials}
+                      selected={usedRevSeq === p.sequence}
+                      onUse={() => {
+                        setUsedRevSeq(p.sequence);
+                        if (p.coords) {
+                          const [s, e] = rawTupleToInterval(p.coords, true);
+                          selectManualGene('reverse', [s + fromSeqResult.offset, e + fromSeqResult.offset], p.sequence, 'manual');
+                        } else {
+                          findAndUsePrimer(p.sequence, 'reverse', fromSeqResult.offset);
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
               </div>
             )}
             {fromSeqResult.bestPairs.length > 0 && (
@@ -471,62 +440,28 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
         {probeResult && probeResult.probes.length > 0 && (
           <div>
             <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4 ml-1">TaqMan Probes</h4>
-            <ResultsTable
-              accent="blue"
-              rows={probeResult.probes}
-              keyOf={(p, i) => `pr-${i}-${p.sequence}`}
-              columns={[
-                { header: '#', render: (_p, i) => i + 1 },
-                { header: "Sequence (5'→3')", render: (p) => p.sequence, className: 'font-mono text-blue-800 dark:text-blue-300' },
-                { header: 'Len', render: (p) => p.length },
-                { header: 'Tm', render: (p) => fmt(p.tm) },
-                { header: 'GC%', render: (p) => fmt(p.gc_percent) },
-                { header: 'Hairpin', render: (p) => yesNo(p.hairpin.structure_found) },
-                { header: 'Homol', render: (p) => yesNo(p.homodimer.structure_found) },
-                {
-                  header: 'Action',
-                  render: (p) => (
-                    <button
-                      className="px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition"
-                      onClick={() => {
-                        const [s, e] = rawTupleToInterval(p.coords, false);
-                        onSelect('geneProbe', { region: 'gene', start: probeResult.offset + s, end: probeResult.offset + e, primerSeq: p.sequence, bindingSeq: p.sequence, source: 'manual' });
-                      }}
-                    >
-                      Use
-                    </button>
-                  ),
-                },
-              ]}
-            />
+            <div className="space-y-2">
+              {probeResult.probes.map((p, i) => (
+                <PrimerCard
+                  key={`pr-${i}-${p.sequence}`}
+                  index={i}
+                  primer={p}
+                  idtCredentials={idtCredentials}
+                  selected={usedProbeSeq === p.sequence}
+                  onUse={() => {
+                    setUsedProbeSeq(p.sequence);
+                    const [s, e] = rawTupleToInterval(p.coords, false);
+                    onSelect('geneProbe', { region: 'gene', start: probeResult.offset + s, end: probeResult.offset + e, primerSeq: p.sequence, bindingSeq: p.sequence, source: 'manual' });
+                  }}
+                />
+              ))}
+            </div>
           </div>
         )}
 
       </div>
     </div>
   );
-}
-
-function primerAnalysisColumns(onUse: (p: FromSequencePrimerResult) => void) {
-  return [
-    { header: '#', render: (_p: FromSequencePrimerResult, i: number) => i + 1 },
-    { header: "Sequence (5'→3')", render: (p: FromSequencePrimerResult) => p.sequence, className: 'font-mono text-slate-800 dark:text-slate-200' },
-    { header: 'Len', render: (p: FromSequencePrimerResult) => p.length },
-    { header: 'Tm', render: (p: FromSequencePrimerResult) => fmt(p.tm) },
-    { header: 'GC%', render: (p: FromSequencePrimerResult) => fmt(p.gc_percent) },
-    { header: 'Hairpin', render: (p: FromSequencePrimerResult) => yesNo(p.hairpin.structure_found) },
-    { header: 'HP ΔG', render: (p: FromSequencePrimerResult) => fmt(p.hairpin.dg) },
-    { header: 'Homol', render: (p: FromSequencePrimerResult) => yesNo(p.homodimer.structure_found) },
-    { header: 'HD ΔG', render: (p: FromSequencePrimerResult) => fmt(p.homodimer.dg) },
-    {
-      header: 'Action',
-      render: (p: FromSequencePrimerResult) => (
-        <button className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" onClick={() => onUse(p)}>
-          Use
-        </button>
-      ),
-    },
-  ];
 }
 
 function NumberTriple({

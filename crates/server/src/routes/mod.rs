@@ -6,6 +6,7 @@
 
 pub mod align;
 pub mod analyze_primer;
+pub mod analyze_structure;
 pub mod blast;
 pub mod design_arms;
 pub mod design_conserved;
@@ -27,20 +28,24 @@ use serde_json::Value;
 
 pub(crate) const DEFAULT_SPECIES: &str = "homo_sapiens";
 
-/// Every design route's `engine` request field: `"primer3"` (default,
-/// matching Oligool's own default) selects the real primer3 C library via
-/// FFI; `"native"` selects `thermo-core`'s from-scratch Rust engine (now
-/// Mathews2004-parameter-set-accurate for hairpin/dimer Tm — see
-/// `crates/thermo-core/tests/mathews2004_parity.rs` — though it still
-/// ranks *candidate* primers differently than primer3, per
-/// `crates/engine/native_vs_primer3_report.md`). Boxed rather than generic
-/// because each route's request is only known at runtime, and the
-/// `design_*` engine functions already take `&dyn ThermoBackend`.
+/// Every design route's `engine` request field: `"strider"` (default —
+/// unlike Oligool, whose own default is primer3) selects `thermo-core`'s
+/// from-scratch Rust engine (`NativeBackend` internally; Mathews2004-
+/// parameter-set-accurate for hairpin/dimer Tm — see
+/// `crates/thermo-core/tests/mathews2004_parity.rs` — named "Strider" in
+/// every user-facing surface after Oligool's own engine of the same name,
+/// though it still ranks *candidate* primers differently than primer3, per
+/// `crates/engine/native_vs_primer3_report.md`); `"primer3"` selects the
+/// real primer3 C library via FFI. Anything else (including an
+/// omitted/empty field) falls back to Strider, not primer3 — the inverse of
+/// this app's original default. Boxed rather than generic because each
+/// route's request is only known at runtime, and the `design_*` engine
+/// functions already take `&dyn ThermoBackend`.
 pub(crate) fn select_backend(requested: &str) -> Box<dyn ThermoBackend> {
-    if requested.eq_ignore_ascii_case("native") {
-        Box::new(NativeBackend)
-    } else {
+    if requested.eq_ignore_ascii_case("primer3") {
         Box::new(Primer3Backend)
+    } else {
+        Box::new(NativeBackend)
     }
 }
 

@@ -24,6 +24,11 @@ export interface DimerResult {
   structure_found: boolean;
   tm: number | null;
   dg: number | null;
+  /** Dot-bracket structure for the single MFE fold — only ever populated by
+   * the Strider engine (`DesignEngine: "strider"`); always `null` from
+   * primer3. For a dimer, defined over the concatenation of the two
+   * strands (self-dimer: the same primer sequence twice). */
+  structure: string | null;
 }
 
 export interface PrimerAnalysis {
@@ -48,13 +53,14 @@ export interface AdvancedThermo {
   max_ns?: number;
 }
 
-/** `"primer3"` (default) uses the real primer3 C library via FFI;
- * `"native"` uses thermo-core's from-scratch Rust engine — now
- * Mathews2004-accurate for hairpin/dimer Tm (matching Oligool's own
- * default `parameter_set="mathews2004-dna"`), though it still ranks
- * *candidate* primers differently than primer3 (see
- * crates/engine/native_vs_primer3_report.md). */
-export type DesignEngine = 'primer3' | 'native';
+/** `"strider"` (default here — Oligool's own default is primer3) uses
+ * thermo-core's from-scratch Rust engine, named for Oligool's engine of the
+ * same name — now Mathews2004-accurate for hairpin/dimer Tm (matching
+ * Oligool's own default `parameter_set="mathews2004-dna"`), though it still
+ * ranks *candidate* primers differently than primer3 (see
+ * crates/engine/native_vs_primer3_report.md). `"primer3"` uses the real
+ * primer3 C library via FFI. */
+export type DesignEngine = 'primer3' | 'strider';
 
 // ---------------------------------------------------------------------
 // /design_primers — classic internal (SEQUENCE_TARGET)

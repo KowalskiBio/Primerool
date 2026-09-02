@@ -40,7 +40,7 @@ impl Default for DesignFromSequenceRequest {
             amplicon_target: None,
             amplicon_deviation: None,
             conditions: None,
-            engine: "primer3".to_string(),
+            engine: "strider".to_string(),
         }
     }
 }

@@ -32,15 +32,15 @@ export interface IdtAnalyzeRequest {
   oligo_conc?: number;
   idt_region: 'us' | 'eu';
   /** Which backend computes the "local" recompute alongside IDT's numbers.
-   * `"native"` also populates `native_hairpin`/`native_self_dimer_subopt`/
-   * `native_hetero_dimer_subopt` below — data with no primer3 equivalent
+   * `"strider"` also populates `strider_hairpin`/`strider_self_dimer_subopt`/
+   * `strider_hetero_dimer_subopt` below — data with no primer3 equivalent
    * (primer3's `thal()` has no suboptimal-structure enumeration). */
   engine?: DesignEngine;
 }
 
 /** A single folded structure from `thermo_core::thermo` (hairpin or dimer),
- * only ever populated when `engine: "native"` was requested. */
-export interface NativeThermoStructure {
+ * only ever populated when `engine: "strider"` was requested. */
+export interface StriderThermoStructure {
   tm: number;
   dh: number;
   ds: number;
@@ -64,10 +64,10 @@ export interface IdtAnalyzeSide {
     self_dimer_delta_g: number | null;
   };
   local: PrimerAnalysis;
-  /** `null` unless `engine: "native"` was requested. */
-  native_hairpin: NativeThermoStructure | null;
-  /** Top suboptimal self-dimer alignments; `[]` unless `engine: "native"`. */
-  native_self_dimer_subopt: NativeThermoStructure[];
+  /** `null` unless `engine: "strider"` was requested. */
+  strider_hairpin: StriderThermoStructure | null;
+  /** Top suboptimal self-dimer alignments; `[]` unless `engine: "strider"`. */
+  strider_self_dimer_subopt: StriderThermoStructure[];
 }
 
 export interface IdtAnalyzeResponse {
@@ -79,8 +79,8 @@ export interface IdtAnalyzeResponse {
       hetero_dimer_delta_g: number | null;
     };
     local: PairAnalysis;
-    /** Top suboptimal heterodimer alignments; `[]` unless `engine: "native"`. */
-    native_hetero_dimer_subopt: NativeThermoStructure[];
+    /** Top suboptimal heterodimer alignments; `[]` unless `engine: "strider"`. */
+    strider_hetero_dimer_subopt: StriderThermoStructure[];
   };
 }
 

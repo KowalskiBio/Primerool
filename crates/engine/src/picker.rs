@@ -93,7 +93,7 @@ pub fn scan_candidates(template: &str, constraints: &CandidateConstraints) -> Ve
     out
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ScoredCandidate {
     pub candidate: Candidate,
     pub tm: f64,
@@ -172,7 +172,7 @@ pub fn rank(mut scored: Vec<ScoredCandidate>) -> Vec<ScoredCandidate> {
     scored
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ScoredPair {
     pub left: ScoredCandidate,
     pub right: ScoredCandidate,
@@ -250,7 +250,7 @@ pub fn pick_pairs(
                 }
                 let heterodimer = backend.calc_heterodimer(l.candidate.sequence(template), r.candidate.sequence(template), thermo_params);
                 let penalty = l.penalty + r.penalty + weights.tm_diff * (l.tm - r.tm).abs();
-                Some(ScoredPair { left: *l, right: *r, product_size, heterodimer, penalty })
+                Some(ScoredPair { left: l.clone(), right: r.clone(), product_size, heterodimer, penalty })
             })
         })
         .collect();

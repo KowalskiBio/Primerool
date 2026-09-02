@@ -6,8 +6,10 @@ import { ApiError } from '../api/client';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { rawTupleToInterval } from '../utils/coords';
 import ResultsTable from './ResultsTable';
+import PrimerCard from './PrimerCard';
 import ArmsDesignPanel from './ArmsDesignPanel';
 import { fmt, yesNo } from '../utils/format';
+import type { IdtCredentials } from './IdtSettingsPanel';
 
 type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
 
@@ -18,9 +20,10 @@ interface Props {
   primerMode: PrimerMode;
   onPrimerModeChange: (mode: PrimerMode) => void;
   onSelect: (key: keyof Selections, value: Selection) => void;
+  idtCredentials?: IdtCredentials;
 }
 
-export default function AutoDesignPanel({ data, species, apiSource, primerMode, onPrimerModeChange, onSelect }: Props) {
+export default function AutoDesignPanel({ data, species, apiSource, primerMode, onPrimerModeChange, onSelect, idtCredentials }: Props) {
   const [junctionPos, setJunctionPos] = useState('');
   const [overlapMin, setOverlapMin] = useState(6);
   const [overlapMax, setOverlapMax] = useState(12);
@@ -30,10 +33,12 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
   const [targetEnd, setTargetEnd] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [engine, setEngine] = useState<DesignEngine>('primer3');
+  const [engine, setEngine] = useState<DesignEngine>('strider');
   const [flankingResult, setFlankingResult] = useState<{ forward: FlankingOligoResult[]; reverse: FlankingOligoResult[]; pairDg: number | null; pairFound: boolean } | null>(null);
   const [junctionPairs, setJunctionPairs] = useState<JunctionPairResult[] | null>(null);
   const [generalPairs, setGeneralPairs] = useState<InternalDesignPair[] | null>(null);
+  const [usedWgaFwdSeq, setUsedWgaFwdSeq] = useState<string | null>(null);
+  const [usedWgaRevSeq, setUsedWgaRevSeq] = useState<string | null>(null);
 
   function selectWGA(which: 'forward' | 'reverse', region: 'up' | 'down', interval: [number, number], primerSeq: string, source: 'recommended' | 'manual' = 'recommended') {
     const [start, end] = interval;
@@ -169,7 +174,7 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
         </label>
       </div>
 
-      {primerMode === 'arms' && <ArmsDesignPanel data={data} species={species} apiSource={apiSource} onSelect={onSelect} />}
+      {primerMode === 'arms' && <ArmsDesignPanel data={data} species={species} apiSource={apiSource} onSelect={onSelect} idtCredentials={idtCredentials} />}
 
       {primerMode === 'general' && (
         <div className="bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-6">
@@ -252,60 +257,48 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
           </div>
 
           <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4 ml-1">Forward primers (upstream flank)</h4>
-          <ResultsTable
-            rows={flankingResult.forward}
-            keyOf={(p, i) => `f-${i}-${p.sequence}`}
-            columns={[
-              { header: '#', render: (_p, i) => i + 1 },
-              { header: "Sequence (5'→3')", render: (p) => p.sequence, className: 'font-mono text-slate-800 dark:text-slate-200' },
-              { header: 'Len', render: (p) => p.length },
-              { header: 'Tm', render: (p) => fmt(p.tm) },
-              { header: 'GC%', render: (p) => fmt(p.gc_percent) },
-              { header: 'Hairpin', render: (p) => yesNo(p.hairpin.structure_found) },
-              { header: 'HP Tm', render: (p) => fmt(p.hairpin.tm) },
-              { header: 'HP ΔG', render: (p) => fmt(p.hairpin.dg) },
-              { header: 'Homol', render: (p) => yesNo(p.homodimer.structure_found) },
-              { header: 'HD Tm', render: (p) => fmt(p.homodimer.tm) },
-              { header: 'HD ΔG', render: (p) => fmt(p.homodimer.dg) },
-              {
-                header: 'Action',
-                render: (p) => (
-                  <button className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" onClick={() => selectWGA('forward', 'up', p.interval, p.sequence)}>
-                    Use
-                  </button>
-                ),
-              },
-              { header: 'Binding site', render: (p) => data.upstream_seq.substring(p.interval[0], p.interval[1]), className: 'font-mono text-xs text-slate-500 dark:text-slate-400 break-all' },
-            ]}
-          />
+          <div className="space-y-2">
+            {flankingResult.forward.map((p, i) => (
+              <PrimerCard
+                key={`f-${i}-${p.sequence}`}
+                index={i}
+                primer={p}
+                idtCredentials={idtCredentials}
+                selected={usedWgaFwdSeq === p.sequence}
+                onUse={() => {
+                  setUsedWgaFwdSeq(p.sequence);
+                  selectWGA('forward', 'up', p.interval, p.sequence);
+                }}
+                extra={
+                  <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800 font-mono text-[13px] text-zinc-500 dark:text-zinc-400 break-all">
+                    Binding site: {data.upstream_seq.substring(p.interval[0], p.interval[1])}
+                  </div>
+                }
+              />
+            ))}
+          </div>
 
           <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4 ml-1">Reverse primers (downstream flank)</h4>
-          <ResultsTable
-            rows={flankingResult.reverse}
-            keyOf={(p, i) => `r-${i}-${p.sequence}`}
-            columns={[
-              { header: '#', render: (_p, i) => i + 1 },
-              { header: "Sequence (5'→3')", render: (p) => p.sequence, className: 'font-mono text-slate-800 dark:text-slate-200' },
-              { header: 'Len', render: (p) => p.length },
-              { header: 'Tm', render: (p) => fmt(p.tm) },
-              { header: 'GC%', render: (p) => fmt(p.gc_percent) },
-              { header: 'Hairpin', render: (p) => yesNo(p.hairpin.structure_found) },
-              { header: 'HP Tm', render: (p) => fmt(p.hairpin.tm) },
-              { header: 'HP ΔG', render: (p) => fmt(p.hairpin.dg) },
-              { header: 'Homol', render: (p) => yesNo(p.homodimer.structure_found) },
-              { header: 'HD Tm', render: (p) => fmt(p.homodimer.tm) },
-              { header: 'HD ΔG', render: (p) => fmt(p.homodimer.dg) },
-              {
-                header: 'Action',
-                render: (p) => (
-                  <button className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" onClick={() => selectWGA('reverse', 'down', p.interval, p.sequence)}>
-                    Use
-                  </button>
-                ),
-              },
-              { header: 'Binding site', render: (p) => (data.downstream_seq || '').substring(p.interval[0], p.interval[1]), className: 'font-mono text-xs text-slate-500 dark:text-slate-400 break-all' },
-            ]}
-          />
+          <div className="space-y-2">
+            {flankingResult.reverse.map((p, i) => (
+              <PrimerCard
+                key={`r-${i}-${p.sequence}`}
+                index={i}
+                primer={p}
+                idtCredentials={idtCredentials}
+                selected={usedWgaRevSeq === p.sequence}
+                onUse={() => {
+                  setUsedWgaRevSeq(p.sequence);
+                  selectWGA('reverse', 'down', p.interval, p.sequence);
+                }}
+                extra={
+                  <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800 font-mono text-[13px] text-zinc-500 dark:text-zinc-400 break-all">
+                    Binding site: {(data.downstream_seq || '').substring(p.interval[0], p.interval[1])}
+                  </div>
+                }
+              />
+            ))}
+          </div>
 
           {flankingResult.pairDg !== null && (
             <p className="text-slate-700 dark:text-slate-300">

@@ -75,6 +75,7 @@ pub fn build_router(state: state::AppState) -> Router {
         .route("/idt/token", post(routes::idt::idt_token))
         .route("/idt/analyze", post(routes::idt::idt_analyze_route))
         .route("/analyze_primer", post(routes::analyze_primer::analyze_primer_route))
+        .route("/analyze_structure", post(routes::analyze_structure::analyze_structure_route))
         // No app-level auth: access control for a VM deployment is
         // delegated to the network layer (e.g. a Cloudflare Tunnel),
         // matching Oligool's model and this rewrite's locked-in decision.

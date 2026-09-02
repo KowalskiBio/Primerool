@@ -4,8 +4,6 @@ import type { Selection, Selections } from '../utils/regionMapping';
 import SequenceViewer from './SequenceViewer';
 import SplicedSequenceViewer from './SplicedSequenceViewer';
 import FeatureMap from './FeatureMap';
-import SelectedPrimerInfo from './SelectedPrimerInfo';
-import type { IdtCredentials } from './IdtSettingsPanel';
 
 type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
 
@@ -16,16 +14,12 @@ interface Props {
   primerMode: PrimerMode;
   onPrimerModeChange: (mode: PrimerMode) => void;
   onClearSelections: () => void;
-  ampTarget: number | null;
-  ampDev: number | null;
-  onFindProbesInAmplicon?: () => void;
-  idtCredentials?: IdtCredentials;
   /** Interactive drag/resize edits from `SequenceViewer` flow back up
    * through this — same callback shape as the design panels' `onSelect`. */
   onSelect?: (key: keyof Selections, value: Selection) => void;
 }
 
-export default function SequenceFeaturesPanel({ data, selections, truncateIntrons, primerMode, onPrimerModeChange, onClearSelections, ampTarget, ampDev, onFindProbesInAmplicon, idtCredentials, onSelect }: Props) {
+export default function SequenceFeaturesPanel({ data, selections, truncateIntrons, primerMode, onPrimerModeChange, onClearSelections, onSelect }: Props) {
   const [showFeatureMap, setShowFeatureMap] = useState(false);
   const [showSplicedMap, setShowSplicedMap] = useState(false);
 
@@ -101,8 +95,6 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
           Clear Primer Highlights
         </button>
       </div>
-
-      <SelectedPrimerInfo selections={selections} data={data} ampTarget={ampTarget} ampDev={ampDev} onFindProbesInAmplicon={onFindProbesInAmplicon} idtCredentials={idtCredentials} />
     </div>
   );
 }

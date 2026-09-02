@@ -2,7 +2,8 @@
   "name": "design_probe_taqman_tp53",
   "request": {
     "body": {
-      "probe_region": "GCAGTCAGATCCTAGCGTCGAGCCCCCTCTGAGTCAGGAAACATTTTCAGACCTATGGAAACTACTTCCTGAAAACAACGTTCTGTCCCCCTTGCCGTCC"
+      "probe_region": "GCAGTCAGATCCTAGCGTCGAGCCCCCTCTGAGTCAGGAAACATTTTCAGACCTATGGAAACTACTTCCTGAAAACAACGTTCTGTCCCCCTTGCCGTCC",
+      "engine": "primer3"
     },
     "method": "POST",
     "path": "/design_probe"
@@ -17,14 +18,16 @@
           ],
           "gc_percent": 68.0,
           "hairpin": {
-            "dg": -238.4,
+            "dg": -0.2,
             "structure_found": true,
-            "tm": 41.1
+            "tm": 41.1,
+            "structure": null
           },
           "homodimer": {
-            "dg": -7212.6,
+            "dg": -7.2,
             "structure_found": true,
-            "tm": 20.4
+            "tm": 20.4,
+            "structure": null
           },
           "length": 25,
           "sequence": "GCGTCGAGCCCCCTCTGAGTCAGGA",
@@ -37,14 +40,16 @@
           ],
           "gc_percent": 65.4,
           "hairpin": {
-            "dg": -238.4,
+            "dg": -0.2,
             "structure_found": true,
-            "tm": 41.1
+            "tm": 41.1,
+            "structure": null
           },
           "homodimer": {
-            "dg": -7212.6,
+            "dg": -7.2,
             "structure_found": true,
-            "tm": 20.4
+            "tm": 20.4,
+            "structure": null
           },
           "length": 26,
           "sequence": "GCGTCGAGCCCCCTCTGAGTCAGGAA",
@@ -57,14 +62,16 @@
           ],
           "gc_percent": 63.0,
           "hairpin": {
-            "dg": -238.4,
+            "dg": -0.2,
             "structure_found": true,
-            "tm": 41.1
+            "tm": 41.1,
+            "structure": null
           },
           "homodimer": {
-            "dg": -7212.6,
+            "dg": -7.2,
             "structure_found": true,
-            "tm": 20.4
+            "tm": 20.4,
+            "structure": null
           },
           "length": 27,
           "sequence": "GCGTCGAGCCCCCTCTGAGTCAGGAAA",
@@ -77,14 +84,16 @@
           ],
           "gc_percent": 64.3,
           "hairpin": {
-            "dg": -238.4,
+            "dg": -0.2,
             "structure_found": true,
-            "tm": 41.1
+            "tm": 41.1,
+            "structure": null
           },
           "homodimer": {
-            "dg": -7212.6,
+            "dg": -7.2,
             "structure_found": true,
-            "tm": 20.4
+            "tm": 20.4,
+            "structure": null
           },
           "length": 28,
           "sequence": "GCGTCGAGCCCCCTCTGAGTCAGGAAAC",
@@ -97,14 +106,16 @@
           ],
           "gc_percent": 62.1,
           "hairpin": {
-            "dg": -238.4,
+            "dg": -0.2,
             "structure_found": true,
-            "tm": 41.1
+            "tm": 41.1,
+            "structure": null
           },
           "homodimer": {
-            "dg": -7212.6,
+            "dg": -7.2,
             "structure_found": true,
-            "tm": 20.4
+            "tm": 20.4,
+            "structure": null
           },
           "length": 29,
           "sequence": "GCGTCGAGCCCCCTCTGAGTCAGGAAACA",

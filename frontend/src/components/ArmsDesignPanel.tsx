@@ -8,6 +8,8 @@ import type { Selection, Selections } from '../utils/regionMapping';
 import { normalizedTupleToInterval } from '../utils/coords';
 import { reverseComplement } from '../utils/dna';
 import ResultsTable, { type Column } from './ResultsTable';
+import PrimerCard from './PrimerCard';
+import type { IdtCredentials } from './IdtSettingsPanel';
 import { fmt, yesNo } from '../utils/format';
 
 const PAGE_SIZES = [10, 50, 100] as const;
@@ -117,6 +119,7 @@ interface Props {
   species: string;
   apiSource: 'ensembl' | 'ncbi';
   onSelect: (key: keyof Selections, value: Selection) => void;
+  idtCredentials?: IdtCredentials;
 }
 
 interface SelectedVariant {
@@ -137,7 +140,7 @@ interface DesignOutcome {
   error?: string;
 }
 
-export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: Props) {
+export default function ArmsDesignPanel({ data, species, apiSource, onSelect, idtCredentials }: Props) {
   const [regionStart, setRegionStart] = useState(0);
   const [regionEnd, setRegionEnd] = useState(Math.min(500, data.gene_len));
   const [lookupId, setLookupId] = useState('');
@@ -176,11 +179,14 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: 
 
   const [mismatchEnabled, setMismatchEnabled] = useState(true);
   const [mismatchOffset, setMismatchOffset] = useState(3);
-  const [engine, setEngine] = useState<DesignEngine>('primer3');
+  const [engine, setEngine] = useState<DesignEngine>('strider');
 
   const [designLoading, setDesignLoading] = useState(false);
   const [designError, setDesignError] = useState<string | null>(null);
   const [results, setResults] = useState<DesignOutcome[]>([]);
+  /** `${variant.key}:${sequence}` of the common candidate last picked for
+   * that variant, so the matching PrimerCard shows "Used". */
+  const [usedCommonKey, setUsedCommonKey] = useState<string | null>(null);
 
   const canUseVariantSearch = data.include_introns;
 
@@ -563,7 +569,11 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: 
     if (firstOk?.response) {
       selectAllele('ref', firstOk.response.ref_primer);
       selectAllele('alt', firstOk.response.alt_primer);
-      if (firstOk.response.common_candidates[0]) selectCommon(firstOk.response.common_candidates[0]);
+      const firstCommon = firstOk.response.common_candidates[0];
+      if (firstCommon) {
+        selectCommon(firstCommon);
+        setUsedCommonKey(`${firstOk.variant.key}:${firstCommon.sequence}`);
+      }
     }
     setDesignLoading(false);
   }
@@ -799,28 +809,26 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect }: 
                     The common primer is shared by both reactions (ref-specific + common, alt-specific + common) — selecting one row highlights it for both.
                     {results.length > 1 && ' Highlighting works one variant at a time — picking here overwrites the sequence view’s current highlight.'}
                   </div>
-                  <ResultsTable
-                    rows={outcome.response.common_candidates}
-                    keyOf={(c, ci) => `${outcome.variant.key}-c-${ci}-${c.sequence}`}
-                    columns={[
-                      { header: '#', render: (_c, ci) => ci + 1 },
-                      { header: "Sequence (5'→3')", render: (c) => c.sequence, className: 'font-mono text-slate-800 dark:text-slate-200' },
-                      { header: 'Tm', render: (c) => fmt(c.tm) },
-                      { header: 'GC%', render: (c) => fmt(c.gc_percent) },
-                      { header: 'Product (ref)', render: (c) => c.product_size_ref },
-                      { header: 'Product (alt)', render: (c) => c.product_size_alt },
-                      { header: 'Hairpin', render: (c) => yesNo(c.hairpin.structure_found) },
-                      { header: 'Homodimer', render: (c) => yesNo(c.homodimer.structure_found) },
-                      {
-                        header: 'Action',
-                        render: (c) => (
-                          <button className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" onClick={() => selectCommon(c)}>
-                            Use
-                          </button>
-                        ),
-                      },
-                    ]}
-                  />
+                  <div className="space-y-2">
+                    {outcome.response.common_candidates.map((c, ci) => (
+                      <PrimerCard
+                        key={`${outcome.variant.key}-c-${ci}-${c.sequence}`}
+                        index={ci}
+                        primer={c}
+                        idtCredentials={idtCredentials}
+                        selected={usedCommonKey === `${outcome.variant.key}:${c.sequence}`}
+                        onUse={() => {
+                          selectCommon(c);
+                          setUsedCommonKey(`${outcome.variant.key}:${c.sequence}`);
+                        }}
+                        extra={
+                          <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800 text-[13px] text-zinc-500 dark:text-zinc-400">
+                            Product: <span className="font-mono tabular-nums">{c.product_size_ref} bp</span> (ref) / <span className="font-mono tabular-nums">{c.product_size_alt} bp</span> (alt)
+                          </div>
+                        }
+                      />
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

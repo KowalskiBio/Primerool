@@ -23,6 +23,7 @@ export default defineConfig({
       '/design_from_sequence': 'http://127.0.0.1:5050',
       '/design_probe': 'http://127.0.0.1:5050',
       '/analyze_primer': 'http://127.0.0.1:5050',
+      '/analyze_structure': 'http://127.0.0.1:5050',
       '/search_variants': 'http://127.0.0.1:5050',
       '/lookup_variant': 'http://127.0.0.1:5050',
       '/design_arms': 'http://127.0.0.1:5050',

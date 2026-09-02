@@ -96,7 +96,11 @@ const MIN_HAIRPIN_LOOP: usize = 3;
 /// affects *which* outer boundary wins here — see
 /// [`crate::structure_thermo::hairpin_exterior_dangle_bonus`]'s docs — a
 /// structure's internal stacking/loop energies never depend on it.
-pub fn hairpin_mfe_mathews(seq: &[u8], dangles: u8) -> Option<(f64, Vec<(usize, usize)>)> {
+/// The DP fill shared by [`hairpin_mfe_mathews`] (single best) and
+/// [`hairpin_mfe_candidates_mathews`] (every closing pair, ranked) — same
+/// recurrence either way, only what's read back out of `inner`/`trace`
+/// differs.
+fn hairpin_mfe_fill(seq: &[u8]) -> Option<(usize, Vec<f64>, Vec<Option<(usize, usize)>>)> {
     let n = seq.len();
     if n < MIN_HAIRPIN_LOOP + 2 {
         return None;
@@ -159,6 +163,29 @@ pub fn hairpin_mfe_mathews(seq: &[u8], dangles: u8) -> Option<(f64, Vec<(usize, 
         }
     }
 
+    Some((n, inner, trace))
+}
+
+fn hairpin_traceback(n: usize, trace: &[Option<(usize, usize)>], i: usize, j: usize) -> Vec<(usize, usize)> {
+    let mut pairs = Vec::new();
+    let (mut ci, mut cj) = (i, j);
+    loop {
+        pairs.push((ci, cj));
+        match trace[ci * n + cj] {
+            None => break,
+            Some((ip, jp)) => {
+                ci = ip;
+                cj = jp;
+            }
+        }
+    }
+    pairs
+}
+
+pub fn hairpin_mfe_mathews(seq: &[u8], dangles: u8) -> Option<(f64, Vec<(usize, usize)>)> {
+    let (n, inner, trace) = hairpin_mfe_fill(seq)?;
+    let idx = |i: usize, j: usize| i * n + j;
+
     // Ranked by val + dangle bonus (when dangles=2) so a shorter stem that
     // leaves a more favorable dangling flank can beat a longer one that
     // engulfs those bases — mirroring `fold_mfe`'s exterior-loop placement,
@@ -179,21 +206,37 @@ pub fn hairpin_mfe_mathews(seq: &[u8], dangles: u8) -> Option<(f64, Vec<(usize, 
         }
     }
 
-    best_outer.map(|(i, j, dg, _)| {
-        let mut pairs = Vec::new();
-        let (mut ci, mut cj) = (i, j);
-        loop {
-            pairs.push((ci, cj));
-            match trace[idx(ci, cj)] {
-                None => break,
-                Some((ip, jp)) => {
-                    ci = ip;
-                    cj = jp;
-                }
+    best_outer.map(|(i, j, dg, _)| (dg, hairpin_traceback(n, &trace, i, j)))
+}
+
+/// Every closing pair `(i,j)` that folds at all, ranked the same way
+/// [`crate::dimer::dimer_mfe_candidates_dna`]/[`dimer_mfe_candidates_mathews`]
+/// rank theirs: closed-state energy ascending, then base-pair count
+/// descending. Needed for the same reason that one is: a subopt/ensemble
+/// view over more than just the single MFE structure.
+pub fn hairpin_mfe_candidates_mathews(seq: &[u8], dangles: u8) -> Vec<(f64, Vec<(usize, usize)>)> {
+    let Some((n, inner, trace)) = hairpin_mfe_fill(seq) else {
+        return Vec::new();
+    };
+    let idx = |i: usize, j: usize| i * n + j;
+
+    let mut candidates: Vec<(f64, f64, usize, usize)> = Vec::new();
+    for i in 0..n {
+        for j in (i + MIN_HAIRPIN_LOOP + 1)..n {
+            let val = inner[idx(i, j)];
+            if !val.is_finite() {
+                continue;
             }
+            let ranked = if dangles == 2 { val + hairpin_exterior_dangle_bonus(Mode::Dg, seq, i, j) } else { val };
+            candidates.push((ranked, val, i, j));
         }
-        (dg, pairs)
-    })
+    }
+    candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap().then_with(|| {
+        let len_a = hairpin_traceback(n, &trace, a.2, a.3).len();
+        let len_b = hairpin_traceback(n, &trace, b.2, b.3).len();
+        len_b.cmp(&len_a)
+    }));
+    candidates.into_iter().map(|(_, dg, i, j)| (dg, hairpin_traceback(n, &trace, i, j))).collect()
 }
 
 /// Mathews2004-scored counterpart of

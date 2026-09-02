@@ -54,7 +54,7 @@ impl Default for DesignPrimersRequest {
             junction_max_candidates: 25,
             upstream_seq: None,
             downstream_seq: None,
-            engine: "primer3".to_string(),
+            engine: "strider".to_string(),
         }
     }
 }

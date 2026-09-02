@@ -4,9 +4,9 @@
 //! has no logging of its own at all).
 //!
 //! `/idt/analyze` merges IDT's raw results with a local `engine::analyze`
-//! recompute, using whichever `engine` the request selects (`"primer3"`
-//! default, or `"native"` — see `crate::routes::select_backend`). When
-//! `engine="native"`, the response also carries suboptimal-dimer and
+//! recompute, using whichever `engine` the request selects (`"strider"`
+//! default, or `"primer3"` — see `crate::routes::select_backend`). When
+//! `engine="strider"`, the response also carries suboptimal-dimer and
 //! dot-bracket structure data straight from `thermo_core::thermo`
 //! (`dimer_thermo_subopt`/`hairpin_thermo`) — the piece of Oligool's own
 //! `_run_strider_analysis` (ViennaRNA-style structure enumeration) that a
@@ -42,15 +42,16 @@ fn dimer_thermo_json(d: &DimerThermo) -> Value {
     })
 }
 
-/// Native-only enrichment: real suboptimal dimer alignments (self and
+/// Strider-only enrichment: real suboptimal dimer alignments (self and
 /// hetero) plus each primer's own hairpin structure/Tm, straight from
-/// `thermo_core::thermo` — bypassing the generic `ThermoBackend` trait
-/// (whose `DimerResult` has no structure field, shared as it is by
-/// `Primer3Backend`) since this data has no primer3 equivalent to report
-/// instead. `None` if the sequence doesn't fold under the requested salt
-/// conditions — a normal outcome (e.g. no self-complementarity at all),
-/// not an error.
-fn native_enrichment(p1_seq: &str, p2_seq: &str, mv_conc: f64, mg_conc: f64, dntp_conc: f64, oligo_conc_um: f64) -> Value {
+/// `thermo_core::thermo` — bypassing the generic `ThermoBackend` trait since
+/// this data has no primer3 equivalent to report instead. `DimerResult`
+/// (shared with `Primer3Backend`) does carry a `structure` field now, but
+/// only ever the single MFE fold; the ranked suboptimal alignments this
+/// route additionally returns have no home there. `None` if the sequence
+/// doesn't fold under the requested salt conditions — a normal outcome
+/// (e.g. no self-complementarity at all), not an error.
+fn strider_enrichment(p1_seq: &str, p2_seq: &str, mv_conc: f64, mg_conc: f64, dntp_conc: f64, oligo_conc_um: f64) -> Value {
     let sodium_m = mv_conc / 1000.0;
     let magnesium_m = ((mg_conc - dntp_conc) / 1000.0).max(0.0);
     let strand_conc_m = oligo_conc_um * 1e-6;
@@ -117,7 +118,7 @@ pub struct IdtAnalyzeRequest {
 
 impl Default for IdtAnalyzeRequest {
     fn default() -> Self {
-        Self { p1_seq: String::new(), p2_seq: String::new(), token: String::new(), mv_conc: 50.0, mg_conc: 10.0, dntp_conc: 0.8, oligo_conc: 0.25, idt_region: "eu".to_string(), engine: "primer3".to_string() }
+        Self { p1_seq: String::new(), p2_seq: String::new(), token: String::new(), mv_conc: 50.0, mg_conc: 10.0, dntp_conc: 0.8, oligo_conc: 0.25, idt_region: "eu".to_string(), engine: "strider".to_string() }
     }
 }
 
@@ -145,12 +146,12 @@ pub async fn idt_analyze_route(State(state): State<AppState>, Json(req): Json<Id
     let m2_local = analyze_primer(backend.as_ref(), &req.p2_seq, thermo);
     let pair_local = analyze_pair(backend.as_ref(), &req.p1_seq, &req.p2_seq, thermo);
 
-    let native = if req.engine.eq_ignore_ascii_case("native") {
-        Some(native_enrichment(&req.p1_seq, &req.p2_seq, req.mv_conc, req.mg_conc, req.dntp_conc, req.oligo_conc))
+    let strider = if !req.engine.eq_ignore_ascii_case("primer3") {
+        Some(strider_enrichment(&req.p1_seq, &req.p2_seq, req.mv_conc, req.mg_conc, req.dntp_conc, req.oligo_conc))
     } else {
         None
     };
-    let native_field = |key: &str| native.as_ref().and_then(|v| v.get(key)).cloned().unwrap_or(Value::Null);
+    let strider_field = |key: &str| strider.as_ref().and_then(|v| v.get(key)).cloned().unwrap_or(Value::Null);
 
     Ok(Json(json!({
         "m1": {
@@ -162,8 +163,8 @@ pub async fn idt_analyze_route(State(state): State<AppState>, Json(req): Json<Id
                 "self_dimer_delta_g": extract_delta_g(&idt_result.m1_selfdimer),
             },
             "local": m1_local,
-            "native_hairpin": native_field("m1_hairpin"),
-            "native_self_dimer_subopt": native_field("m1_self_dimer_subopt"),
+            "strider_hairpin": strider_field("m1_hairpin"),
+            "strider_self_dimer_subopt": strider_field("m1_self_dimer_subopt"),
         },
         "m2": {
             "idt": {
@@ -174,8 +175,8 @@ pub async fn idt_analyze_route(State(state): State<AppState>, Json(req): Json<Id
                 "self_dimer_delta_g": extract_delta_g(&idt_result.m2_selfdimer),
             },
             "local": m2_local,
-            "native_hairpin": native_field("m2_hairpin"),
-            "native_self_dimer_subopt": native_field("m2_self_dimer_subopt"),
+            "strider_hairpin": strider_field("m2_hairpin"),
+            "strider_self_dimer_subopt": strider_field("m2_self_dimer_subopt"),
         },
         "pairwise": {
             "idt": {
@@ -183,7 +184,7 @@ pub async fn idt_analyze_route(State(state): State<AppState>, Json(req): Json<Id
                 "hetero_dimer_delta_g": extract_delta_g(&idt_result.hetero),
             },
             "local": pair_local,
-            "native_hetero_dimer_subopt": native_field("hetero_dimer_subopt"),
+            "strider_hetero_dimer_subopt": strider_field("hetero_dimer_subopt"),
         },
     })))
 }

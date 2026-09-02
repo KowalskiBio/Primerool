@@ -15,7 +15,7 @@ pub struct PrimerAnalysis {
     pub homodimer: DimerResult,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct PairAnalysis {
     pub heterodimer: DimerResult,
 }
@@ -31,7 +31,7 @@ fn oligo_gc(seq: &str) -> f64 {
 }
 
 fn round_dimer(r: DimerResult) -> DimerResult {
-    DimerResult { structure_found: r.structure_found, tm: round_or_none(r.tm), dg: round_or_none(r.dg) }
+    DimerResult { structure_found: r.structure_found, tm: round_or_none(r.tm), dg: round_or_none(r.dg), structure: r.structure }
 }
 
 /// Port of `analyze_primer`: uppercases/strips the sequence, then computes

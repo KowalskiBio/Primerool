@@ -48,5 +48,6 @@ pub mod design_internal;
 pub mod design_junction;
 pub mod design_probe;
 pub mod picker;
+pub mod structure_variant;
 
 pub use backend::{DimerResult, ThermoBackend, ThermoParams};

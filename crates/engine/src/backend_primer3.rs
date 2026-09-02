@@ -8,7 +8,18 @@ use crate::backend::{DimerResult, ThermoBackend, ThermoParams};
 pub struct Primer3Backend;
 
 fn to_dimer_result(r: primer3_ffi::ThermoResult) -> DimerResult {
-    DimerResult { structure_found: r.structure_found, tm: r.tm, dg: r.dg }
+    // `primer3-ffi` intentionally passes `thal()`'s raw dg straight through
+    // (its own parity test validates the FFI binding against live
+    // `primer3-py` in primer3's *native* units) — but that raw unit is
+    // cal/mol (see `primer3-py`'s own `thermoanalysis.pyx` docstring on
+    // `.dg`), not kcal/mol like `NativeBackend`'s `dg37`. `DimerResult` is
+    // the app-wide, engine-agnostic contract that promises kcal/mol
+    // (matching real biology and the UI's ΔG thresholds/labels), so this is
+    // the boundary that converts.
+    let dg_kcal = r.dg.map(|cal_per_mol| cal_per_mol / 1000.0);
+    // `structure: None` - primer3-ffi doesn't extract `thal_results`' own
+    // structure output, unlike `NativeBackend` (see `DimerResult::structure`'s docs).
+    DimerResult { structure_found: r.structure_found, tm: r.tm, dg: dg_kcal, structure: None }
 }
 
 impl ThermoBackend for Primer3Backend {

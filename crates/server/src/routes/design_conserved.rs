@@ -31,7 +31,7 @@ pub struct DesignConservedRequest {
     pub col_end: usize,
     pub target_start: Option<usize>,
     pub target_end: Option<usize>,
-    pub backend: String, // "primer3" (default) or "native"
+    pub backend: String, // "strider" (default) or "primer3"
     pub size_min: u32,
     pub size_opt: u32,
     pub size_max: u32,
@@ -53,7 +53,7 @@ impl Default for DesignConservedRequest {
             col_end: 0,
             target_start: None,
             target_end: None,
-            backend: "primer3".to_string(),
+            backend: "strider".to_string(),
             size_min: 18,
             size_opt: 20,
             size_max: 25,
@@ -93,7 +93,7 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
     // FFI call per candidate) — see `design_probe.rs`'s identical comment
     // on why this runs via `spawn_blocking`.
     tokio::task::spawn_blocking(move || {
-        let backend: Box<dyn ThermoBackend> = if req.backend.eq_ignore_ascii_case("native") { Box::new(NativeBackend) } else { Box::new(Primer3Backend) };
+        let backend: Box<dyn ThermoBackend> = if req.backend.eq_ignore_ascii_case("primer3") { Box::new(Primer3Backend) } else { Box::new(NativeBackend) };
 
         if let (Some(target_start), Some(target_end)) = (req.target_start, req.target_end) {
             let pairs = design_pairs_in_conserved_region(

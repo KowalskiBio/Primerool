@@ -54,6 +54,17 @@ pub struct NcbiProvider {
     transcript_cache: Arc<Mutex<HashMap<String, TranscriptInfo>>>,
 }
 
+/// Result of `resolve_accession`, mirroring `ncbi_api.py::resolve_accession`'s
+/// return dict: an accession pinned to its gene, ready to become a synthetic
+/// BLAST-style hit in the `/blast_sequence` route.
+#[derive(Debug, Clone)]
+pub struct AccessionResolution {
+    pub gene_id: String,
+    pub gene_symbol: Option<String>,
+    pub description: String,
+    pub organism: String,
+}
+
 impl Default for NcbiProvider {
     fn default() -> Self {
         Self::new()
@@ -178,6 +189,104 @@ impl NcbiProvider {
         let esummary = self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "snp"), ("id", numeric_id), ("retmode", "json")]).await?;
         Ok(parse_esummary_variant(&esummary["result"][numeric_id]))
     }
+
+    /// Port of `ncbi_api.py::_esearch_ids`.
+    async fn esearch_ids(&self, db: &str, term: &str, retmax: usize) -> Result<Vec<String>, ProviderError> {
+        let retmax = retmax.to_string();
+        let esearch = self.get_json(&format!("{EUTILS}/esearch.fcgi"), &[("db", db), ("term", term), ("retmode", "json"), ("retmax", &retmax)]).await?;
+        Ok(esearch["esearchresult"]["idlist"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default())
+    }
+
+    /// Port of `ncbi_api.py::_rank_name_candidates`: pick the candidate
+    /// that truly matches `query` by name. An All-Fields esearch also
+    /// surfaces genes whose summary text merely mentions the query
+    /// (searching "casein" in Homo sapiens returns EGFR/TP53 because
+    /// their summaries mention casein), so only a real name match is
+    /// accepted — anything else is "not found" rather than a wrong gene.
+    /// Rank: exact symbol > description starts-with > exact alias >
+    /// description contains. Ties keep esearch relevance order
+    /// (`min_by_key`/`min` both return the first of equal minima).
+    async fn rank_name_candidates(&self, query: &str, ids: &[String]) -> Result<Option<String>, ProviderError> {
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let id_list = ids.join(",");
+        let esummary = self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "gene"), ("id", &id_list), ("retmode", "json")]).await?;
+        let result = &esummary["result"];
+        let q = query.to_lowercase();
+
+        let score = |gid: &str| -> u8 {
+            let g = &result[gid];
+            let symbol = g["name"].as_str().unwrap_or_default().to_lowercase();
+            let desc = g["description"].as_str().unwrap_or_default().to_lowercase();
+            let aliases = g["otheraliases"].as_str().unwrap_or_default().to_lowercase();
+            if symbol == q {
+                0
+            } else if desc.starts_with(&q) {
+                1
+            } else if aliases.split(',').map(str::trim).any(|a| a == q) {
+                2
+            } else if desc.contains(&q) {
+                3
+            } else {
+                99
+            }
+        };
+
+        match ids.iter().min_by_key(|gid| score(gid)) {
+            Some(best) if score(best) < 99 => Ok(Some(best.clone())),
+            _ => Ok(None),
+        }
+    }
+
+    /// Port of `ncbi_api.py::_elink_protein_to_gene`.
+    async fn elink_protein_to_gene(&self, protein_uid: &str) -> Result<Vec<String>, ProviderError> {
+        let elink = self.get_json(&format!("{EUTILS}/elink.fcgi"), &[("dbfrom", "protein"), ("db", "gene"), ("id", protein_uid), ("retmode", "json")]).await?;
+        let mut ids: Vec<String> = Vec::new();
+        for linkset in elink["linksets"].as_array().into_iter().flatten() {
+            for dbs in linkset["linksetdbs"].as_array().into_iter().flatten() {
+                for link in dbs["links"].as_array().into_iter().flatten() {
+                    if let Some(id) = link.as_str().map(str::to_string).or_else(|| link.as_i64().map(|n| n.to_string())) {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
+        Ok(ids)
+    }
+
+    /// Port of `ncbi_api.py::resolve_accession`: resolve a
+    /// nucleotide/protein accession directly to its gene via E-utilities —
+    /// instant, unlike the BLAST path, which is blastn-only and cannot
+    /// handle protein accessions (NP_, XP_, UniProt 'P' IDs) at all.
+    /// Nucleotide accessions (NM_, NR_, XM_, XR_) are indexed in the gene
+    /// db; protein accessions go protein-uid -> elink -> gene.
+    pub async fn resolve_accession(&self, accession: &str) -> Result<Option<AccessionResolution>, ProviderError> {
+        let base = accession.trim().split('.').next().unwrap_or_default();
+        if base.is_empty() {
+            return Ok(None);
+        }
+
+        let mut ids = self.esearch_ids("gene", &format!("{base}[accn]"), 20).await?;
+        if ids.is_empty() {
+            let pids = self.esearch_ids("protein", &format!("{base}[accn]"), 20).await?;
+            if let Some(pid) = pids.first() {
+                ids = self.elink_protein_to_gene(pid).await?;
+            }
+        }
+        let Some(gene_id) = ids.into_iter().next() else {
+            return Ok(None);
+        };
+
+        let esummary = self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "gene"), ("id", &gene_id), ("retmode", "json")]).await?;
+        let summary = &esummary["result"][&gene_id];
+        Ok(Some(AccessionResolution {
+            gene_id,
+            gene_symbol: summary["name"].as_str().filter(|s| !s.is_empty()).map(str::to_string),
+            description: summary["description"].as_str().unwrap_or_default().to_string(),
+            organism: summary["organism"]["scientificname"].as_str().unwrap_or_default().to_string(),
+        }))
+    }
 }
 
 /// One `esummary(db=snp)` record -> `VariantHit`. `None` for a uid that
@@ -263,16 +372,30 @@ impl SequenceProvider for NcbiProvider {
         let organism = ensembl_to_binomial_or_guess(species);
 
         // Step 1: esearch -> gene ID
+        // 1a: exact symbol match (fast path, e.g. MTHFR)
         let term = format!("{gene_name}[sym] AND {organism}[orgn]");
-        let esearch = self.get_json(&format!("{EUTILS}/esearch.fcgi"), &[("db", "gene"), ("term", &term), ("retmode", "json")]).await?;
-        let gene_id = match esearch["esearchresult"]["idlist"].as_array().and_then(|a| a.first()).and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => return Ok(None),
+        let ids = self.esearch_ids("gene", &term, 20).await?;
+        let gene_id = match ids.first() {
+            Some(id) => id.clone(),
+            None => {
+                // 1b: name/protein-family fallback (e.g. "casein" -> CSN2),
+                // ranked strictly so summary-text mentions never win
+                let term2 = format!("{gene_name} AND {organism}[orgn]");
+                let candidates = self.esearch_ids("gene", &term2, 50).await?;
+                match self.rank_name_candidates(gene_name, &candidates).await? {
+                    Some(id) => id,
+                    None => return Ok(None),
+                }
+            }
         };
 
         // Step 2: esummary -> gene info
         let esummary = self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "gene"), ("id", &gene_id), ("retmode", "json")]).await?;
         let summary = &esummary["result"][&gene_id];
+
+        // Official symbol (e.g. "casein" -> "CSN2", "mthfr" -> "MTHFR") —
+        // what the frontend displays and downstream searches should use.
+        let official_name = summary["name"].as_str().filter(|s| !s.is_empty()).unwrap_or(gene_name).to_string();
 
         let chrom = summary["chromosome"].as_str().unwrap_or_default().to_string();
         let genomic_info = summary["genomicinfo"].as_array();
@@ -309,7 +432,7 @@ impl SequenceProvider for NcbiProvider {
         // gene_table comes back empty. Synthesize a single-exon transcript
         // from the esummary genomic span.
         if transcripts_data.is_empty() && gene_start != 0 && gene_end != 0 {
-            let syn_id = format!("{gene_name}_CDS");
+            let syn_id = format!("{official_name}_CDS");
             transcripts_data.insert(
                 syn_id.clone(),
                 TranscriptInfo {
@@ -326,7 +449,7 @@ impl SequenceProvider for NcbiProvider {
                     // HTTPError` would catch — so this must stay empty for
                     // real correctness, not just Python-parity pedantry.
                     transcript_id: String::new(),
-                    transcript_name: format!("{gene_name} (CDS)"),
+                    transcript_name: format!("{official_name} (CDS)"),
                     chrom: if !chrom.is_empty() { chrom.clone() } else { chr_accession.clone() },
                     chr_accession: chr_accession.clone(),
                     strand,
@@ -375,7 +498,7 @@ impl SequenceProvider for NcbiProvider {
         }
 
         Ok(Some(GeneSearchResult {
-            gene_name: gene_name.to_string(),
+            gene_name: official_name,
             gene_id,
             chrom,
             strand,

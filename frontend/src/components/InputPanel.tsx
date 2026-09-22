@@ -83,7 +83,7 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
     setSuccess(null);
 
     if (isAccessionId(input)) {
-      setSuccess(`Input '${input}' looks like an Accession ID. Resolving via BLAST...`);
+      setSuccess(`Input '${input}' looks like an Accession ID. Resolving...`);
       await resolveAccessionAndSearch(input);
     } else {
       await runSearchGene(input, effectiveSpecies || 'homo_sapiens', apiSource);

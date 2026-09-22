@@ -35,7 +35,12 @@ pub struct BlastSequenceResponse {
 /// non-header content looks like an accession ID (`[A-Za-z]{1,4}_?[0-9]{5,}`,
 /// optionally versioned), treat it as one; otherwise clean it as a raw
 /// sequence and enforce the 20bp-50kb length bounds.
-fn parse_blast_input(raw_seq: &str) -> Result<String, AppError> {
+enum ParsedInput {
+    Accession(String),
+    Sequence(String),
+}
+
+fn parse_blast_input(raw_seq: &str) -> Result<ParsedInput, AppError> {
     let raw_seq = raw_seq.trim();
     let content_lines: Vec<&str> = raw_seq.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('>')).collect();
     let full_content = content_lines.join(" ");
@@ -45,7 +50,7 @@ fn parse_blast_input(raw_seq: &str) -> Result<String, AppError> {
         // The regex itself requires 5+ digits to match, so `full_content`
         // trivially contains a digit whenever this branch is taken —
         // Python's separate `any(c.isdigit() ...)` check is redundant.
-        return Ok(m.as_str().to_string());
+        return Ok(ParsedInput::Accession(m.as_str().to_string()));
     }
 
     let mut sequence: String = content_lines.join("").to_uppercase();
@@ -57,11 +62,46 @@ fn parse_blast_input(raw_seq: &str) -> Result<String, AppError> {
     if sequence.len() > 50_000 {
         return Err(AppError::bad_request("Sequence too long (max 50,000 bp)"));
     }
-    Ok(sequence)
+    Ok(ParsedInput::Sequence(sequence))
 }
 
 pub async fn blast_sequence(State(state): State<AppState>, Json(req): Json<BlastSequenceRequest>) -> Result<Json<BlastSequenceResponse>, AppError> {
-    let sequence = parse_blast_input(&req.sequence)?;
+    let (sequence, is_accession) = match parse_blast_input(&req.sequence)? {
+        ParsedInput::Accession(a) => (a, true),
+        ParsedInput::Sequence(s) => (s, false),
+    };
+
+    // Fast path (ported from `main.py::blast_sequence`): resolve accession
+    // IDs directly via NCBI E-utilities. Instant, and the only working
+    // route for protein accessions (NP_, XP_, UniProt 'P' IDs) —
+    // blastn/"nt" cannot handle those. On any failure, fall through to
+    // the real BLAST run (old behavior).
+    if is_accession {
+        match state.ncbi.resolve_accession(&sequence).await {
+            Ok(Some(res)) => {
+                let ensembl_species = blast::parse::organism_to_ensembl_species(&res.organism);
+                let hit = blast::parse::BlastHit {
+                    organism: res.organism,
+                    gene_symbol: res.gene_symbol,
+                    accession: sequence.clone(),
+                    title: if res.description.is_empty() { sequence.clone() } else { res.description },
+                    evalue: None,
+                    bit_score: None,
+                    identity_pct: 100.0,
+                    query_cover: 100.0,
+                    query_from: 0,
+                    query_to: 0,
+                    hit_from: 0,
+                    hit_to: 0,
+                    query_len: 0,
+                    direct: Some(true),
+                };
+                return Ok(Json(BlastSequenceResponse { hits: vec![BlastHitJson { hit, ensembl_species }] }));
+            }
+            Ok(None) => {}
+            Err(e) => eprintln!("Direct accession resolution failed for {sequence}: {e}"),
+        }
+    }
 
     let hits = blast::run_blast(&state.http_client, &sequence).await?;
 
@@ -86,15 +126,15 @@ mod tests {
 
     #[test]
     fn parse_blast_input_detects_accession() {
-        assert_eq!(parse_blast_input("NM_001407269.1").unwrap(), "NM_001407269.1");
-        assert_eq!(parse_blast_input(">header\nNM_001407269.1\n").unwrap(), "NM_001407269.1");
+        assert!(matches!(parse_blast_input("NM_001407269.1").unwrap(), ParsedInput::Accession(a) if a == "NM_001407269.1"));
+        assert!(matches!(parse_blast_input(">header\nNM_001407269.1\n").unwrap(), ParsedInput::Accession(a) if a == "NM_001407269.1"));
     }
 
     #[test]
     fn parse_blast_input_cleans_raw_sequence() {
         let seq = "A".repeat(25);
         let input = format!(">header\n{seq}\n");
-        assert_eq!(parse_blast_input(&input).unwrap(), seq);
+        assert!(matches!(parse_blast_input(&input).unwrap(), ParsedInput::Sequence(s) if s == seq));
     }
 
     #[test]

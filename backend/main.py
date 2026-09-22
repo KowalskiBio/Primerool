@@ -141,11 +141,36 @@ def blast_sequence():
     if accession_match and any(c.isdigit() for c in full_content):
         # Found an ID and input has digits -> Treat as Accession ID lookup
         sequence = accession_match.group(1)
-        # Verify it's not super long (an ID shouldn't be 1000 chars)
-        if len(sequence) > 20: 
-             # Fallback to sequence if 'ID' is suspiciously long? 
-             # Actually, some IDs can be long strings? No, usually < 15 chars.
-             pass 
+
+        # Fast path: resolve the accession directly via NCBI E-utilities.
+        # Instant, and the only working route for protein accessions (NP_,
+        # XP_, UniProt 'P' IDs) — blastn/"nt" cannot handle those.
+        resolved = None
+        try:
+            resolved = ncbi_api.resolve_accession(sequence)
+        except Exception as e:
+            print(f"Direct accession resolution failed for {sequence}: {e}", flush=True)
+
+        if resolved:
+            hit = {
+                "organism": resolved["organism"],
+                "gene_symbol": resolved["gene_symbol"],
+                "accession": sequence,
+                "title": resolved["description"] or sequence,
+                "evalue": None,
+                "bit_score": None,
+                "identity_pct": 100.0,
+                "query_cover": 100.0,
+                "query_from": 0,
+                "query_to": 0,
+                "hit_from": 0,
+                "hit_to": 0,
+                "query_len": 0,
+                "direct": True,
+                "ensembl_species": organism_to_ensembl_species(resolved["organism"]),
+            }
+            return jsonify({"hits": [hit]})
+        # Direct resolution failed -> fall through to BLAST (old behavior).
     else:
         # Treat as raw sequence
         seq_lines = [l.strip() for l in lines if l.strip() and not l.strip().startswith(">")]
@@ -194,7 +219,12 @@ def search_gene_route():
 
     if not result:
         source_label = "NCBI" if api is ncbi_api else "Ensembl"
-        return jsonify({"error": f"Gene {gene_name_raw} not found in {source_label} (species: {species})"}), 404
+        return jsonify({"error": (
+            f"Gene {gene_name_raw} not found in {source_label} (species: {species}). "
+            "Try the official gene symbol (e.g. 'casein' → CSN2) and check the "
+            "selected organism — many genes (like caseins) are annotated in "
+            "another species (e.g. Bos taurus)."
+        )}), 404
 
     return jsonify({
         "gene_name": result["gene_name"],

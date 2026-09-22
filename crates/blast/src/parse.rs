@@ -27,6 +27,12 @@ pub struct BlastHit {
     pub hit_from: i64,
     pub hit_to: i64,
     pub query_len: i64,
+    /// `Some(true)` on synthetic hits produced by direct accession
+    /// resolution (no BLAST round-trip) in the `/blast_sequence` route.
+    /// The Python backend only includes this key on such synthetic hits,
+    /// so it is omitted from serialization on real BLAST hits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct: Option<bool>,
 }
 
 fn find_child<'a, 'input>(node: Node<'a, 'input>, tag: &str) -> Option<Node<'a, 'input>> {
@@ -119,6 +125,7 @@ pub fn parse_blast_results(xml_data: &str) -> Result<Vec<BlastHit>, BlastError> 
             hit_from: get_text("Hsp_hit-from").and_then(|s| s.parse().ok()).unwrap_or(0),
             hit_to: get_text("Hsp_hit-to").and_then(|s| s.parse().ok()).unwrap_or(0),
             query_len,
+            direct: None,
         });
     }
 

@@ -17,6 +17,9 @@ export interface BlastHit {
   hit_from: number;
   hit_to: number;
   query_len: number;
+  /** Only present on synthetic hits produced by direct accession
+      resolution (no BLAST round-trip). */
+  direct?: boolean;
   ensembl_species: string;
 }
 

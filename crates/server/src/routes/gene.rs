@@ -60,7 +60,12 @@ pub async fn search_gene(State(state): State<AppState>, Json(req): Json<SearchGe
     }
 
     let result = result.ok_or_else(|| {
-        AppError::not_found(format!("Gene {} not found in {} (species: {})", gene_name_raw, state.provider_label(&api_source), species))
+        AppError::not_found(format!(
+            "Gene {} not found in {} (species: {}). Try the official gene symbol (e.g. 'casein' → CSN2) and check the selected organism — many genes (like caseins) are annotated in another species (e.g. Bos taurus).",
+            gene_name_raw,
+            state.provider_label(&api_source),
+            species
+        ))
     })?;
 
     Ok(Json(SearchGeneResponse {

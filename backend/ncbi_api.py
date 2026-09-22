@@ -238,31 +238,83 @@ def _compute_utrs(exons, cds, strand):
 # Gene search
 # ---------------------------------------------------------------------------
 
+def _esearch_ids(db: str, term: str, retmax: int = 20) -> List[str]:
+    """esearch helper → id list."""
+    resp = _get(f"{EUTILS}/esearch.fcgi", {
+        "db": db, "term": term, "retmode": "json", "retmax": str(retmax),
+    })
+    return resp.json().get("esearchresult", {}).get("idlist", [])
+
+
+def _rank_name_candidates(query: str, ids: List[str]) -> Optional[str]:
+    """
+    Pick the candidate that truly matches `query` by name.
+    An All-Fields esearch also surfaces genes whose summary text merely
+    mentions the query (searching "casein" in Homo sapiens returns EGFR /
+    TP53 because their summaries mention casein), so only a real name
+    match is accepted — anything else is "not found" rather than a wrong
+    gene.  Rank: exact symbol > description starts-with > exact alias >
+    description contains.  Ties keep esearch relevance order.
+    """
+    if not ids:
+        return None
+
+    resp = _get(f"{EUTILS}/esummary.fcgi", {
+        "db": "gene", "id": ",".join(ids), "retmode": "json",
+    })
+    result = resp.json().get("result", {})
+    q = query.lower()
+
+    def score(gid: str) -> int:
+        g = result.get(gid, {})
+        symbol = (g.get("name") or "").lower()
+        desc = (g.get("description") or "").lower()
+        aliases = (g.get("otheraliases") or "").lower()
+        if symbol == q:
+            return 0
+        if desc.startswith(q):
+            return 1
+        if any(a.strip() == q for a in aliases.split(",")):
+            return 2
+        if q in desc:
+            return 3
+        return 99
+
+    best = min(ids, key=score)
+    return best if score(best) < 99 else None
+
+
 def search_gene(gene_name: str, species: str = DEFAULT_SPECIES) -> Optional[Dict[str, Any]]:
     """
-    Look up a gene by symbol using NCBI E-utilities.
+    Look up a gene by symbol or gene/protein name using NCBI E-utilities.
     Returns gene info with transcript list (same format as ensembl_api).
     """
     gene_name = gene_name.strip()
     organism = _SPECIES_MAP.get(species, species.replace("_", " "))
 
     # Step 1: esearch → gene ID
-    resp = _get(f"{EUTILS}/esearch.fcgi", {
-        "db": "gene",
-        "term": f"{gene_name}[sym] AND {organism}[orgn]",
-        "retmode": "json",
-    })
-    ids = resp.json().get("esearchresult", {}).get("idlist", [])
-    if not ids:
-        return None
-
-    gene_id = ids[0]
+    # 1a: exact symbol match (fast path, e.g. MTHFR)
+    ids = _esearch_ids("gene", f"{gene_name}[sym] AND {organism}[orgn]")
+    if ids:
+        gene_id = ids[0]
+    else:
+        # 1b: name/protein-family fallback (e.g. "casein" → CSN2),
+        # ranked strictly so summary-text mentions never win
+        gene_id = _rank_name_candidates(
+            gene_name, _esearch_ids("gene", f"{gene_name} AND {organism}[orgn]", retmax=50)
+        )
+        if not gene_id:
+            return None
 
     # Step 2: esummary → gene info
     resp = _get(f"{EUTILS}/esummary.fcgi", {
         "db": "gene", "id": gene_id, "retmode": "json",
     })
     summary = resp.json().get("result", {}).get(gene_id, {})
+
+    # Official symbol (e.g. "casein" → "CSN2", "mthfr" → "MTHFR") — what
+    # the frontend displays and what downstream searches should use
+    official_name = summary.get("name") or gene_name
 
     chrom = summary.get("chromosome", "")
     genomic_info = summary.get("genomicinfo", [])
@@ -295,9 +347,9 @@ def search_gene(gene_name: str, species: str = DEFAULT_SPECIES) -> Optional[Dict
     # genes have no annotated mRNA transcripts.  Synthesise a single-exon
     # transcript from the esummary genomic coordinates.
     if not transcripts_data and gene_start and gene_end:
-        syn_id = f"{gene_name}_CDS"
+        syn_id = f"{official_name}_CDS"
         transcripts_data[syn_id] = {
-            "transcript_name": f"{gene_name} (CDS)",
+            "transcript_name": f"{official_name} (CDS)",
             "chrom": chrom or chr_accession,
             "chr_accession": chr_accession,
             "strand": strand,
@@ -335,13 +387,64 @@ def search_gene(gene_name: str, species: str = DEFAULT_SPECIES) -> Optional[Dict
         transcripts[0]["is_canonical"] = True
 
     return {
-        "gene_name": gene_name,
+        "gene_name": official_name,
         "gene_id": gene_id,
         "chrom": chrom,
         "strand": strand,
         "start": gene_start,
         "end": gene_end,
         "transcripts": transcripts,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Accession resolution (direct E-utilities lookup — no BLAST round-trip)
+# ---------------------------------------------------------------------------
+
+def _elink_protein_to_gene(protein_uid: str) -> List[str]:
+    """elink dbfrom=protein db=gene → gene id list."""
+    resp = _get(f"{EUTILS}/elink.fcgi", {
+        "dbfrom": "protein", "db": "gene", "id": protein_uid, "retmode": "json",
+    })
+    ids: List[str] = []
+    for linkset in resp.json().get("linksets", []):
+        for dbs in linkset.get("linksetdbs", []):
+            ids.extend(str(i) for i in dbs.get("links", []))
+    return ids
+
+
+def resolve_accession(accession: str) -> Optional[Dict[str, Any]]:
+    """
+    Resolve a nucleotide/protein accession directly to its gene via
+    E-utilities — instant, unlike the BLAST path, which is blastn-only and
+    cannot handle protein accessions (NP_, XP_, UniProt-style 'P' IDs) at
+    all.  Nucleotide accessions (NM_, NR_, XM_, XR_) are indexed in the
+    gene db; protein accessions go protein-uid → elink → gene.
+    Returns {"gene_id", "gene_symbol", "description", "organism"} or None.
+    """
+    base = accession.strip().split(".")[0]
+    if not base:
+        return None
+
+    ids = _esearch_ids("gene", f"{base}[accn]")
+    if not ids:
+        pids = _esearch_ids("protein", f"{base}[accn]")
+        if pids:
+            ids = _elink_protein_to_gene(pids[0])
+    if not ids:
+        return None
+
+    gene_id = ids[0]
+    resp = _get(f"{EUTILS}/esummary.fcgi", {
+        "db": "gene", "id": gene_id, "retmode": "json",
+    })
+    summary = resp.json().get("result", {}).get(gene_id, {})
+    org = summary.get("organism") or {}
+    return {
+        "gene_id": gene_id,
+        "gene_symbol": summary.get("name") or None,
+        "description": summary.get("description") or "",
+        "organism": org.get("scientificname") or "",
     }
 
 

@@ -21,11 +21,27 @@ export default function Modal({ open, title, onClose, children }: Props) {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [open, onClose]);
 
+  // Locks the page underneath from scrolling while the modal is open - a
+  // scroll gesture inside the dialog's own scroll containers still works
+  // (they're unaffected by the body's overflow), but once it runs out of
+  // room there's nothing left underneath for the gesture to fall through
+  // to. Restores whatever the body's own `overflow` was before this modal
+  // touched it, not a hardcoded `''`, so nesting (or another piece of the
+  // app that also sets it) can't get clobbered.
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
   if (!open) return null;
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center overscroll-contain bg-black/50 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -45,7 +61,7 @@ export default function Modal({ open, title, onClose, children }: Props) {
             </svg>
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">{children}</div>
       </div>
     </div>,
     document.body,

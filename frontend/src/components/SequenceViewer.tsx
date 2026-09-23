@@ -142,7 +142,7 @@ function isInCDS(pos: number, cdsIntervals: [number, number][]): boolean {
   return false;
 }
 
-function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons: boolean): Segment[] {
+function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons: boolean, variantMarkers: VariantMarker[]): Segment[] {
   const seq = data.gene_seq || '';
   if (!seq) return [];
 
@@ -193,7 +193,14 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
     let last = 0;
 
     const pushIntron = (intronSeq: string, offset: number) => {
-      if (truncateIntrons) {
+      // A truncated intron collapses to a short placeholder - fine for an
+      // unmarked intron, but it would silently swallow any variant marker
+      // landing inside it (nothing left at that position to hang the
+      // marker on). An intron carrying one of this map's markers is always
+      // rendered in full instead, regardless of the toggle - "truncate
+      // introns" means "the ones I don't need to see", not "hide my SNPs".
+      const hasMarker = variantMarkers.some((m) => m.end > offset && m.start < offset + intronSeq.length);
+      if (truncateIntrons && !hasMarker) {
         segments.push({ text: `...intron ${intronSeq.length}bp...`, className: 'seq-intron-placeholder', startPos: offset, region: 'gene' });
       } else {
         segments.push(...wrapHighlights(intronSeq, offset, 'seq-intron'));
@@ -696,10 +703,10 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
 
   const segments = useMemo(() => {
     const up = flankSegments(data.upstream_seq || '', 'up', data, selections);
-    const gene = geneBlockSegments(data, selections, truncateIntrons);
+    const gene = geneBlockSegments(data, selections, truncateIntrons, variantMarkers);
     const down = flankSegments(data.downstream_seq || '', 'down', data, selections);
     return [...up, ...gene, ...down];
-  }, [data, selections, truncateIntrons]);
+  }, [data, selections, truncateIntrons, variantMarkers]);
 
   // A selection is only draggable when its highlighted primer/probe render
   // is exactly one contiguous span - split across an exon/CDS/UTR boundary
@@ -904,7 +911,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
       <div
         id="sequence-map"
         ref={containerRef}
-        className="sequence-viewer relative max-h-[520px] overflow-y-auto overflow-x-hidden rounded-lg border border-line bg-base p-4 text-sm"
+        className="sequence-viewer relative max-h-[520px] overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg border border-line bg-base p-4 text-sm"
       >
         {/* Unrendered (out of flow, invisible) - measured only, to figure
          * out how many characters actually fit in one row of this

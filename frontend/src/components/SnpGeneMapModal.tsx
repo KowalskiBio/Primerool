@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { searchGene } from '../api/gene';
+import { searchGene, type Transcript } from '../api/gene';
 import { getSequence, type SequenceData } from '../api/sequence';
 import type { SnpBlock } from '../api/snpImport';
 import type { VariantMarker } from './SequenceViewer';
 import Modal from './ui/Modal';
 import Checkbox from './ui/Checkbox';
+import Select from './ui/Select';
 import SequenceViewer from './SequenceViewer';
 import { EMPTY_SELECTIONS } from '../utils/regionMapping';
 
@@ -13,6 +14,18 @@ import { EMPTY_SELECTIONS } from '../utils/regionMapping';
  * gene-search workflow there's no species/source picker upstream to read
  * this from - it's fixed here instead. */
 const SPECIES = 'homo_sapiens';
+
+/** A gene's "canonical" transcript (per whichever source has it) can cover
+ * only part of the gene's full genomic locus - a large gene like OPRM1
+ * has isoforms differing by tens of kb at either end, and its
+ * RefSeq-flagged canonical pick is a short one. A batch SNP that's
+ * genuinely inside the gene can still land outside that one transcript's
+ * exon span. Rather than surface that as a dead end, up to this many
+ * *other* transcripts from the same search result are tried in order
+ * (their natural list order already tends to put the well-characterized
+ * RefSeq/Ensembl transcripts before predicted ones) until one covers every
+ * batch SNP, or attempts run out - whichever covers the most wins. */
+const MAX_AUTO_TRANSCRIPT_ATTEMPTS = 6;
 
 interface Props {
   /** The gene symbol to load, or `null` to keep the modal closed. */
@@ -34,6 +47,16 @@ function localGenePos(data: SequenceData, genomicPos: number): number | null {
   return local;
 }
 
+function markersFor(data: SequenceData, blocks: SnpBlock[]): VariantMarker[] {
+  return blocks
+    .map((b): VariantMarker | null => {
+      const local = localGenePos(data, b.position);
+      if (local === null) return null;
+      return { rsid: b.rsid, start: local, end: local + 1, alleles: b.alleles };
+    })
+    .filter((m): m is VariantMarker => m !== null);
+}
+
 /** Opens the same intron-aware sequence map the main gene-search workflow
  * uses (`SequenceViewer`), loaded fresh for one gene from a clicked SNP
  * batch result row - with every SNP the batch found for that gene (not
@@ -41,11 +64,14 @@ function localGenePos(data: SequenceData, genomicPos: number): number | null {
 export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
   const [data, setData] = useState<SequenceData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [apiSourceUsed, setApiSourceUsed] = useState<'ncbi' | 'ensembl' | null>(null);
   // Which gene `data`/`error` actually belong to - lets render tell "still
   // loading this gene" apart from "showing a previous gene's stale result"
   // without a separate loading flag set synchronously inside the effect
   // (see `PrimerCard.tsx`'s `structureFor` for the same pattern).
   const [resultFor, setResultFor] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
   const [truncateIntrons, setTruncateIntrons] = useState(true);
 
   useEffect(() => {
@@ -60,11 +86,11 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
       for (const apiSource of ['ncbi', 'ensembl'] as const) {
         try {
           const found = await searchGene({ gene_name: gene!, species: SPECIES, api_source: apiSource });
-          const transcript = found.transcripts.find((t) => t.is_canonical) || found.transcripts[0];
-          if (!transcript) continue;
-          const seq = await getSequence({
+          const canonical = found.transcripts.find((t) => t.is_canonical) || found.transcripts[0];
+          if (!canonical) continue;
+          const canonicalSeq = await getSequence({
             gene_name: gene!,
-            transcript_id: transcript.id,
+            transcript_id: canonical.id,
             species: SPECIES,
             api_source: apiSource,
             upstream_bp: 200,
@@ -72,8 +98,46 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
             include_introns: true,
             include_utr: false,
           });
+          if (cancelled) return;
+
+          let best = canonicalSeq;
+          let bestCoverage = markersFor(canonicalSeq, blocks).length;
+          // The canonical transcript doesn't cover every batch SNP - try a
+          // handful of this gene's other transcripts for one that does
+          // (see `MAX_AUTO_TRANSCRIPT_ATTEMPTS`'s doc). A candidate that
+          // fails to load (some very large transcripts do, from this
+          // backend) is just skipped, not treated as an error.
+          if (bestCoverage < blocks.length) {
+            const others = found.transcripts.filter((t) => t.id !== canonical.id).slice(0, MAX_AUTO_TRANSCRIPT_ATTEMPTS);
+            for (const t of others) {
+              if (bestCoverage >= blocks.length) break;
+              try {
+                const seq = await getSequence({
+                  gene_name: gene!,
+                  transcript_id: t.id,
+                  species: SPECIES,
+                  api_source: apiSource,
+                  upstream_bp: 200,
+                  downstream_bp: 200,
+                  include_introns: true,
+                  include_utr: false,
+                });
+                if (cancelled) return;
+                const coverage = markersFor(seq, blocks).length;
+                if (coverage > bestCoverage) {
+                  best = seq;
+                  bestCoverage = coverage;
+                }
+              } catch {
+                // try the next candidate
+              }
+            }
+          }
+
           if (!cancelled) {
-            setData(seq);
+            setData(best);
+            setTranscripts(found.transcripts);
+            setApiSourceUsed(apiSource);
             setError(null);
             setResultFor(gene);
           }
@@ -84,6 +148,8 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
       }
       if (!cancelled) {
         setData(null);
+        setTranscripts([]);
+        setApiSourceUsed(null);
         setError(`Couldn't load "${gene}" from either NCBI or Ensembl.`);
         setResultFor(gene);
       }
@@ -93,21 +159,35 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [gene]);
+  }, [gene, blocks]);
 
   const loading = gene !== null && resultFor !== gene;
   const shownData = gene !== null && resultFor === gene ? data : null;
   const shownError = gene !== null && resultFor === gene ? error : null;
 
-  const markers: VariantMarker[] = shownData
-    ? blocks
-        .map((b): VariantMarker | null => {
-          const local = localGenePos(shownData, b.position);
-          if (local === null) return null;
-          return { rsid: b.rsid, start: local, end: local + 1, alleles: b.alleles };
-        })
-        .filter((m): m is VariantMarker => m !== null)
-    : [];
+  async function switchTranscript(transcriptId: string) {
+    if (!gene || !apiSourceUsed || transcriptId === shownData?.transcript_id) return;
+    setSwitching(true);
+    try {
+      const seq = await getSequence({
+        gene_name: gene,
+        transcript_id: transcriptId,
+        species: SPECIES,
+        api_source: apiSourceUsed,
+        upstream_bp: 200,
+        downstream_bp: 200,
+        include_introns: true,
+        include_utr: false,
+      });
+      setData(seq);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  const markers = shownData ? markersFor(shownData, blocks) : [];
   const markedRsids = new Set(markers.map((m) => m.rsid));
   const offMapCount = shownData ? blocks.length - markers.length : 0;
 
@@ -134,7 +214,22 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
       {shownData && (
         <div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <Checkbox label="Truncate introns (show length only)" checked={truncateIntrons} onChange={(e) => setTruncateIntrons(e.target.checked)} />
+            <div className="flex flex-wrap items-center gap-3">
+              <Checkbox label="Truncate introns (show length only)" checked={truncateIntrons} onChange={(e) => setTruncateIntrons(e.target.checked)} />
+              {transcripts.length > 1 && (
+                <label className="inline-flex items-center gap-1.5 text-xs text-ink-muted">
+                  Transcript:
+                  <Select size="sm" value={shownData.transcript_id} disabled={switching} onChange={(e) => void switchTranscript(e.target.value)}>
+                    {transcripts.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.id}){t.is_canonical ? ' - canonical' : ''}
+                      </option>
+                    ))}
+                  </Select>
+                  {switching && <span>loading…</span>}
+                </label>
+              )}
+            </div>
             <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
               <span aria-hidden="true" className="inline-block h-2.5 w-4 rounded-sm" style={{ outline: '2px dashed var(--warning)', outlineOffset: 1 }} />
               <span>marks this batch's SNPs:</span>
@@ -150,14 +245,14 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
                       {b.rsid}
                     </button>
                   ) : (
-                    <span title="Outside this transcript's span - not shown" className="text-ink-faint line-through">
+                    <span title={`Outside ${shownData.transcript_name}'s exon span - this SNP may still be in the gene, just under a different transcript. Try the Transcript picker.`} className="text-ink-faint line-through">
                       {b.rsid}
                     </span>
                   )}
                   {i < blocks.length - 1 && ', '}
                 </span>
               ))}
-              {offMapCount > 0 && ` (${offMapCount} outside this transcript's span, not shown)`}
+              {offMapCount > 0 && ` (${offMapCount} outside ${shownData.transcript_name}'s span - try another transcript above)`}
             </div>
           </div>
           <SequenceViewer data={shownData} selections={EMPTY_SELECTIONS} truncateIntrons={truncateIntrons} variantMarkers={markers} />

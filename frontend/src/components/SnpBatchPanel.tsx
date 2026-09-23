@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
 import { designFlanking, type DesignEngine, type FlankingOligoResult } from '../api/design';
 import { ApiError } from '../api/client';
@@ -275,6 +275,12 @@ export default function SnpBatchPanel() {
       refSeq: b.upstream_seq + (b.alleles[0] || 'N') + b.downstream_seq,
     }));
 
+  // Kept referentially stable across re-renders (unlike a plain inline
+  // `.filter()` in the JSX below) so `SnpGeneMapModal`'s fetch effect,
+  // which depends on this array, doesn't refire on every unrelated
+  // re-render this panel gets while a batch is running.
+  const openGeneBlocks = useMemo(() => (blocks || []).filter((b) => b.gene === openGene), [blocks, openGene]);
+
   return (
     <>
       <div className="mb-6 rounded-md border border-line bg-surface-2 p-4">
@@ -420,7 +426,7 @@ export default function SnpBatchPanel() {
         </Section>
       )}
 
-      <SnpGeneMapModal gene={openGene} blocks={(blocks || []).filter((b) => b.gene === openGene)} onClose={() => setOpenGene(null)} />
+      <SnpGeneMapModal gene={openGene} blocks={openGeneBlocks} onClose={() => setOpenGene(null)} />
     </>
   );
 }

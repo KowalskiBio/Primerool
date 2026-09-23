@@ -22,6 +22,28 @@ interface BatchResult {
   pairFound?: boolean;
   pairDg?: number | null;
   error?: string;
+  /** Notes on avoiding a neighboring listed SNP's exact position when
+   * picking among the returned primer candidates (see `pickAvoidingCandidate`). */
+  notes?: { tone: 'accent' | 'danger'; text: string }[];
+}
+
+/** From the returned candidates for one side (forward/reverse), picks the
+ * first whose genomic span clears every position in `avoid` — falling back
+ * to the top-ranked candidate (with `unresolved` listing what it still
+ * overlaps) if none do. `hits0` is what the top-ranked candidate alone hit,
+ * used to explain *why* a switch happened even when it succeeded. */
+function pickAvoidingCandidate<T>(candidates: T[], toGenomicSpan: (c: T) => [number, number], avoid: { rsid: string; pos: number }[]): { chosen: T; index: number; hits0: { rsid: string; pos: number }[]; unresolved: { rsid: string; pos: number }[] } | null {
+  if (!candidates.length) return null;
+  const hitsOf = (c: T) => {
+    const [s, e] = toGenomicSpan(c);
+    return avoid.filter((a) => a.pos >= s && a.pos <= e);
+  };
+  const hits0 = hitsOf(candidates[0]);
+  if (!hits0.length) return { chosen: candidates[0], index: 0, hits0, unresolved: [] };
+  for (let i = 1; i < candidates.length; i++) {
+    if (hitsOf(candidates[i]).length === 0) return { chosen: candidates[i], index: i, hits0, unresolved: [] };
+  }
+  return { chosen: candidates[0], index: 0, hits0, unresolved: hits0 };
 }
 
 /** Every pair of same-chromosome amplicons whose [ampStart, ampEnd] spans
@@ -120,16 +142,42 @@ export default function SnpBatchPanel() {
     for (const b of blocks) next[b.rsid] = { status: 'pending' };
     setResults(next);
 
+    const positionByRsid = new Map(blocks.map((b) => [b.rsid, b.position]));
+
     for (const b of blocks) {
       setResults((prev) => ({ ...prev, [b.rsid]: { status: 'running' } }));
       try {
         const res = await designFlanking(b.upstream_seq, b.downstream_seq, engine, window);
-        const fwd = res.primers.forward.primers[0];
-        const rev = res.primers.reverse.primers[0];
-        if (!fwd || !rev) {
+        const fwdCandidates = res.primers.forward.primers;
+        const revCandidates = res.primers.reverse.primers;
+        if (!fwdCandidates.length || !revCandidates.length) {
           setResults((prev) => ({ ...prev, [b.rsid]: { status: 'error', error: 'No primers found in window' } }));
           continue;
         }
+
+        // Prefer a candidate whose binding site clears every other listed
+        // SNP known to share this block's window — a primer sitting on an
+        // unrelated polymorphism can silently fail to anneal on the allele
+        // it doesn't match (allele dropout), which matters more than the
+        // amplicons merely overlapping.
+        const avoid = b.other_targets.map((rsid) => ({ rsid, pos: positionByRsid.get(rsid) })).filter((x): x is { rsid: string; pos: number } => x.pos !== undefined);
+        const fwdPick = pickAvoidingCandidate(fwdCandidates, (c) => [b.interval_start + c.interval[0], b.interval_start + c.interval[1] - 1], avoid)!;
+        const revPick = pickAvoidingCandidate(revCandidates, (c) => [b.position + 1 + c.interval[0], b.position + c.interval[1]], avoid)!;
+        const fwd = fwdPick.chosen;
+        const rev = revPick.chosen;
+
+        const notes: BatchResult['notes'] = [];
+        if (fwdPick.unresolved.length) {
+          notes.push({ tone: 'danger', text: `Forward primer overlaps ${fwdPick.unresolved.map((h) => h.rsid).join(', ')} (all ${fwdCandidates.length} candidates do; review manually)` });
+        } else if (fwdPick.hits0.length) {
+          notes.push({ tone: 'accent', text: `Forward: used alt candidate #${fwdPick.index + 1} to avoid ${fwdPick.hits0.map((h) => h.rsid).join(', ')}` });
+        }
+        if (revPick.unresolved.length) {
+          notes.push({ tone: 'danger', text: `Reverse primer overlaps ${revPick.unresolved.map((h) => h.rsid).join(', ')} (all ${revCandidates.length} candidates do; review manually)` });
+        } else if (revPick.hits0.length) {
+          notes.push({ tone: 'accent', text: `Reverse: used alt candidate #${revPick.index + 1} to avoid ${revPick.hits0.map((h) => h.rsid).join(', ')}` });
+        }
+
         const productSize = b.upstream_seq.length - fwd.interval[0] + 1 + rev.interval[1];
         // Genomic coordinates of the amplicon: the forward primer's 5' end
         // sits `upstream_seq.length - fwd.interval[0]` bases before the
@@ -137,6 +185,11 @@ export default function SnpBatchPanel() {
         // bases after it.
         const ampStart = b.position - (b.upstream_seq.length - fwd.interval[0]);
         const ampEnd = b.position + rev.interval[1];
+        // The server's heterodimer check is only ever computed for the
+        // top-ranked forward/reverse pair — if either side switched
+        // candidates to avoid a neighbor, that check no longer applies to
+        // the pair actually used, so don't report it as if it did.
+        const usedDefaultPair = fwdPick.index === 0 && revPick.index === 0;
         setResults((prev) => ({
           ...prev,
           [b.rsid]: {
@@ -146,8 +199,9 @@ export default function SnpBatchPanel() {
             productSize,
             ampStart,
             ampEnd,
-            pairFound: res.primers.pair_metrics?.heterodimer.structure_found ?? false,
-            pairDg: res.primers.pair_metrics?.heterodimer.dg ?? null,
+            pairFound: usedDefaultPair ? (res.primers.pair_metrics?.heterodimer.structure_found ?? false) : undefined,
+            pairDg: usedDefaultPair ? (res.primers.pair_metrics?.heterodimer.dg ?? null) : undefined,
+            notes,
           },
         }));
       } catch (err) {
@@ -160,7 +214,7 @@ export default function SnpBatchPanel() {
 
   function exportCsv() {
     if (!blocks) return;
-    const header = ['gene', 'rsid', 'chrom', 'position', 'alleles', 'other_targets', 'forward_primer', 'forward_tm', 'reverse_primer', 'reverse_tm', 'product_size', 'amplicon_start', 'amplicon_end', 'amplicon_overlaps', 'heterodimer_found', 'heterodimer_dg', 'status'];
+    const header = ['gene', 'rsid', 'chrom', 'position', 'alleles', 'other_targets', 'forward_primer', 'forward_tm', 'reverse_primer', 'reverse_tm', 'product_size', 'amplicon_start', 'amplicon_end', 'amplicon_overlaps', 'primer_notes', 'heterodimer_found', 'heterodimer_dg', 'status'];
     const rows = blocks.map((b) => {
       const r = results[b.rsid];
       return [
@@ -178,6 +232,7 @@ export default function SnpBatchPanel() {
         r?.ampStart ?? '',
         r?.ampEnd ?? '',
         (overlaps[b.rsid] || []).join(';'),
+        (r?.notes || []).map((n) => n.text).join(' | '),
         r?.pairFound ?? '',
         r?.pairDg ?? '',
         r?.status ?? 'not run',
@@ -287,6 +342,7 @@ export default function SnpBatchPanel() {
                     <th className="border-b border-line px-2 py-2 font-medium">Reverse (5'→3')</th>
                     <th className="border-b border-line px-2 py-2 font-medium">Product</th>
                     <th className="border-b border-line px-2 py-2 font-medium">Amplicons overlap?</th>
+                    <th className="border-b border-line px-2 py-2 font-medium">Primer notes</th>
                     <th className="border-b border-line px-2 py-2 font-medium">Status</th>
                   </tr>
                 </thead>
@@ -299,7 +355,7 @@ export default function SnpBatchPanel() {
                         <td className="px-2 py-2 font-mono">
                           {b.rsid}
                           {b.other_targets.length > 0 && (
-                            <span title={`Shares this window with: ${b.other_targets.join(', ')}; verify primers don't overlap its position.`} className="ml-1 text-warning">
+                            <span title={`Shares this window with: ${b.other_targets.join(', ')}. Primer design tries to pick a candidate whose binding site clears it (see "Primer notes" once designed).`} className="ml-1 text-warning">
                               *
                             </span>
                           )}
@@ -320,6 +376,19 @@ export default function SnpBatchPanel() {
                             ) : (
                               <Badge tone="success">no overlap</Badge>
                             ))}
+                        </td>
+                        <td className="px-2 py-2">
+                          {r?.status === 'done' && r.notes && r.notes.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              {r.notes.map((n, i) => (
+                                <Badge key={i} tone={n.tone} title={n.text} className="w-fit">
+                                  {n.text}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            r?.status === 'done' && '-'
+                          )}
                         </td>
                         <td className="px-2 py-2">
                           {!r && '-'}

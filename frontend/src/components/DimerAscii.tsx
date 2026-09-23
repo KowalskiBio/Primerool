@@ -1,9 +1,9 @@
-/** Plain-text duplex view for a bimolecular (self- or hetero-) dimer —
+/** Plain-text duplex view for a bimolecular (self- or hetero-) dimer -
  * three monospace lines (top strand, bond symbols, bottom strand), using
  * `alignDimer`'s gapped-column alignment so every bond is a real vertical
  * `|`/`:` and any bulge just shows as blank space in whichever strand
  * doesn't have a base there. Chosen over an SVG rendering specifically
- * because plain text is trivially, visibly correct — no geometry to get
+ * because plain text is trivially, visibly correct - no geometry to get
  * wrong, no diagonal-line ambiguity to misread. */
 import { alignDimer } from '../utils/dimerAlignment';
 
@@ -26,12 +26,12 @@ function bondSymbol(a: string, b: string): string {
 
 export default function DimerAscii({ seq1, seq2, structure }: Props) {
   if (!seq1 || !seq2 || !structure || structure.length !== seq1.length + seq2.length) {
-    return <div className="text-[13px] text-zinc-400 italic">Invalid dimer structure</div>;
+    return <div className="text-[13px] italic text-ink-faint">Invalid dimer structure</div>;
   }
 
   const { topCol, botCol, pairs, totalCols } = alignDimer(seq1, seq2, structure);
   if (pairs.length === 0) {
-    return <div className="text-[13px] text-zinc-400 italic">No inter-strand base pairs predicted</div>;
+    return <div className="text-[13px] italic text-ink-faint">No inter-strand base pairs predicted</div>;
   }
 
   const topRow = new Array(totalCols).fill(' ');
@@ -50,8 +50,8 @@ export default function DimerAscii({ seq1, seq2, structure }: Props) {
   const botLine = `3' ${botRow.join('')} 5'`;
 
   return (
-    <div className="bg-zinc-50 dark:bg-zinc-900/50 rounded p-2 overflow-x-auto">
-      <pre className="font-mono text-[13px] text-zinc-700 dark:text-zinc-300 whitespace-pre leading-[1.3]">{[topLine, bondLine, botLine].join('\n')}</pre>
+    <div className="overflow-x-auto rounded-md border border-line bg-base p-2">
+      <pre className="whitespace-pre font-mono text-[13px] leading-[1.3] text-ink">{[topLine, bondLine, botLine].join('\n')}</pre>
     </div>
   );
 }

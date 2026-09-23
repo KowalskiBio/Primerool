@@ -2,6 +2,8 @@ import { useRef, useState } from 'react';
 import type { SequenceData } from '../api/sequence';
 import type { Selections } from '../utils/regionMapping';
 import { mapPrimerToGenomic } from '../utils/regionMapping';
+import Button from './ui/Button';
+import Checkbox from './ui/Checkbox';
 
 interface ViewState {
   start: number;
@@ -22,7 +24,7 @@ const MARGIN = 20;
 
 /** Scrolls the sequence viewer (Card 3's `SequenceViewer`, identified by a
  * shared DOM id since the two components are siblings, not parent/child)
- * to the exon/CDS span starting at `startPos` — clicking a feature-map rect
+ * to the exon/CDS span starting at `startPos` - clicking a feature-map rect
  * or an amplicon/primer overlay jumps the reader straight to that base. */
 function teleportTo(startPos: number) {
   const el = document.getElementById(`seq-region-${startPos}`);
@@ -37,14 +39,14 @@ function teleportTo(startPos: number) {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
   const original = el.style.backgroundColor;
-  el.style.backgroundColor = '#fef08a';
+  el.style.backgroundColor = 'var(--seq-hit-active-bg)';
   el.style.transition = 'background-color 0.3s';
   setTimeout(() => {
     el.style.backgroundColor = original;
   }, 1000);
 }
 
-/** `data` is only read for its *initial* view range — the caller
+/** `data` is only read for its *initial* view range - the caller
  * (`SequenceFeaturesPanel`) must pass a `key` tied to the sequence's
  * identity so a genuinely new sequence remounts this component (and
  * re-runs the lazy initializer below) instead of leaving a stale zoom
@@ -103,19 +105,19 @@ export default function FeatureMap({ data, selections }: Props) {
   const cds = (data.annotations || []).filter((a) => a.type === 'cds');
 
   const primerHighlights: { sel: typeof selections.wgaForward; label: string; color: string }[] = [
-    { sel: selections.wgaForward, label: 'F', color: '#ef4444' },
-    { sel: selections.wgaReverse, label: 'R', color: '#ef4444' },
-    { sel: selections.juncLeft, label: 'F', color: '#ef4444' },
-    { sel: selections.juncRight, label: 'R', color: '#ef4444' },
-    { sel: selections.geneForward, label: 'F', color: '#ef4444' },
-    { sel: selections.geneReverse, label: 'R', color: '#ef4444' },
-    { sel: selections.geneProbe, label: 'P', color: '#3b82f6' },
+    { sel: selections.wgaForward, label: 'F', color: 'var(--seq-primer-ink)' },
+    { sel: selections.wgaReverse, label: 'R', color: 'var(--seq-primer-ink)' },
+    { sel: selections.juncLeft, label: 'F', color: 'var(--seq-primer-ink)' },
+    { sel: selections.juncRight, label: 'R', color: 'var(--seq-primer-ink)' },
+    { sel: selections.geneForward, label: 'F', color: 'var(--seq-primer-ink)' },
+    { sel: selections.geneReverse, label: 'R', color: 'var(--seq-primer-ink)' },
+    { sel: selections.geneProbe, label: 'P', color: 'var(--seq-probe-ink)' },
   ];
 
   const fwdPrimers = [selections.wgaForward, selections.juncLeft, selections.geneForward].filter((p) => p !== null);
   const revPrimers = [selections.wgaReverse, selections.juncRight, selections.geneReverse].filter((p) => p !== null);
 
-  // Adaptive ruler tick spacing — mirrors the legacy formula.
+  // Adaptive ruler tick spacing - mirrors the legacy formula.
   const tickStep = Math.pow(10, Math.floor(Math.log10(viewLen)) - 1) || 1;
   const effectiveStep = tickStep * (viewLen / tickStep > 20 ? 2 : 1) * (viewLen / tickStep > 50 ? 2.5 : 1);
   const startTick = Math.floor(view.start / effectiveStep) * effectiveStep;
@@ -126,29 +128,20 @@ export default function FeatureMap({ data, selections }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-md font-semibold text-slate-800 dark:text-slate-200">Feature map</h3>
-        <div className="flex gap-2 items-center">
-          <button
-            onClick={resetZoom}
-            className="text-xs bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 px-3 py-1 rounded border border-slate-300 dark:border-slate-600 transition-colors"
-          >
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-ink">Feature map</h3>
+        <div className="flex items-center gap-3">
+          <Button size="sm" onClick={resetZoom}>
             Reset Zoom
-          </button>
-          <label className="inline-flex items-center text-xs ml-2 cursor-pointer text-slate-700 dark:text-slate-300">
-            <input type="checkbox" checked={showPrimers} onChange={(e) => setShowPrimers(e.target.checked)} className="h-4 w-4 text-green-600 rounded border-slate-300" />
-            <span className="ml-1">Primers</span>
-          </label>
-          <label className="inline-flex items-center text-xs ml-2 cursor-pointer text-slate-700 dark:text-slate-300">
-            <input type="checkbox" checked={showAmplicons} onChange={(e) => setShowAmplicons(e.target.checked)} className="h-4 w-4 text-green-600 rounded border-slate-300" />
-            <span className="ml-1">Amplicons</span>
-          </label>
+          </Button>
+          <Checkbox label={<span className="text-xs">Primers</span>} checked={showPrimers} onChange={(e) => setShowPrimers(e.target.checked)} />
+          <Checkbox label={<span className="text-xs">Amplicons</span>} checked={showAmplicons} onChange={(e) => setShowAmplicons(e.target.checked)} />
         </div>
       </div>
 
-      <div className="overflow-hidden relative select-none border border-slate-200 dark:border-slate-700 rounded-lg bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900">
+      <div className="relative overflow-hidden rounded-lg border border-line bg-base select-none">
         <svg ref={svgRef} width="100%" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} style={{ fontFamily: 'var(--font-sans)', cursor: 'crosshair' }} onMouseDown={handleMouseDown}>
-          <line x1={MARGIN} y1={TRACK_Y + TRACK_HEIGHT / 2} x2={WIDTH - MARGIN} y2={TRACK_Y + TRACK_HEIGHT / 2} stroke="#94a3b8" strokeWidth={2} />
+          <line x1={MARGIN} y1={TRACK_Y + TRACK_HEIGHT / 2} x2={WIDTH - MARGIN} y2={TRACK_Y + TRACK_HEIGHT / 2} stroke="var(--ink-faint)" strokeWidth={2} />
 
           {exons.map((ex, i) => {
             if (!isVisible(ex.start, ex.end)) return null;
@@ -162,8 +155,8 @@ export default function FeatureMap({ data, selections }: Props) {
                   y={TRACK_Y}
                   width={w}
                   height={TRACK_HEIGHT}
-                  fill="#fed7aa"
-                  stroke="#fbbf24"
+                  fill="var(--seq-cds-bg)"
+                  stroke="var(--warning)"
                   strokeWidth={1}
                   data-start={ex.start}
                   className="cursor-pointer opacity-90 hover:opacity-100"
@@ -173,12 +166,12 @@ export default function FeatureMap({ data, selections }: Props) {
                 {w > 20 && (
                   <>
                     {scale(ex.start) >= MARGIN && (
-                      <text x={x1} y={TRACK_Y - 8} fontSize={10} fill="#64748b" textAnchor="middle" pointerEvents="none">
+                      <text x={x1} y={TRACK_Y - 8} fontSize={10} fill="var(--ink-muted)" textAnchor="middle" pointerEvents="none">
                         {ex.start}
                       </text>
                     )}
                     {scale(ex.end) <= WIDTH - MARGIN && (
-                      <text x={x2} y={TRACK_Y + TRACK_HEIGHT + 15} fontSize={10} fill="#64748b" textAnchor="middle" pointerEvents="none">
+                      <text x={x2} y={TRACK_Y + TRACK_HEIGHT + 15} fontSize={10} fill="var(--ink-muted)" textAnchor="middle" pointerEvents="none">
                         {ex.end}
                       </text>
                     )}
@@ -194,7 +187,7 @@ export default function FeatureMap({ data, selections }: Props) {
             const x2 = Math.min(WIDTH - MARGIN, scale(c.end));
             const w = Math.max(1, x2 - x1);
             return (
-              <rect key={`cds-${i}`} x={x1} y={TRACK_Y} width={w} height={TRACK_HEIGHT} fill="#fed7aa" stroke="#fbbf24" strokeWidth={1} data-start={c.start} className="cursor-pointer opacity-90 hover:opacity-100">
+              <rect key={`cds-${i}`} x={x1} y={TRACK_Y} width={w} height={TRACK_HEIGHT} fill="var(--seq-cds-bg)" stroke="var(--warning)" strokeWidth={1} data-start={c.start} className="cursor-pointer opacity-90 hover:opacity-100">
                 <title>{`CDS ${c.start}-${c.end}`}</title>
               </rect>
             );
@@ -211,7 +204,7 @@ export default function FeatureMap({ data, selections }: Props) {
                 const x1 = scale(startPos);
                 const x2 = scale(endPos);
                 if (!(x2 > x1 && x2 > MARGIN && x1 < WIDTH - MARGIN)) return null;
-                return <line key={`amp-${fi}-${ri}`} x1={x1} y1={TRACK_Y - 28} x2={x2} y2={TRACK_Y - 28} stroke="#9333ea" strokeWidth={2} strokeDasharray="4,4" opacity={0.5} />;
+                return <line key={`amp-${fi}-${ri}`} x1={x1} y1={TRACK_Y - 28} x2={x2} y2={TRACK_Y - 28} stroke="var(--accent)" strokeWidth={2} strokeDasharray="4,4" opacity={0.5} />;
               }),
             )}
 
@@ -247,22 +240,22 @@ export default function FeatureMap({ data, selections }: Props) {
               const w = Math.max(1, x2 - x1);
               return (
                 <>
-                  <rect x={x1} y={TRACK_Y} width={w} height={TRACK_HEIGHT} fill="rgba(74, 222, 128, 0.15)" stroke="#22c55e" strokeWidth={1} pointerEvents="none" />
-                  <text x={x1 + w / 2} y={TRACK_Y + TRACK_HEIGHT / 2} fontSize={12} fill="#15803d" textAnchor="middle" fontWeight="bold" pointerEvents="none">
+                  <rect x={x1} y={TRACK_Y} width={w} height={TRACK_HEIGHT} fill="var(--accent-subtle)" stroke="var(--accent)" strokeWidth={1} pointerEvents="none" />
+                  <text x={x1 + w / 2} y={TRACK_Y + TRACK_HEIGHT / 2} fontSize={12} fill="var(--accent)" textAnchor="middle" fontWeight="bold" pointerEvents="none">
                     {Math.round(end - start)} bp
                   </text>
                 </>
               );
             })()}
 
-          <line x1={MARGIN} y1={RULER_Y} x2={WIDTH - MARGIN} y2={RULER_Y} stroke="#334155" strokeWidth={1} />
+          <line x1={MARGIN} y1={RULER_Y} x2={WIDTH - MARGIN} y2={RULER_Y} stroke="var(--ink-muted)" strokeWidth={1} />
           {ticks.map((t, i) => {
             const x = scale(t);
             if (x > WIDTH - MARGIN) return null;
             return (
               <g key={`tick-${i}`}>
-                <line x1={x} y1={RULER_Y} x2={x} y2={RULER_Y + 5} stroke="#334155" strokeWidth={1} />
-                <text x={x} y={RULER_Y + 15} fontSize={10} fill="#334155" textAnchor="middle">
+                <line x1={x} y1={RULER_Y} x2={x} y2={RULER_Y + 5} stroke="var(--ink-muted)" strokeWidth={1} />
+                <text x={x} y={RULER_Y + 15} fontSize={10} fill="var(--ink-muted)" textAnchor="middle">
                   {Math.round(t)}
                 </text>
               </g>

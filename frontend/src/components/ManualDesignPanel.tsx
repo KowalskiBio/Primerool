@@ -9,6 +9,9 @@ import { fmt } from '../utils/format';
 import type { Selection, Selections } from '../utils/regionMapping';
 import ResultsTable from './ResultsTable';
 import PrimerCard from './PrimerCard';
+import Button from './ui/Button';
+import TextInput, { controlClasses } from './ui/TextInput';
+import Field from './ui/Field';
 import type { IdtCredentials } from './IdtSettingsPanel';
 
 /** Probe-parameter presets confirmed in the legacy source (see the rewrite
@@ -76,7 +79,7 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
   /** Fallback for results with no coordinate metadata at all (the
    * independent-design path): searches gene -> spliced -> upstream ->
    * downstream, in that priority order, for the primer sequence or its
-   * reverse-complement — ported directly from the legacy `findAndUsePrimer`. */
+   * reverse-complement - ported directly from the legacy `findAndUsePrimer`. */
   function findAndUsePrimer(seq: string, type: 'forward' | 'reverse' | 'unknown', searchOffset = 0) {
     const cleanSeq = seq.replace(/[^A-Za-z]/g, '').toUpperCase();
     const rc = reverseComplement(cleanSeq);
@@ -123,7 +126,7 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
   // The legacy app's `findAndUseProbe` substring-search fallback (for a
   // probe result with no coordinate metadata) is genuinely dead code here:
   // `/design_probe`'s response always includes `coords` (see `api/design.ts`'s
-  // `ProbeResult` — declared required, not optional, because the real
+  // `ProbeResult` - declared required, not optional, because the real
   // route always sets it via `raw_tuple`), so the "Use" button below
   // always has real coordinates to work with. Not ported, per this
   // session's own "drop confirmed-dead code, don't preserve it defensively"
@@ -245,45 +248,47 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
 
   return (
     <div>
-      <h3 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-2">Design Primers from Sequence</h3>
-      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Paste a sequence region for each primer. Primer3 will find the best primer within each region.</p>
+      <h3 className="mb-2 text-sm font-semibold text-ink">Design Primers from Sequence</h3>
+      <p className="mb-4 text-sm text-ink-muted">Paste a sequence region for each primer. Primer3 will find the best primer within each region.</p>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Forward Primer Region:</label>
+      <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Field label="Forward Primer Region" htmlFor="manual-fwd-region">
           <textarea
+            id="manual-fwd-region"
             rows={3}
             value={fwdRegionText}
             onChange={(e) => setFwdRegionText(e.target.value)}
-            placeholder="Paste sequence region for forward primer..."
-            className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm font-mono text-sm p-3 border resize-y"
+            placeholder="Paste sequence region for forward primer…"
+            className={`${controlClasses} resize-y p-3 font-mono`}
           />
-        </div>
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Reverse Primer Region:</label>
+        </Field>
+        <Field label="Reverse Primer Region" htmlFor="manual-rev-region">
           <textarea
+            id="manual-rev-region"
             rows={3}
             value={revRegionText}
             onChange={(e) => setRevRegionText(e.target.value)}
-            placeholder="Paste sequence region for reverse primer..."
-            className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm font-mono text-sm p-3 border resize-y"
+            placeholder="Paste sequence region for reverse primer…"
+            className={`${controlClasses} resize-y p-3 font-mono`}
           />
-        </div>
+        </Field>
       </div>
 
       <div className="mb-4">
-        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">TaqMan Probe Region (Optional):</label>
-        <textarea
-          rows={2}
-          value={probeRegionText}
-          onChange={(e) => setProbeRegionText(e.target.value)}
-          placeholder="Paste sequence region for TaqMan probe..."
-          className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm font-mono text-sm p-3 border resize-y"
-        />
+        <Field label="TaqMan Probe Region (Optional)" htmlFor="manual-probe-region">
+          <textarea
+            id="manual-probe-region"
+            rows={2}
+            value={probeRegionText}
+            onChange={(e) => setProbeRegionText(e.target.value)}
+            placeholder="Paste sequence region for TaqMan probe…"
+            className={`${controlClasses} resize-y p-3 font-mono`}
+          />
+        </Field>
 
-        <details className="mt-2 border border-slate-200 dark:border-slate-600 rounded-lg">
-          <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-slate-50 dark:bg-slate-700/50 rounded-lg">⚙️ Probe Conditions (Tm, Length, GC)</summary>
-          <div className="px-3 py-2 space-y-2">
+        <details className="mt-2 rounded-md border border-line">
+          <summary className="cursor-pointer select-none rounded-md bg-surface-2 px-3 py-2 text-xs font-semibold text-ink-muted">Probe Conditions (Tm, Length, GC)</summary>
+          <div className="space-y-2 px-3 py-2">
             <NumberTriple label="Probe Tm (°C)" min={probeTmMin} opt={probeTmOpt} max={probeTmMax} onMin={setProbeTmMin} onOpt={setProbeTmOpt} onMax={setProbeTmMax} step={0.5} />
             <NumberTriple label="Probe Length (bp)" min={probeLenMin} opt={probeLenOpt} max={probeLenMax} onMin={setProbeLenMin} onOpt={setProbeLenOpt} onMax={setProbeLenMax} step={1} />
             <NumberPair label="Probe GC (%)" min={probeGcMin} max={probeGcMax} onMin={setProbeGcMin} onMax={setProbeGcMax} />
@@ -291,34 +296,31 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
         </details>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Desired Amplicon Length (bp)</label>
-          <input type="number" step={10} min={50} max={2000} value={ampTarget} onChange={(e) => onAmpTargetChange(parseInt(e.target.value, 10) || 150)} className="w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border" />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Length Deviation (± bp)</label>
-          <input type="number" step={5} min={5} max={500} value={ampDev} onChange={(e) => onAmpDevChange(parseInt(e.target.value, 10) || 50)} className="w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border" />
-        </div>
+      <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Field label="Desired Amplicon Length (bp)">
+          <TextInput type="number" step={10} min={50} max={2000} value={ampTarget} onChange={(e) => onAmpTargetChange(parseInt(e.target.value, 10) || 150)} className="tabular-nums" />
+        </Field>
+        <Field label="Length Deviation (± bp)">
+          <TextInput type="number" step={5} min={5} max={500} value={ampDev} onChange={(e) => onAmpDevChange(parseInt(e.target.value, 10) || 50)} className="tabular-nums" />
+        </Field>
       </div>
 
-      <details className="mb-4 border border-slate-200 dark:border-slate-600 rounded-lg">
-        <summary className="cursor-pointer select-none px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-700/50 rounded-lg">⚙️ Primer Conditions</summary>
-        <div className="px-4 py-3 space-y-3">
+      <details className="mb-4 rounded-md border border-line">
+        <summary className="cursor-pointer select-none rounded-md bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink-muted">Primer Conditions</summary>
+        <div className="space-y-3 px-4 py-3">
           <NumberTriple label="Melting Temperature (Tm, °C)" min={tmMin} opt={tmOpt} max={tmMax} onMin={setTmMin} onOpt={setTmOpt} onMax={setTmMax} step={0.5} />
           <NumberTriple label="Primer Length (bp)" min={lenMin} opt={lenOpt} max={lenMax} onMin={setLenMin} onOpt={setLenOpt} onMax={setLenMax} step={1} />
           <NumberPair label="GC Content (%)" min={gcMin} max={gcMax} onMin={setGcMin} onMax={setGcMax} />
           <div className="flex flex-wrap items-end gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Max Options to Return</label>
-              <input type="number" step={1} min={1} max={20} value={numReturn} onChange={(e) => setNumReturn(parseInt(e.target.value, 10) || 5)} className="w-24 rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border" />
-            </div>
+            <Field label="Max Options to Return">
+              <TextInput type="number" step={1} min={1} max={20} value={numReturn} onChange={(e) => setNumReturn(parseInt(e.target.value, 10) || 5)} className="w-24 tabular-nums" />
+            </Field>
             <EngineSelect value={engine} onChange={setEngine} />
           </div>
 
-          <details className="mt-2 border-t border-slate-100 dark:border-slate-700 pt-2">
-            <summary className="text-xs font-semibold text-green-600 cursor-pointer select-none py-1">Advanced Primer3 Options (Salts, Poly-X, etc)</summary>
-            <div className="grid grid-cols-2 gap-3 mt-2">
+          <details className="mt-2 border-t border-line pt-2">
+            <summary className="cursor-pointer select-none py-1 text-xs font-semibold text-accent">Advanced Primer3 Options (Salts, Poly-X, etc)</summary>
+            <div className="mt-2 grid grid-cols-2 gap-3">
               <LabeledNumber label="Na+/K+ conc (mM)" value={mvConc} onChange={setMvConc} step={1} />
               <LabeledNumber label="Mg2+ conc (mM)" value={dvConc} onChange={setDvConc} step={0.1} />
               <LabeledNumber label="dNTP conc (mM)" value={dntpConc} onChange={setDntpConc} step={0.05} />
@@ -331,15 +333,15 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
       </details>
 
       <div className="flex flex-wrap gap-2">
-        <button disabled={loading} onClick={() => void runDesignFromSequence()} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full md:w-auto">
+        <Button variant="primary" disabled={loading} onClick={() => void runDesignFromSequence()} className="w-full md:w-auto">
           Design Primers
-        </button>
-        <button disabled={loading} onClick={() => void runDesignProbeStandalone()} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full md:w-auto">
+        </Button>
+        <Button disabled={loading} onClick={() => void runDesignProbeStandalone()} className="w-full md:w-auto">
           Design TaqMan Probe
-        </button>
+        </Button>
       </div>
 
-      {error && <div className="error mt-4 p-3 text-sm text-red-800 dark:text-red-300 rounded-lg bg-red-50 dark:bg-red-950/40">{error}</div>}
+      {error && <div role="alert" className="mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{error}</div>}
 
       <div className="mt-4 space-y-6">
         {fromSeqResult && (
@@ -406,14 +408,15 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
                     { header: 'Fwd Tm', render: (p) => fmt(p.forward_tm) },
                     { header: 'Reverse', render: (p) => p.reverse_seq, className: 'font-mono text-slate-800 dark:text-slate-200' },
                     { header: 'Rev Tm', render: (p) => fmt(p.reverse_tm) },
-                    { header: 'Amplicon', render: (p) => (p.product_size !== undefined ? `${p.product_size} bp` : '-'), className: 'font-bold text-blue-700 dark:text-blue-400' },
+                    { header: 'Amplicon', render: (p) => (p.product_size !== undefined ? `${p.product_size} bp` : '-'), className: 'font-medium text-accent' },
                     { header: 'ΔTm', render: (p) => fmt(p.tm_diff) },
                     { header: 'HD ΔG', render: (p) => fmt(p.heterodimer.dg) },
                     {
                       header: 'Action',
                       render: (p) => (
-                        <button
-                          className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition"
+                        <Button
+                          size="sm"
+                          variant="primary"
                           onClick={() => {
                             if (p.forward_coords && p.reverse_coords) {
                               const [fs, fe] = rawTupleToInterval(p.forward_coords, false);
@@ -427,7 +430,7 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
                           }}
                         >
                           Use Both
-                        </button>
+                        </Button>
                       ),
                     },
                   ]}
@@ -516,7 +519,7 @@ function LabeledNumber({ label, value, onChange, step, small }: { label: string;
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className={`w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm border ${small ? 'text-xs px-2 py-1' : 'text-sm px-2 py-1.5'}`}
+        className={`w-full rounded-md border border-line-strong bg-surface tabular-nums text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 ${small ? 'px-2 py-1 text-xs' : 'px-2 py-1.5 text-sm'}`}
       />
     </div>
   );

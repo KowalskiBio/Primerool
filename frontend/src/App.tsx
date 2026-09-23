@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Transcript } from './api/gene';
 import type { SequenceData } from './api/sequence';
 import { EMPTY_SELECTIONS, type Selection, type Selections } from './utils/regionMapping';
-import Card from './components/Card';
+import Section from './components/ui/Section';
 import InputPanel from './components/InputPanel';
 import TranscriptPanel from './components/TranscriptPanel';
 import SequenceFeaturesPanel from './components/SequenceFeaturesPanel';
@@ -11,40 +11,39 @@ import ManualDesignPanel from './components/ManualDesignPanel';
 import AlignmentPanel from './components/AlignmentPanel';
 import IdtSettingsPanel, { type IdtCredentials } from './components/IdtSettingsPanel';
 
-function ThemeDensityToggle({
-  theme,
-  onThemeChange,
-  density,
-  onDensityChange,
-}: {
-  theme: 'light' | 'dark';
-  onThemeChange: (t: 'light' | 'dark') => void;
-  density: 'airy' | 'squish';
-  onDensityChange: (d: 'airy' | 'squish') => void;
-}) {
+function SunIcon() {
   return (
-    <div className="flex items-center gap-3">
-      <button
-        onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
-        aria-label="Toggle dark mode"
-        className="px-3 py-1.5 text-xs rounded-full font-medium border border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-slate-700 hover:bg-white dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 transition-colors"
-      >
-        {theme === 'dark' ? '🌙 Dark' : '☀️ Light'}
-      </button>
-      <button
-        onClick={() => onDensityChange(density === 'squish' ? 'airy' : 'squish')}
-        title="Toggle density"
-        className="px-3 py-1.5 text-xs rounded-full font-medium border border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-slate-700 hover:bg-white dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 transition-colors"
-      >
-        {density === 'squish' ? 'Squish' : 'Airy'}
-      </button>
-    </div>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="h-4 w-4">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="h-4 w-4">
+      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+    </svg>
+  );
+}
+
+function ThemeToggle({ theme, onThemeChange }: { theme: 'light' | 'dark'; onThemeChange: (t: 'light' | 'dark') => void }) {
+  const dark = theme === 'dark';
+  return (
+    <button
+      onClick={() => onThemeChange(dark ? 'light' : 'dark')}
+      aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+      title={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+      className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    >
+      {dark ? <SunIcon /> : <MoonIcon />}
+    </button>
   );
 }
 
 function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'));
-  const [density, setDensity] = useState<'airy' | 'squish'>(() => (localStorage.getItem('density') === 'squish' ? 'squish' : 'airy'));
 
   const [geneName, setGeneName] = useState('');
   const [species, setSpecies] = useState('homo_sapiens');
@@ -57,7 +56,7 @@ function App() {
   const [ampTarget, setAmpTarget] = useState(150);
   const [ampDev, setAmpDev] = useState(50);
 
-  // IDT OligoAnalyzer credentials — five discrete `localStorage` keys,
+  // IDT OligoAnalyzer credentials - five discrete `localStorage` keys,
   // matching Oligool's own storage shape exactly (the rewrite plan's
   // locked-in decision), assembled into one object only here at the point
   // of use, never persisted server-side.
@@ -89,12 +88,6 @@ function App() {
     document.documentElement.classList.toggle('dark', t === 'dark');
   }
 
-  function applyDensity(d: 'airy' | 'squish') {
-    setDensity(d);
-    localStorage.setItem('density', d);
-    document.documentElement.setAttribute('data-density', d);
-  }
-
   function handleGeneFound(name: string, sp: string, source: 'ensembl' | 'ncbi', ts: Transcript[]) {
     setGeneName(name);
     setSpecies(sp);
@@ -115,26 +108,24 @@ function App() {
   const isCustomSequence = sequenceData?.transcript_id === 'custom';
 
   return (
-    <div className="min-h-screen py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-5xl mx-auto">
-        <header className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent">Primerool</h1>
-            <p className="mt-1 text-slate-500 dark:text-slate-400">Cloud-based Primer Design Tool</p>
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-20 border-b border-line bg-base">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
+          <div className="flex items-baseline gap-2.5">
+            <span className="text-[15px] font-semibold tracking-tight text-ink">Primerool</span>
+            <span className="hidden text-xs text-ink-faint sm:inline">Primer design for any organism</span>
           </div>
-          <ThemeDensityToggle theme={theme} onThemeChange={applyTheme} density={density} onDensityChange={applyDensity} />
-        </header>
-
-        <div className="mb-6">
-          <IdtSettingsPanel credentials={idtCredentials} onChange={handleIdtCredentialsChange} />
+          <ThemeToggle theme={theme} onThemeChange={applyTheme} />
         </div>
+      </header>
 
-        <Card title="1. Input Sequence">
+      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+        <Section step={1} title="Input Sequence">
           <InputPanel onGeneFound={handleGeneFound} onCustomSequence={handleCustomSequence} />
-        </Card>
+        </Section>
 
         {transcripts.length > 0 && (
-          <Card title="2. Select Transcript & Configure">
+          <Section step={2} title="Select Transcript & Configure">
             <TranscriptPanel
               key={`${geneName}-${species}-${apiSource}`}
               geneName={geneName}
@@ -145,11 +136,11 @@ function App() {
               onTruncateIntronsChange={setTruncateIntrons}
               onSequenceLoaded={setSequenceData}
             />
-          </Card>
+          </Section>
         )}
 
         {sequenceData && (
-          <Card title="3. Sequence & Features">
+          <Section step={3} title="Sequence & Features">
             <SequenceFeaturesPanel
               data={sequenceData}
               selections={selections}
@@ -159,11 +150,11 @@ function App() {
               onClearSelections={() => setSelections(EMPTY_SELECTIONS)}
               onSelect={handleSelect}
             />
-          </Card>
+          </Section>
         )}
 
         {sequenceData && !isCustomSequence && (
-          <Card title="4. Primer Design (Automatic)">
+          <Section step={4} title="Primer Design: Automatic">
             <AutoDesignPanel
               data={sequenceData}
               species={species}
@@ -173,11 +164,11 @@ function App() {
               onSelect={handleSelect}
               idtCredentials={hasIdtCredentials ? idtCredentials : undefined}
             />
-          </Card>
+          </Section>
         )}
 
         {sequenceData && (
-          <Card title="5. Primer Design (Manual)">
+          <Section step={5} title="Primer Design: Manual">
             <ManualDesignPanel
               data={sequenceData}
               onSelect={handleSelect}
@@ -187,13 +178,17 @@ function App() {
               onAmpDevChange={setAmpDev}
               idtCredentials={hasIdtCredentials ? idtCredentials : undefined}
             />
-          </Card>
+          </Section>
         )}
 
-        <Card title="6. Multi-Sequence Alignment (Conserved-Region Primers)" defaultCollapsed>
+        <Section step={6} title="Multi-Sequence Alignment (Conserved-Region Primers)" defaultCollapsed>
           <AlignmentPanel />
-        </Card>
-      </div>
+        </Section>
+
+        <Section title="IDT OligoAnalyzer Account" defaultCollapsed>
+          <IdtSettingsPanel credentials={idtCredentials} onChange={handleIdtCredentialsChange} />
+        </Section>
+      </main>
     </div>
   );
 }

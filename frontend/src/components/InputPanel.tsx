@@ -7,6 +7,12 @@ import { isAccessionId, cleanDNA } from '../utils/dna';
 import { SPECIES_BY_KINGDOM, KINGDOM_LABELS, findKingdomForSpecies, type Kingdom } from '../utils/species';
 import BlastResultsTable from './BlastResultsTable';
 import SnpBatchPanel from './SnpBatchPanel';
+import SegmentedControl from './ui/SegmentedControl';
+import Field from './ui/Field';
+import TextInput from './ui/TextInput';
+import Select from './ui/Select';
+import Button from './ui/Button';
+import { controlClasses } from './ui/TextInput';
 
 interface Props {
   onGeneFound: (geneName: string, species: string, apiSource: 'ensembl' | 'ncbi', transcripts: Transcript[]) => void;
@@ -70,7 +76,7 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
         throw new Error(`Accession identified as '${top.organism}' but no Gene Symbol found. Please try searching by Sequence to view full results.`);
       }
       const species = top.ensembl_species || 'homo_sapiens';
-      setSuccess(`Accession '${accession}' identified as ${top.organism} — ${top.gene_symbol}. Loading gene data...`);
+      setSuccess(`Accession '${accession}' identified as ${top.organism} (${top.gene_symbol}). Loading gene data…`);
       await runSearchGene(top.gene_symbol, species, apiSource);
     } catch (e) {
       setSuccess(null);
@@ -85,7 +91,7 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
     setSuccess(null);
 
     if (isAccessionId(input)) {
-      setSuccess(`Input '${input}' looks like an Accession ID. Resolving...`);
+      setSuccess(`Input '${input}' looks like an Accession ID. Resolving…`);
       await resolveAccessionAndSearch(input);
     } else {
       await runSearchGene(input, effectiveSpecies || 'homo_sapiens', apiSource);
@@ -140,7 +146,7 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
     }
 
     setGeneInput(hit.gene_symbol);
-    setSuccess(`Identified: ${hit.organism} — ${hit.gene_symbol}. Searching Ensembl...`);
+    setSuccess(`Identified: ${hit.organism} (${hit.gene_symbol}). Searching Ensembl…`);
     void runSearchGene(hit.gene_symbol, species, apiSource);
   }
 
@@ -185,81 +191,70 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
 
   return (
     <div>
-      <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-4">How would you like to start?</h2>
-
-      <div className="flex flex-wrap gap-4 mb-6">
-        <label className="flex items-center gap-2 cursor-pointer bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-          <input type="radio" name="inputMode" checked={inputMode === 'gene'} onChange={() => setInputMode('gene')} className="accent-green-600 w-4 h-4" />
-          <span className="font-medium text-slate-700 dark:text-slate-200">Search by Gene Name</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-4 py-3 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-          <input type="radio" name="inputMode" checked={inputMode === 'fasta'} onChange={() => setInputMode('fasta')} className="accent-green-600 w-4 h-4" />
-          <span className="font-medium text-slate-700 dark:text-slate-200">Paste a Sequence (FASTA)</span>
-        </label>
-      </div>
+      <SegmentedControl
+        className="mb-6"
+        ariaLabel="Input mode"
+        value={inputMode}
+        onChange={setInputMode}
+        options={[
+          { value: 'gene', label: 'Search by Gene Name' },
+          { value: 'fasta', label: 'Paste a Sequence (FASTA)' },
+        ]}
+      />
 
       {inputMode === 'gene' && (
         <>
-          <div className="mb-3">
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Data Source</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setApiSource('ensembl')}
-                className={`px-3 py-1 text-xs rounded-full font-medium transition-colors border ${apiSource === 'ensembl' ? 'border-green-500 bg-green-500 text-white' : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:border-green-400'}`}
-              >
-                Ensembl
-              </button>
-              <button
-                onClick={() => setApiSource('ncbi')}
-                className={`px-3 py-1 text-xs rounded-full font-medium transition-colors border ${apiSource === 'ncbi' ? 'border-green-500 bg-green-500 text-white' : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:border-green-400'}`}
-              >
-                NCBI
-              </button>
-            </div>
-          </div>
+          <Field label="Data Source" className="mb-4">
+            <SegmentedControl
+              size="sm"
+              ariaLabel="Data source"
+              value={apiSource}
+              onChange={setApiSource}
+              options={[
+                { value: 'ensembl', label: 'Ensembl' },
+                { value: 'ncbi', label: 'NCBI' },
+              ]}
+            />
+          </Field>
 
-          <div className="mb-3">
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Organism</label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <select
+          <div className="mb-4">
+            <label className="mb-1.5 block text-xs font-medium text-ink-muted">Organism</label>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Select
+                aria-label="Kingdom"
                 value={kingdom}
                 onChange={(e) => {
                   const k = e.target.value as Kingdom;
                   setKingdom(k);
                   setSpeciesValue(SPECIES_BY_KINGDOM[k][0]?.value || '');
                 }}
-                className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border"
               >
                 {(Object.keys(KINGDOM_LABELS) as Kingdom[]).map((k) => (
                   <option key={k} value={k}>
                     {KINGDOM_LABELS[k]}
                   </option>
                 ))}
-              </select>
-              <select
-                value={speciesValue}
-                onChange={(e) => setSpeciesValue(e.target.value)}
-                className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border"
-              >
+              </Select>
+              <Select aria-label="Species" value={speciesValue} onChange={(e) => setSpeciesValue(e.target.value)}>
                 {speciesOptions.map((s) => (
                   <option key={s.value} value={s.value}>
                     {s.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             {speciesValue === '__custom__' && (
               <div className="mt-2">
-                <input
+                <TextInput
                   type="text"
+                  spellCheck={false}
                   value={customSpecies}
                   onChange={(e) => setCustomSpecies(e.target.value)}
-                  placeholder="e.g. escherichia_coli_str_k_12_substr_mg1655"
-                  className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border"
+                  placeholder="e.g. escherichia_coli_str_k_12_substr_mg1655…"
                 />
-                <p className="text-xs text-slate-400 mt-1">
+                <p className="mt-1 text-xs text-ink-faint">
                   Enter the Ensembl species name (lowercase, underscores).{' '}
-                  <a href="https://rest.ensembl.org/info/species?content-type=application/json" target="_blank" rel="noreferrer" className="text-green-600 hover:underline">
+                  <a href="https://rest.ensembl.org/info/species?content-type=application/json" target="_blank" rel="noreferrer" className="text-accent hover:underline">
                     Browse all species
                   </a>
                 </p>
@@ -267,60 +262,50 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
             )}
           </div>
 
-          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Gene Name or Accession ID</label>
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={geneInput}
-              onChange={(e) => setGeneInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleGeneSearch();
-              }}
-              placeholder="e.g., CHAT or NR_132312.2"
-              className="flex-1 rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border"
-            />
-            <button
-              disabled={searching}
-              onClick={() => void handleGeneSearch()}
-              className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm"
-            >
-              {searching ? 'Searching…' : 'Search'}
-            </button>
-          </div>
+          <Field label="Gene Name or Accession ID" htmlFor="gene-input">
+            <div className="flex gap-3">
+              <input
+                id="gene-input"
+                type="text"
+                value={geneInput}
+                onChange={(e) => setGeneInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleGeneSearch();
+                }}
+                placeholder="e.g. CHAT or NR_132312.2…"
+                className="h-9 flex-1 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+              />
+              <Button variant="primary" disabled={searching} onClick={() => void handleGeneSearch()}>
+                {searching ? 'Searching…' : 'Search'}
+              </Button>
+            </div>
+          </Field>
         </>
       )}
 
       {inputMode === 'fasta' && (
         <div>
-          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Paste your sequence (raw or FASTA format)</label>
-          <textarea
-            rows={6}
-            value={fastaInput}
-            onChange={(e) => setFastaInput(e.target.value)}
-            placeholder={'>optional_header\nATGCGTACGATCGATCGATCGATCG...'}
-            className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm focus:border-green-500 focus:ring-green-500 font-mono text-sm p-3 border resize-y mb-3"
-          />
+          <Field label="Paste your sequence (raw or FASTA format)" htmlFor="fasta-input">
+            <textarea
+              id="fasta-input"
+              rows={6}
+              value={fastaInput}
+              onChange={(e) => setFastaInput(e.target.value)}
+              placeholder={'>optional_header\nATGCGTACGATCGATCGATCGATCG…'}
+              className={`${controlClasses} mb-3 font-mono leading-relaxed resize-y`}
+            />
+          </Field>
 
           <div className="flex flex-wrap gap-3">
-            <button
-              disabled={blastRunning}
-              onClick={() => void identifySequence()}
-              className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full sm:w-auto"
-            >
-              {blastRunning ? 'Running BLAST...' : 'Identify Sequence (NCBI BLAST)'}
-            </button>
-            <button
-              onClick={useCustomSequence}
-              className="bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-green-50 dark:hover:bg-slate-600 font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full sm:w-auto"
-            >
+            <Button variant="primary" disabled={blastRunning} onClick={() => void identifySequence()} className="w-full sm:w-auto">
+              {blastRunning ? 'Running BLAST…' : 'Identify Sequence (NCBI BLAST)'}
+            </Button>
+            <Button onClick={useCustomSequence} className="w-full sm:w-auto">
               Use Custom Sequence
-            </button>
-            <button
-              onClick={() => setShowSnpBatch((v) => !v)}
-              className="bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-green-50 dark:hover:bg-slate-600 font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full sm:w-auto"
-            >
-              {showSnpBatch ? 'Hide SNP batch importer' : 'Import SNP flanking blocks (batch) →'}
-            </button>
+            </Button>
+            <Button onClick={() => setShowSnpBatch((v) => !v)} className="w-full sm:w-auto">
+              {showSnpBatch ? 'Hide SNP batch importer' : 'Import SNP flanking blocks (batch)'}
+            </Button>
           </div>
 
           {showSnpBatch && (
@@ -330,28 +315,28 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
           )}
 
           {blastRunning && (
-            <div className="mt-4 p-4 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg">
-              <div className="flex items-center gap-2 mb-2">
-                <strong className="text-amber-800 dark:text-amber-300">Running NCBI BLAST...</strong>
-                <span className="text-sm text-amber-700 dark:text-amber-400">This may take up to 2 minutes. Please wait.</span>
+            <div className="mt-4 rounded-md border border-line bg-surface-2 px-4 py-3" role="status">
+              <div className="mb-2 flex items-baseline gap-2">
+                <strong className="text-sm text-ink">Running NCBI BLAST…</strong>
+                <span className="text-sm text-ink-muted">This may take up to 2 minutes. Please wait.</span>
               </div>
-              <div className="w-full h-2 bg-amber-100 dark:bg-amber-950 rounded-full overflow-hidden">
-                <div className="h-full bg-amber-500 transition-all duration-1000 ease-linear" style={{ width: `${blastProgress}%` }} />
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
+                <div className="h-full rounded-full bg-accent transition-[width] duration-1000 ease-linear" style={{ width: `${blastProgress}%` }} />
               </div>
             </div>
           )}
 
           {blastHits && (
             <div className="mt-4">
-              <h3 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-3">BLAST Results</h3>
+              <h3 className="mb-3 text-sm font-semibold text-ink">BLAST Results</h3>
               <BlastResultsTable hits={blastHits} onUse={useBlastHit} />
             </div>
           )}
         </div>
       )}
 
-      {error && <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm font-medium">{error}</div>}
-      {success && <div className="mt-4 mb-6 p-4 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 rounded-lg text-emerald-700 dark:text-emerald-300 text-sm font-medium">{success}</div>}
+      {error && <div role="alert" className="mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{error}</div>}
+      {success && <div role="status" className="mt-4 mb-2 rounded-md border border-success/25 bg-success-subtle px-3 py-2.5 text-sm font-medium text-success">{success}</div>}
     </div>
   );
 }

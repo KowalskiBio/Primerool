@@ -9,6 +9,11 @@ import { normalizedTupleToInterval } from '../utils/coords';
 import { reverseComplement } from '../utils/dna';
 import ResultsTable, { type Column } from './ResultsTable';
 import PrimerCard from './PrimerCard';
+import Badge from './ui/Badge';
+import Button from './ui/Button';
+import Checkbox from './ui/Checkbox';
+import Field from './ui/Field';
+import TextInput from './ui/TextInput';
 import type { IdtCredentials } from './IdtSettingsPanel';
 import { fmt, yesNo } from '../utils/format';
 
@@ -18,7 +23,7 @@ const HIDDEN_COLUMNS_STORAGE_KEY = 'arms_hidden_variant_columns';
 
 /** Sorts by a column's `sortValue`: numbers compare numerically, everything
  * else as text. `null` (meaning "no value for this row", e.g. an unfetched
- * frequency) always sorts last regardless of direction — the direction only
+ * frequency) always sorts last regardless of direction - the direction only
  * flips the order of rows that actually have a value. */
 function sortByColumn<T>(rows: T[], sortValue: (row: T) => string | number | null, direction: 'asc' | 'desc'): T[] {
   const dir = direction === 'asc' ? 1 : -1;
@@ -32,7 +37,7 @@ function sortByColumn<T>(rows: T[], sortValue: (row: T) => string | number | nul
   });
 }
 
-/** A single real nucleotide character — deliberately excludes Ensembl's `-`
+/** A single real nucleotide character - deliberately excludes Ensembl's `-`
  * placeholder for "no base here" (its convention for the deleted/inserted
  * side of an indel), which has `length === 1` but isn't a base. */
 function isSingleBase(a: string): boolean {
@@ -40,7 +45,7 @@ function isSingleBase(a: string): boolean {
 }
 
 /** Classic single-letter-position-letter mutation notation (e.g. `C6574T`)
- * — only meaningful for a true single-base substitution; indels have no
+ * - only meaningful for a true single-base substitution; indels have no
  * clean equivalent in this shorthand, so callers get `null` for those.
  * `pos` is 0-based (as used everywhere else in this component/the design
  * API) and is rendered 1-based here, matching this notation's own
@@ -51,7 +56,7 @@ function snpNotation(pos: number, ref: string, alt: string): string | null {
 }
 
 /** Coarse severity ranking used only to sort/triage the results list, not
- * to make any design decision — lower rank = shown first ("more dangerous
+ * to make any design decision - lower rank = shown first ("more dangerous
  * / more likely to matter"). Not the full SO consequence-type ontology or
  * ClinVar's own significance model, just enough of a hierarchy to surface
  * pathogenic/high-impact variants above intronic/synonymous ones. */
@@ -107,7 +112,7 @@ function rankIn(order: string[], value: string | null | undefined): number {
 }
 
 /** Lower = more clinically significant / more likely to matter for ARMS
- * design; used purely to sort the results table, never to filter it — a
+ * design; used purely to sort the results table, never to filter it - a
  * variant with unrecognized/empty metadata still shows up, just last. */
 function dangerScore(h: VariantHit): number {
   const clinical = h.clinical_significance.length ? Math.min(...h.clinical_significance.map((s) => rankIn(CLINICAL_SIGNIFICANCE_ORDER, s))) : CLINICAL_SIGNIFICANCE_ORDER.length;
@@ -123,8 +128,8 @@ interface Props {
 }
 
 interface SelectedVariant {
-  /** Unique within the selection list — a hit's own id for search/lookup
-   * picks, or a derived key for manual entries — used for React keys, the
+  /** Unique within the selection list - a hit's own id for search/lookup
+   * picks, or a derived key for manual entries - used for React keys, the
    * "Remove" action, and de-duplication (selecting the same hit twice is a
    * no-op rather than a second entry). */
   key: string;
@@ -166,7 +171,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
   /** Frequency lookups a user has explicitly triggered (per-row "Fetch" or
    * the bulk "Show frequency" button) for hits that didn't already carry
    * `minor_allele_freq` from the search response itself (i.e. position/
-   * region search results — see `VariantHit.minor_allele_freq`'s doc).
+   * region search results - see `VariantHit.minor_allele_freq`'s doc).
    * Keyed by variant id; absent = not yet requested. */
   const [frequencies, setFrequencies] = useState<Record<string, { loading: boolean; value: number | null; minorAllele: string | null }>>({});
   const [bulkFreqLoading, setBulkFreqLoading] = useState(false);
@@ -244,21 +249,21 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
 
   /** `null` when selectable; otherwise the reason it isn't (shown as the
    * disabled button's tooltip). A variant found via ID lookup can land on
-   * any chromosome, not necessarily the one the loaded gene is on — unlike
+   * any chromosome, not necessarily the one the loaded gene is on - unlike
    * a region-search hit, which is always on `data.chrom` by construction
-   * (that's what was searched) — so this must check both. */
+   * (that's what was searched) - so this must check both. */
   function hitSelectDisabledReason(hit: VariantHit): string | null {
     if (!canUseVariantSearch) return "Enable 'Include introns' in step 2 to select a variant.";
     if (hit.chrom && data.chrom && hit.chrom !== data.chrom) return `This variant is on chromosome ${hit.chrom}, not the loaded gene's chromosome (${data.chrom}).`;
     if (localPosForHit(hit) === null) return 'This variant maps outside the loaded gene sequence.';
     if (refAltCandidates(hit) === null && new Set(orientedAlleles(hit)).size < 2) {
-      return "This variant's allele data isn't available from the source — add it manually using position/ref/alt below instead.";
+      return "This variant's allele data isn't available from the source - add it manually using position/ref/alt below instead.";
     }
     return null;
   }
 
   /** Ensembl reports `alleles` relative to the reference genome's plus
-   * strand, regardless of which strand the loaded transcript is on — but
+   * strand, regardless of which strand the loaded transcript is on - but
    * `data.gene_seq` is the transcript's own sense-strand sequence (already
    * reverse-complemented at fetch time for a minus-strand gene). Every
    * allele shown to, or picked by, the user must be expressed in
@@ -266,7 +271,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
    * like a mismatch (its plus-strand base is the complement of what's
    * actually in `gene_seq`) and gets wrongly rejected by the backend's
    * `RefAlleleMismatch` check. `-` (Ensembl's "no base here" placeholder
-   * for the deleted/inserted side of an indel) is left as-is — it isn't a
+   * for the deleted/inserted side of an indel) is left as-is - it isn't a
    * sequence to reverse-complement. */
   function orientedAlleles(hit: VariantHit): string[] {
     if (data.strand !== '-') return hit.alleles;
@@ -282,9 +287,9 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
   }
 
   /** The *actual* template base at this hit's position (ground truth from
-   * `data.gene_seq`, never trusted from the provider's allele order — see
+   * `data.gene_seq`, never trusted from the provider's allele order - see
    * `VariantHit.alleles`'s doc) as ref, and every other reported allele as
-   * a possible alt — so the UI never has to ask the user to disambiguate
+   * a possible alt - so the UI never has to ask the user to disambiguate
    * ref/alt for a plain biallelic SNP, only to pick among alts when a site
    * genuinely has more than one. `null` when unavailable (off-sequence/
    * wrong chromosome, matching `localPosForHit`), when this isn't a clean
@@ -314,7 +319,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
 
   /** A hit's frequency, merging what the search/lookup response already
    * carried (populated for `lookupVariant` results, always `null` for
-   * `searchVariants` results — see `VariantHit.minor_allele_freq`) with any
+   * `searchVariants` results - see `VariantHit.minor_allele_freq`) with any
    * on-demand fetch the user triggered for it. `fetched: false` means
    * neither source has an answer yet, so the cell should offer to fetch. */
   function resolvedFreq(h: VariantHit): { value: number | null; minorAllele: string | null; loading: boolean; fetched: boolean } {
@@ -342,15 +347,15 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
 
   const allColumns: { key: string; column: Column<VariantHit> }[] = [
     { key: 'id', column: { header: 'ID', render: (h) => h.id, className: 'font-mono', width: '10%', sortValue: (h) => h.id } },
-    { key: 'name', column: { header: 'Name', render: (h) => snpNameForHit(h) ?? '—', className: 'font-mono', width: '8%', sortValue: (h) => snpNameForHit(h) } },
+    { key: 'name', column: { header: 'Name', render: (h) => snpNameForHit(h) ?? '-', className: 'font-mono', width: '8%', sortValue: (h) => snpNameForHit(h) } },
     { key: 'position', column: { header: 'Position', render: (h) => `chr${h.chrom}:${h.start === h.end ? h.start : `${h.start}-${h.end}`}`, width: '12%', sortValue: (h) => h.start } },
     { key: 'alleles', column: { header: 'Alleles', render: (h) => orientedAlleles(h).join('/'), className: 'font-mono', width: '8%' } },
-    { key: 'consequence', column: { header: 'Consequence', render: (h) => (h.consequence_type || '—').replace(/_/g, ' '), width: '15%', sortValue: (h) => h.consequence_type } },
+    { key: 'consequence', column: { header: 'Consequence', render: (h) => (h.consequence_type || '-').replace(/_/g, ' '), width: '15%', sortValue: (h) => h.consequence_type } },
     {
       key: 'clinical',
       column: {
         header: 'Clinical significance',
-        render: (h) => (h.clinical_significance.length ? h.clinical_significance.join(', ') : '—'),
+        render: (h) => (h.clinical_significance.length ? h.clinical_significance.join(', ') : '-'),
         width: '15%',
         sortValue: (h) => (h.clinical_significance.length ? h.clinical_significance.join(', ') : null),
       },
@@ -363,12 +368,12 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
         sortValue: (h) => resolvedFreq(h).value,
         render: (h) => {
           const f = resolvedFreq(h);
-          if (f.loading) return <span className="text-xs text-slate-400">…</span>;
-          if (f.fetched) return f.value !== null ? `${f.minorAllele ? `${f.minorAllele}: ` : ''}${(f.value * 100).toFixed(2)}%` : '—';
+          if (f.loading) return <span className="text-xs text-ink-faint">…</span>;
+          if (f.fetched) return f.value !== null ? `${f.minorAllele ? `${f.minorAllele}: ` : ''}${(f.value * 100).toFixed(2)}%` : '-';
           return (
-            <button className="px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-400 border border-green-600 rounded hover:bg-green-600 hover:text-white dark:hover:text-white transition" onClick={() => void fetchFrequency(h)}>
+            <Button size="sm" onClick={() => void fetchFrequency(h)}>
               Fetch
-            </button>
+            </Button>
           );
         },
       },
@@ -385,29 +390,25 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
           return (
             <div>
               {selectedVariants.some((v) => v.key === h.id) ? (
-                <span className="px-2 py-1 text-xs font-medium text-green-700 dark:text-green-400">✓ Added</span>
+                <Badge tone="success">Added</Badge>
               ) : expandedHitId !== h.id ? (
-                <button
-                  className="px-2 py-1 text-xs font-medium text-green-700 dark:text-green-400 border border-green-600 rounded hover:bg-green-600 hover:text-white dark:hover:text-white transition disabled:opacity-50"
-                  disabled={hitSelectDisabledReason(h) !== null}
-                  title={hitSelectDisabledReason(h) ?? undefined}
-                  onClick={() => setExpandedHitId(h.id)}
-                >
+                <Button size="sm" disabled={hitSelectDisabledReason(h) !== null} title={hitSelectDisabledReason(h) ?? undefined} onClick={() => setExpandedHitId(h.id)}>
                   Select
-                </button>
+                </Button>
               ) : (
-                <div className="flex flex-col gap-1 w-full max-w-[10rem]">
+                <div className="flex w-full max-w-[10rem] flex-col gap-1">
                   <div className="flex items-center gap-1">
-                    <span className="text-xs shrink-0">Ref:</span>
+                    <span className="shrink-0 text-xs">Ref:</span>
                     {/* Ground truth once `refAltCandidates` can determine it
-                     * (from `data.gene_seq`, not the provider) — offering it
+                     * (from `data.gene_seq`, not the provider) - offering it
                      * as an editable select would just invite a mismatch the
                      * backend rejects anyway, see `orientedAlleles`'s doc. */}
                     {candidates ? (
-                      <span className="text-xs font-mono">{candidates.ref}</span>
+                      <span className="font-mono text-xs">{candidates.ref}</span>
                     ) : (
                       <select
-                        className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 flex-1 min-w-0"
+                        aria-label="Ref allele"
+                        className="min-w-0 flex-1 rounded border border-line-strong bg-surface px-1 py-0.5 text-xs text-ink"
                         value={hitRefAllele[h.id] ?? alleles[0] ?? ''}
                         onChange={(e) => setHitRefAllele((prev) => ({ ...prev, [h.id]: e.target.value }))}
                       >
@@ -420,11 +421,12 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
                     )}
                   </div>
                   <div className="flex items-center gap-1">
-                    <span className="text-xs shrink-0">Alt:</span>
+                    <span className="shrink-0 text-xs">Alt:</span>
                     {/* Multiple options here means a genuinely multi-allelic
-                     * site — the user picks which alt they mean. */}
+                     * site - the user picks which alt they mean. */}
                     <select
-                      className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 flex-1 min-w-0"
+                      aria-label="Alt allele"
+                      className="min-w-0 flex-1 rounded border border-line-strong bg-surface px-1 py-0.5 text-xs text-ink"
                       value={hitAltAllele[h.id] ?? altOptions[0] ?? ''}
                       onChange={(e) => setHitAltAllele((prev) => ({ ...prev, [h.id]: e.target.value }))}
                     >
@@ -435,9 +437,9 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
                       ))}
                     </select>
                   </div>
-                  <button className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition mt-1" onClick={() => confirmHitSelection(h)}>
+                  <Button size="sm" variant="primary" className="mt-1" onClick={() => confirmHitSelection(h)}>
                     Add Variant
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
@@ -460,7 +462,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
   const pageMissingFreq = pagedHits.some((h) => !resolvedFreq(h).fetched);
 
   /** Fetches frequency for the current page one row at a time (not
-   * `Promise.all`) — same rate-limiting rationale as `runDesign`'s
+   * `Promise.all`) - same rate-limiting rationale as `runDesign`'s
    * sequential `/design_arms` calls: Ensembl itself is already rate-limited
    * server-side, so firing a page's worth of lookups concurrently just
    * queues up with no real speedup. */
@@ -492,7 +494,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
   }
 
   /** Adding a variant clears stale design output rather than the selection
-   * list itself — each addition is meant to accumulate a batch, and
+   * list itself - each addition is meant to accumulate a batch, and
    * previous results no longer match the (now different) batch about to be
    * designed. */
   function addVariant(v: SelectedVariant) {
@@ -565,7 +567,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
   }
 
   /** Designs every selected variant, one request at a time (not
-   * `Promise.all`) — each `/design_arms` call is a CPU-bound primer3 search
+   * `Promise.all`) - each `/design_arms` call is a CPU-bound primer3 search
    * on the server (`spawn_blocking`), so firing a batch's worth of them
    * concurrently would just queue up behind the same thread pool with no
    * real speedup, for no benefit over sequential requests with visible
@@ -611,87 +613,81 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
 
   return (
     <div>
-      <div className="bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-6">
-        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Search known variants ({apiSource === 'ncbi' ? 'NCBI dbSNP' : 'Ensembl'})</h3>
+      <div className="mb-6 rounded-md border border-line bg-surface-2 p-4">
+        <h3 className="mb-2 text-sm font-semibold text-ink">Search known variants ({apiSource === 'ncbi' ? 'NCBI dbSNP' : 'Ensembl'})</h3>
         {!canUseVariantSearch && (
-          <div className="text-sm text-amber-800 dark:text-amber-300 mb-3 bg-amber-50 dark:bg-amber-950/40 p-2 rounded border border-amber-100 dark:border-amber-900">
+          <div className="mb-3 rounded-md border border-warning/25 bg-warning-subtle p-2 text-sm text-warning">
             Enable &ldquo;Include introns&rdquo; in step 2 to search for known variants (genomic coordinates only map exactly onto the intron-inclusive gene sequence). You can still enter a variant manually below.
           </div>
         )}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Region start (bp, 0-based into gene sequence):</label>
-            <input type="number" min={0} value={regionStart} onChange={(e) => setRegionStart(parseInt(e.target.value, 10) || 0)} className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border" />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Region end (bp, exclusive):</label>
-            <input type="number" min={0} value={regionEnd} onChange={(e) => setRegionEnd(parseInt(e.target.value, 10) || 0)} className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border" />
-          </div>
+        <div className="mb-3 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <Field label="Region start (bp, 0-based into gene sequence)">
+            <TextInput type="number" min={0} value={regionStart} onChange={(e) => setRegionStart(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
+          </Field>
+          <Field label="Region end (bp, exclusive)">
+            <TextInput type="number" min={0} value={regionEnd} onChange={(e) => setRegionEnd(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
+          </Field>
           <div className="flex items-end">
-            <button disabled={searchLoading} onClick={() => void runSearch()} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full">
+            <Button variant="primary" disabled={searchLoading} onClick={() => void runSearch()} className="w-full">
               {searchLoading ? 'Searching…' : 'Search Variants'}
-            </button>
+            </Button>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 my-3 text-xs text-slate-400 dark:text-slate-500">
-          <div className="flex-1 border-t border-slate-200 dark:border-slate-700" />
+        <div className="my-3 flex items-center gap-3 text-xs text-ink-faint">
+          <div className="flex-1 border-t border-line" />
           or look up a specific variant by its database ID
-          <div className="flex-1 border-t border-slate-200 dark:border-slate-700" />
+          <div className="flex-1 border-t border-line" />
         </div>
         <div className="flex gap-3">
-          <input
+          <TextInput
             type="text"
-            placeholder="e.g. rs1042522"
+            placeholder="e.g. rs1042522…"
             value={lookupId}
             onChange={(e) => setLookupId(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void runLookupById();
             }}
-            className="flex-1 rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border font-mono"
+            className="flex-1 font-mono"
           />
-          <button disabled={lookupLoading} onClick={() => void runLookupById()} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm">
+          <Button variant="primary" disabled={lookupLoading} onClick={() => void runLookupById()}>
             {lookupLoading ? 'Looking up…' : 'Look Up'}
-          </button>
+          </Button>
         </div>
 
-        {searchError && <div className="p-3 mt-3 text-sm text-red-800 dark:text-red-300 rounded-lg bg-red-50 dark:bg-red-950/40">{searchError}</div>}
+        {searchError && <div role="alert" className="mt-3 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{searchError}</div>}
 
         {hits && hits.length > 0 && (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-3 text-sm text-slate-600 dark:text-slate-300">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-muted">
               <span>
-                {sort ? `Sorted by ${visibleColumns[sort.columnIndex]?.column.header ?? ''} (${sort.direction})` : 'Sorted by clinical relevance'} — showing {pagedHits.length ? clampedPage * pageSize + 1 : 0}–
-                {clampedPage * pageSize + pagedHits.length} of {sortedHits.length}
+                {sort ? `Sorted by ${visibleColumns[sort.columnIndex]?.column.header ?? ''} (${sort.direction})` : 'Sorted by clinical relevance'}, showing {pagedHits.length ? clampedPage * pageSize + 1 : 0}-{clampedPage * pageSize + pagedHits.length} of {sortedHits.length}
               </span>
               <div className="flex flex-wrap items-center gap-2">
                 {pageMissingFreq && (
-                  <button
-                    disabled={bulkFreqLoading}
-                    onClick={() => void showFrequencyForPage()}
-                    className="px-2 py-1 text-xs font-medium rounded border border-slate-300 dark:border-slate-600 disabled:opacity-50 bg-white dark:bg-slate-700"
-                  >
+                  <Button size="sm" disabled={bulkFreqLoading} onClick={() => void showFrequencyForPage()}>
                     {bulkFreqLoading ? 'Fetching frequencies…' : 'Show frequency'}
-                  </button>
+                  </Button>
                 )}
                 <div className="relative">
-                  <button onClick={() => setColumnsMenuOpen((o) => !o)} className="px-2 py-1 text-xs font-medium rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700">
+                  <Button size="sm" aria-haspopup="menu" aria-expanded={columnsMenuOpen} onClick={() => setColumnsMenuOpen((o) => !o)}>
                     Columns ▾
-                  </button>
+                  </Button>
                   {columnsMenuOpen && (
-                    <div className="absolute right-0 z-10 mt-1 w-56 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-2">
+                    <div className="absolute right-0 z-10 mt-1 w-56 rounded-md border border-line bg-surface p-2 shadow-md">
                       {allColumns.map((c) => (
-                        <label key={c.key} className="flex items-center gap-2 px-1 py-1 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
-                          <input type="checkbox" checked={!hiddenColumns.has(c.key)} onChange={() => toggleColumn(c.key)} className="accent-green-600 w-3.5 h-3.5" />
+                        <label key={c.key} className="flex cursor-pointer items-center gap-2 px-1 py-1 text-xs text-ink">
+                          <input type="checkbox" checked={!hiddenColumns.has(c.key)} onChange={() => toggleColumn(c.key)} className="h-3.5 w-3.5 accent-accent" />
                           {c.column.header}
                         </label>
                       ))}
                     </div>
                   )}
                 </div>
-                <label className="text-xs">Per page:</label>
+                <label className="text-xs text-ink-muted" htmlFor="arms-page-size">Per page:</label>
                 <select
-                  className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1"
+                  id="arms-page-size"
+                  className="h-7 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink"
                   value={pageSize}
                   onChange={(e) => {
                     setPageSize(parseInt(e.target.value, 10));
@@ -704,23 +700,15 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
                     </option>
                   ))}
                 </select>
-                <button
-                  className="px-2 py-1 text-xs font-medium rounded border border-slate-300 dark:border-slate-600 disabled:opacity-40 bg-white dark:bg-slate-700"
-                  disabled={clampedPage === 0}
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                >
+                <Button size="sm" disabled={clampedPage === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
                   Prev
-                </button>
-                <span className="text-xs">
+                </Button>
+                <span className="text-xs tabular-nums text-ink-muted">
                   Page {clampedPage + 1} of {totalPages}
                 </span>
-                <button
-                  className="px-2 py-1 text-xs font-medium rounded border border-slate-300 dark:border-slate-600 disabled:opacity-40 bg-white dark:bg-slate-700"
-                  disabled={clampedPage >= totalPages - 1}
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                >
+                <Button size="sm" disabled={clampedPage >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>
                   Next
-                </button>
+                </Button>
               </div>
             </div>
             <ResultsTable rows={pagedHits} keyOf={(h) => h.id} columns={visibleColumns.map((c) => c.column)} sort={sort} onSortChange={handleSortChange} />
@@ -728,30 +716,27 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
         )}
       </div>
 
-      <div className="bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-6">
-        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Or enter a variant manually</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Position (bp, 0-based into gene sequence):</label>
-            <input type="number" min={0} value={manualPos} onChange={(e) => setManualPos(parseInt(e.target.value, 10) || 0)} className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border" />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Ref allele:</label>
-            <input type="text" value={manualRef} onChange={(e) => setManualRef(e.target.value)} className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border font-mono" />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Alt allele:</label>
-            <input type="text" value={manualAlt} onChange={(e) => setManualAlt(e.target.value)} className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border font-mono" />
-          </div>
+      <div className="mb-6 rounded-md border border-line bg-surface-2 p-4">
+        <h3 className="mb-2 text-sm font-semibold text-ink">Or enter a variant manually</h3>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <Field label="Position (bp, 0-based into gene sequence)">
+            <TextInput type="number" min={0} value={manualPos} onChange={(e) => setManualPos(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
+          </Field>
+          <Field label="Ref allele">
+            <TextInput type="text" value={manualRef} onChange={(e) => setManualRef(e.target.value)} className="font-mono" />
+          </Field>
+          <Field label="Alt allele">
+            <TextInput type="text" value={manualAlt} onChange={(e) => setManualAlt(e.target.value)} className="font-mono" />
+          </Field>
         </div>
-        <button onClick={useManualVariant} className="mt-3 px-4 py-2 text-sm font-medium bg-green-600 border border-green-600 rounded hover:bg-green-700 text-white transition-colors shadow-sm">
+        <Button variant="primary" className="mt-3" onClick={useManualVariant}>
           Add Variant
-        </button>
+        </Button>
       </div>
 
       {selectedVariants.length > 0 && (
-        <div className="text-sm text-slate-700 dark:text-slate-300 mb-4 bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-3 rounded-lg border border-slate-100 dark:border-slate-700">
-          <p className="font-semibold mb-2">Selected variants ({selectedVariants.length}):</p>
+        <div className="mb-4 rounded-md border border-line bg-surface-2 p-3 text-sm text-ink-muted">
+          <p className="mb-2 font-semibold text-ink">Selected variants ({selectedVariants.length}):</p>
           <ul className="space-y-1">
             {selectedVariants.map((v) => {
               const notation = snpNotation(v.pos, v.refAllele, v.altAllele);
@@ -765,9 +750,9 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
                         (<span className="font-mono">{notation}</span>)
                       </>
                     )}
-                    : position <strong>{v.pos}</strong>, ref <strong className="font-mono">{v.refAllele}</strong> / alt <strong className="font-mono">{v.altAllele}</strong>
+                    : position <strong className="font-medium text-ink">{v.pos}</strong>, ref <strong className="font-mono font-medium text-ink">{v.refAllele}</strong> / alt <strong className="font-mono font-medium text-ink">{v.altAllele}</strong>
                   </span>
-                  <button className="text-xs text-red-600 dark:text-red-400 hover:underline shrink-0" onClick={() => removeVariant(v.key)}>
+                  <button className="shrink-0 text-xs font-medium text-danger hover:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent" onClick={() => removeVariant(v.key)}>
                     Remove
                   </button>
                 </li>
@@ -777,68 +762,64 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
         </div>
       )}
 
-      <div className="flex flex-wrap items-end gap-4 mb-4">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={mismatchEnabled} onChange={(e) => setMismatchEnabled(e.target.checked)} className="accent-green-600 w-4 h-4" />
-          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Add destabilizing mismatch</span>
-        </label>
+      <div className="mb-4 flex flex-wrap items-end gap-4">
+        <Checkbox label={<span className="font-medium">Add destabilizing mismatch</span>} checked={mismatchEnabled} onChange={(e) => setMismatchEnabled(e.target.checked)} />
         {mismatchEnabled && (
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Mismatch offset (bases from 3' end):</label>
-            <input type="number" min={1} value={mismatchOffset} onChange={(e) => setMismatchOffset(parseInt(e.target.value, 10) || 1)} className="w-32 rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border" />
-          </div>
+          <Field label="Mismatch offset (bases from 3' end)">
+            <TextInput type="number" min={1} value={mismatchOffset} onChange={(e) => setMismatchOffset(parseInt(e.target.value, 10) || 1)} className="w-32 tabular-nums" />
+          </Field>
         )}
         <EngineSelect value={engine} onChange={setEngine} />
-        <button disabled={designLoading || selectedVariants.length === 0} onClick={() => void runDesign()} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm">
+        <Button variant="primary" disabled={designLoading || selectedVariants.length === 0} onClick={() => void runDesign()}>
           {designLoading ? `Designing… (${results.length}/${selectedVariants.length})` : `Design ARMS Primers${selectedVariants.length > 1 ? ` (${selectedVariants.length})` : ''}`}
-        </button>
+        </Button>
       </div>
 
-      {designError && <div className="p-4 mb-4 text-sm text-red-800 dark:text-red-300 rounded-lg bg-red-50 dark:bg-red-950/40">{designError}</div>}
+      {designError && <div role="alert" className="mb-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{designError}</div>}
 
       {results.length > 0 && (
         <div className="mt-2 space-y-8">
           {results.map((outcome, i) => {
             const notation = snpNotation(outcome.variant.pos, outcome.variant.refAllele, outcome.variant.altAllele);
             return (
-            <div key={outcome.variant.key} className={i > 0 ? 'pt-6 border-t border-slate-200 dark:border-slate-700' : ''}>
-              <h3 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-2">
+            <div key={outcome.variant.key} className={i > 0 ? 'border-t border-line pt-6' : ''}>
+              <h3 className="mb-2 text-sm font-semibold text-ink">
                 {outcome.variant.label}
-                {notation && <span className="font-mono"> ({notation})</span>} — position {outcome.variant.pos}, ref <span className="font-mono">{outcome.variant.refAllele}</span> / alt{' '}
+                {notation && <span className="font-mono"> ({notation})</span>}, position {outcome.variant.pos}, ref <span className="font-mono">{outcome.variant.refAllele}</span> / alt{' '}
                 <span className="font-mono">{outcome.variant.altAllele}</span>
               </h3>
 
-              {outcome.error && <div className="p-4 mb-4 text-sm text-red-800 dark:text-red-300 rounded-lg bg-red-50 dark:bg-red-950/40">{outcome.error}</div>}
+              {outcome.error && <div role="alert" className="mb-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{outcome.error}</div>}
 
               {outcome.response && (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     {[
                       { label: 'Ref', p: outcome.response.ref_primer, which: 'ref' as const },
                       { label: 'Alt', p: outcome.response.alt_primer, which: 'alt' as const },
                     ].map(({ label, p, which }) => (
-                      <div key={which} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      <div key={which} className="rounded-lg border border-line bg-surface p-3">
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="text-sm font-semibold text-ink">
                             {label} allele ({which === 'ref' ? outcome.variant.refAllele : outcome.variant.altAllele})
                           </span>
-                          <button className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition" onClick={() => selectAllele(which, p)}>
+                          <Button size="sm" variant="primary" onClick={() => selectAllele(which, p)}>
                             Highlight
-                          </button>
+                          </Button>
                         </div>
-                        <p className="font-mono text-sm text-slate-800 dark:text-slate-200 break-all">{p.sequence}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                          Len {p.length} | Tm {fmt(p.tm)} | GC% {fmt(p.gc_percent)} | Hairpin {yesNo(p.hairpin.structure_found)} | Homodimer {yesNo(p.homodimer.structure_found)}
-                          {p.mismatch_position !== null && <> | Mismatch at position {p.mismatch_position}</>}
+                        <p className="break-all font-mono text-sm text-ink">{p.sequence}</p>
+                        <p className="mt-1 text-xs tabular-nums text-ink-muted">
+                          Len {p.length} · Tm {fmt(p.tm)} · GC% {fmt(p.gc_percent)} · Hairpin {yesNo(p.hairpin.structure_found)} · Homodimer {yesNo(p.homodimer.structure_found)}
+                          {p.mismatch_position !== null && <> · Mismatch at position {p.mismatch_position}</>}
                         </p>
                       </div>
                     ))}
                   </div>
 
-                  <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2 mt-4">Common Primer Candidates</h4>
-                  <div className="text-sm text-slate-500 dark:text-slate-400 mb-4 bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-2 rounded border border-slate-100 dark:border-slate-700">
-                    The common primer is shared by both reactions (ref-specific + common, alt-specific + common) — selecting one row highlights it for both.
-                    {results.length > 1 && ' Highlighting works one variant at a time — picking here overwrites the sequence view’s current highlight.'}
+                  <h4 className="mb-2 mt-4 text-sm font-semibold text-ink">Common Primer Candidates</h4>
+                  <div className="mb-4 rounded-md border border-line bg-surface-2 p-2 text-sm text-ink-muted">
+                    The common primer is shared by both reactions (ref-specific + common, alt-specific + common); selecting one row highlights it for both.
+                    {results.length > 1 && ' Highlighting works one variant at a time: picking here overwrites the sequence view\u2019s current highlight.'}
                   </div>
                   <div className="space-y-2">
                     {outcome.response.common_candidates.map((c, ci) => (
@@ -853,7 +834,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
                           setUsedCommonKey(`${outcome.variant.key}:${c.sequence}`);
                         }}
                         extra={
-                          <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800 text-[13px] text-zinc-500 dark:text-zinc-400">
+                          <div className="mt-2 border-t border-line pt-2 text-[13px] text-ink-muted">
                             Product: <span className="font-mono tabular-nums">{c.product_size_ref} bp</span> (ref) / <span className="font-mono tabular-nums">{c.product_size_alt} bp</span> (alt)
                           </div>
                         }

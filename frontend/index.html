@@ -4,17 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f6f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#101013" media="(prefers-color-scheme: dark)" />
     <title>Primerool</title>
     <script>
       // Applied before React mounts, so there's no flash of the wrong
-      // theme/density on load — mirrors the legacy app's own inline
-      // pre-mount script, same localStorage keys ('theme', 'density') for
-      // continuity with any already-populated origin storage.
+      // theme on load. Same localStorage key ('theme') as before.
       (function () {
         var theme = localStorage.getItem('theme') || 'light';
         document.documentElement.classList.toggle('dark', theme === 'dark');
-        var density = localStorage.getItem('density') || 'airy';
-        document.documentElement.setAttribute('data-density', density);
       })();
     </script>
   </head>

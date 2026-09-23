@@ -10,41 +10,136 @@
 @theme {
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --dark-mode: selector;
 }
 
+/* Kept for components that still use `dark:` variants. */
 @variant dark (&:where(.dark, .dark *));
+
+/*
+ * Semantic color tokens. Raw values live on :root / .dark and swap with the
+ * theme; utilities (bg-surface, text-ink, border-line, …) map to them via
+ * `@theme inline` below, so components never need dark: variants for colors.
+ */
+:root {
+  color-scheme: light;
+
+  --base: #f6f6f7;
+  --surface: #ffffff;
+  --surface-2: #f0f0f2;
+
+  --line: #e4e4e7;
+  --line-strong: #d1d1d5;
+
+  --ink: #1c1c1f;
+  --ink-muted: #5d5d66;
+  --ink-faint: #9b9ba2;
+
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+  --accent-solid: #1d4ed8;
+  --accent-solid-hover: #1a42b8;
+  --accent-subtle: #e9eefb;
+
+  --danger: #b42318;
+  --danger-subtle: #fdeceb;
+  --success: #15803d;
+  --success-subtle: #e9f5ee;
+  --warning: #9a6700;
+  --warning-subtle: #fdf3d7;
+
+  --seq-flank: #8f8f97;
+  --seq-intron: #5c5c64;
+  --seq-utr-bg: #fde68a;
+  --seq-utr-ink: #1c1c1f;
+  --seq-cds-bg: #fdba74;
+  --seq-cds-ink: #1c1c1f;
+  --seq-primer-ink: #b91c1c;
+  --seq-primer-bg: #fee2e2;
+  --seq-probe-ink: #1d4ed8;
+  --seq-probe-bg: #dbeafe;
+  --seq-hit-ring: #b45309;
+  --seq-hit-active-bg: #fdba74;
+  --seq-hit-active-ring: #9a3412;
+
+  --exon-label-line: #e4e4e7;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --base: #101013;
+  --surface: #17171a;
+  --surface-2: #1e1e22;
+
+  --line: #26262b;
+  --line-strong: #33333a;
+
+  --ink: #e9e9ec;
+  --ink-muted: #a0a0a8;
+  --ink-faint: #6b6b73;
+
+  --accent: #7aa2f7;
+  --accent-hover: #93b1f9;
+  --accent-solid: #2e5fe8;
+  --accent-solid-hover: #3d6ff0;
+  --accent-subtle: #1e2a45;
+
+  --danger: #f97066;
+  --danger-subtle: #331d1b;
+  --success: #3fb950;
+  --success-subtle: #16281c;
+  --warning: #d29222;
+  --warning-subtle: #2d2413;
+
+  --seq-flank: #6a6a72;
+  --seq-intron: #8b8b93;
+  --seq-utr-bg: rgba(250, 204, 21, 0.16);
+  --seq-utr-ink: #fde68a;
+  --seq-cds-bg: rgba(251, 146, 60, 0.18);
+  --seq-cds-ink: #fdba74;
+  --seq-primer-ink: #f87171;
+  --seq-primer-bg: rgba(248, 113, 113, 0.13);
+  --seq-probe-ink: #93c5fd;
+  --seq-probe-bg: rgba(147, 197, 253, 0.13);
+  --seq-hit-ring: #f59e0b;
+  --seq-hit-active-bg: rgba(251, 146, 60, 0.25);
+  --seq-hit-active-ring: #fb923c;
+
+  --exon-label-line: #26262b;
+}
+
+@theme inline {
+  --color-base: var(--base);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-solid: var(--accent-solid);
+  --color-accent-solid-hover: var(--accent-solid-hover);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+}
 
 @layer base {
   body {
-    @apply font-sans bg-gradient-to-br from-green-50 to-emerald-50/30 text-slate-900 antialiased;
-    @apply dark:from-slate-900 dark:to-slate-900 dark:text-slate-100;
+    @apply bg-base text-ink font-sans antialiased;
   }
 }
 
 /*
- * Density system: ported verbatim from the legacy app's [data-density]
- * attribute + CSS custom properties. Set on <html> by the pre-mount script
- * in index.html (and toggled at runtime once the theme/density control is
- * built) - components read --spacing-container/--spacing-gap/--font-size-base
- * rather than hardcoding padding, so both density modes stay in one place.
- */
-:root {
-  --spacing-container: 1.5rem; /* airy */
-  --spacing-gap: 1.5rem;
-  --font-size-base: 1rem;
-}
-
-[data-density="squish"] {
-  --spacing-container: 0.75rem;
-  --spacing-gap: 0.75rem;
-  --font-size-base: 0.875rem;
-}
-
-/*
- * Sequence-viewer color tokens: ported verbatim from the legacy app's
- * <style> block (SequenceViewer.tsx/SplicedSequenceViewer.tsx build spans
- * with these class names, matching `renderMainSequence`/`renderGeneBlock`).
+ * Sequence-viewer feature colors. Same class-name contract the viewers
+ * build spans against; definitions are token-based so both themes get
+ * proper contrast.
  */
 @layer components {
   .sequence-viewer {
@@ -52,67 +147,68 @@
     white-space: pre-wrap;
     word-break: break-all;
     line-height: 1.6;
+    color: var(--ink);
   }
 
   .seq-flank {
-    color: #94a3b8; /* slate-400 */
+    color: var(--seq-flank);
   }
 
   .seq-intron {
-    color: #64748b; /* slate-500 */
+    color: var(--seq-intron);
   }
 
   .seq-intron-placeholder {
-    color: #94a3b8;
+    color: var(--seq-flank);
     font-style: italic;
     user-select: none;
   }
 
   .seq-utr {
-    color: #0f172a; /* slate-900 */
-    background-color: #fed7aa; /* orange-200 */
+    color: var(--seq-utr-ink);
+    background-color: var(--seq-utr-bg);
   }
 
   .seq-cds {
-    color: #0f172a;
+    color: var(--seq-cds-ink);
     font-weight: 700;
-    background-color: #fed7aa;
+    background-color: var(--seq-cds-bg);
   }
 
   .seq-primer {
-    color: #dc2626;
+    color: var(--seq-primer-ink);
     font-weight: 700;
     text-decoration: underline;
-    background-color: #fef2f2;
+    background-color: var(--seq-primer-bg);
   }
 
   .seq-probe {
-    color: #1e40af;
+    color: var(--seq-probe-ink);
     font-weight: 700;
     text-decoration: underline;
-    background-color: #eff6ff;
+    background-color: var(--seq-probe-bg);
   }
 
   .seq-search-hit {
     border-radius: 2px;
-    box-shadow: 0 0 0 2px #eab308; /* yellow-500 */
+    box-shadow: 0 0 0 2px var(--seq-hit-ring);
   }
 
   .seq-search-hit-active {
-    box-shadow: 0 0 0 2px #c2410c; /* orange-700 */
-    background-color: #fdba74; /* orange-300 */
+    box-shadow: 0 0 0 2px var(--seq-hit-active-ring);
+    background-color: var(--seq-hit-active-bg);
   }
 
   .exon-label {
     display: block;
-    color: #64748b;
+    color: var(--ink-muted);
     font-size: 0.75rem;
     font-weight: 600;
     font-family: var(--font-sans);
     margin-top: 0.5rem;
     margin-bottom: 0.125rem;
     user-select: none;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid var(--exon-label-line);
     padding-top: 0.25rem;
   }
 
@@ -121,10 +217,4 @@
     margin-top: 0;
     padding-top: 0;
   }
-}
-
-.dark .sequence-viewer {
-  background-color: #0f172a !important;
-  border-color: #334155 !important;
-  color: #e2e8f0 !important;
 }

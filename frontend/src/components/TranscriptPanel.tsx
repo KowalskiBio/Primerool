@@ -2,6 +2,11 @@ import { useState } from 'react';
 import { getSequence } from '../api/sequence';
 import type { Transcript } from '../api/gene';
 import type { SequenceData } from '../api/sequence';
+import Field from './ui/Field';
+import TextInput from './ui/TextInput';
+import Select from './ui/Select';
+import Checkbox from './ui/Checkbox';
+import Button from './ui/Button';
 
 interface Props {
   geneName: string;
@@ -14,7 +19,7 @@ interface Props {
 }
 
 export default function TranscriptPanel({ geneName, species, apiSource, transcripts, truncateIntrons, onTruncateIntronsChange, onSequenceLoaded }: Props) {
-  // Lazy initializer only — App.tsx remounts this component (via a `key`
+  // Lazy initializer only - App.tsx remounts this component (via a `key`
   // tied to the gene/species/source) whenever a new `transcripts` list
   // arrives, so there's no need to react to prop changes after mount.
   const [transcriptId, setTranscriptId] = useState(() => transcripts.find((t) => t.is_canonical)?.id || transcripts[0]?.id || '');
@@ -53,72 +58,59 @@ export default function TranscriptPanel({ geneName, species, apiSource, transcri
 
   return (
     <div>
-      <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Transcript:</label>
-      <select
-        value={transcriptId}
-        onChange={(e) => setTranscriptId(e.target.value)}
-        className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border mb-6"
-      >
-        <option value="">-- Select a transcript --</option>
-        {transcripts.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.name}
-            {t.is_canonical ? ' (Canonical)' : ''} ({t.exon_count} exons, strand {t.strand})
-          </option>
-        ))}
-      </select>
+      <Field label="Transcript" htmlFor="transcript-select">
+        <Select
+          id="transcript-select"
+          value={transcriptId}
+          onChange={(e) => setTranscriptId(e.target.value)}
+          className="mb-6"
+        >
+          <option value="">Select a transcript…</option>
+          {transcripts.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+              {t.is_canonical ? ' (Canonical)' : ''} ({t.exon_count} exons, strand {t.strand})
+            </option>
+          ))}
+        </Select>
+      </Field>
 
-      <h3 className="text-md font-semibold text-slate-800 dark:text-slate-200 mt-6 mb-3 border-t border-slate-100 dark:border-slate-700 pt-4">Sequence Options</h3>
+      <h3 className="mb-3 border-t border-line pt-4 text-sm font-semibold text-ink">Sequence Options</h3>
 
-      <div className="space-y-3 mb-6">
-        <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
-          <input type="checkbox" checked={includeIntrons} onChange={(e) => setIncludeIntrons(e.target.checked)} className="accent-green-600 rounded w-4 h-4" />
-          Include Introns (genomic DNA with introns/exons)
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
-          <input type="checkbox" checked={truncateIntrons} onChange={(e) => onTruncateIntronsChange(e.target.checked)} className="accent-green-600 rounded w-4 h-4" />
-          Truncate Introns (show length only, for easier exon copying)
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
-          <input type="checkbox" checked={includeUTR} onChange={(e) => setIncludeUTR(e.target.checked)} className="accent-green-600 rounded w-4 h-4" />
-          Include UTRs (untranslated regions)
-        </label>
+      <div className="mb-6 space-y-3">
+        <Checkbox label="Include Introns (genomic DNA with introns/exons)" checked={includeIntrons} onChange={(e) => setIncludeIntrons(e.target.checked)} />
+        <Checkbox label="Truncate Introns (show length only, for easier exon copying)" checked={truncateIntrons} onChange={(e) => onTruncateIntronsChange(e.target.checked)} />
+        <Checkbox label="Include UTRs (untranslated regions)" checked={includeUTR} onChange={(e) => setIncludeUTR(e.target.checked)} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Upstream Flank (bp):</label>
-          <input
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Upstream Flank (bp)">
+          <TextInput
             type="number"
             min={0}
             value={upFlank}
             onChange={(e) => setUpFlank(parseInt(e.target.value, 10) || 0)}
             onKeyDown={(e) => e.key === 'Enter' && void showSequence()}
-            className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border"
+            className="tabular-nums"
           />
-        </div>
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Downstream Flank (bp):</label>
-          <input
+        </Field>
+        <Field label="Downstream Flank (bp)">
+          <TextInput
             type="number"
             min={0}
             value={downFlank}
             onChange={(e) => setDownFlank(parseInt(e.target.value, 10) || 0)}
             onKeyDown={(e) => e.key === 'Enter' && void showSequence()}
-            className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-2 border"
+            className="tabular-nums"
           />
-        </div>
+        </Field>
       </div>
 
-      <button
-        disabled={loading}
-        onClick={() => void showSequence()}
-        className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm"
-      >
+      <Button variant="primary" disabled={loading} onClick={() => void showSequence()}>
         {loading ? 'Loading…' : 'Show Sequence'}
-      </button>
+      </Button>
 
-      {error && <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm font-medium">{error}</div>}
+      {error && <div role="alert" className="mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{error}</div>}
     </div>
   );
 }

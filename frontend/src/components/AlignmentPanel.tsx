@@ -3,17 +3,22 @@ import { alignSequences, designConserved, type ConservedPair, type ConservedCand
 import { ApiError } from '../api/client';
 import { parseMultiFasta } from '../utils/fasta';
 import ResultsTable from './ResultsTable';
+import Button from './ui/Button';
+import Checkbox from './ui/Checkbox';
+import EngineSelect from './EngineSelect';
+import Field from './ui/Field';
+import TextInput, { controlClasses } from './ui/TextInput';
 import { fmt } from '../utils/format';
 
 /** Card 7: MAFFT multi-sequence alignment + conserved-region primer design
- * (Phase 7). New feature, not present in the legacy Primerool app — the
+ * (Phase 7). New feature, not present in the legacy Primerool app - the
  * plan's own "mirror Oligool" instruction for this phase only covers the
  * *backend* MAFFT-subprocess pattern and the raw-alignment-passthrough
  * contract; Oligool's own frontend alignment tooling (`anchorGrid.ts`/
  * `msa.ts`, a full per-column mismatch/insertion visual diff grid) is a
  * substantially larger, more specialized component than this phase's
  * remaining budget covers. This ships a plain, functional raw-alignment
- * view instead — real MAFFT output, real conserved-region design against
+ * view instead - real MAFFT output, real conserved-region design against
  * it, just without Oligool's anchor-grid visualization layer. */
 export default function AlignmentPanel() {
   const [fastaText, setFastaText] = useState('');
@@ -92,8 +97,8 @@ export default function AlignmentPanel() {
 
   return (
     <div>
-      <h3 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-2">Multi-Sequence Alignment</h3>
-      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+      <h3 className="mb-2 text-sm font-semibold text-ink">Multi-Sequence Alignment</h3>
+      <p className="mb-4 text-sm text-ink-muted">
         Paste two or more sequences in FASTA format (or one bare sequence per line). MAFFT aligns them; you can then design primers within a conserved column range.
       </p>
 
@@ -101,67 +106,61 @@ export default function AlignmentPanel() {
         rows={8}
         value={fastaText}
         onChange={(e) => setFastaText(e.target.value)}
-        placeholder={'>seq1\nACGT...\n>seq2\nACGT...'}
-        className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm font-mono text-sm p-3 border resize-y mb-3"
+        placeholder={'>seq1\nACGT…\n>seq2\nACGT…'}
+        className={`${controlClasses} mb-3 resize-y p-3 font-mono`}
       />
 
-      <button disabled={aligning} onClick={() => void runAlign()} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm">
+      <Button variant="primary" disabled={aligning} onClick={() => void runAlign()}>
         {aligning ? 'Aligning…' : 'Align Sequences'}
-      </button>
+      </Button>
 
-      {alignError && <div className="mt-4 p-3 text-sm text-red-800 dark:text-red-300 rounded-lg bg-red-50 dark:bg-red-950/40">{alignError}</div>}
+      {alignError && <div role="alert" className="mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{alignError}</div>}
 
       {alignment && (
         <>
-          <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4">Aligned FASTA</h4>
-          <pre className="sequence-viewer bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-4 text-xs overflow-y-auto overflow-x-auto max-h-[300px] text-slate-800 dark:text-slate-200">
+          <h4 className="mb-2 mt-4 text-sm font-semibold text-ink">Aligned FASTA</h4>
+          <pre className="sequence-viewer max-h-[300px] overflow-y-auto overflow-x-auto rounded-lg border border-line bg-base p-4 text-xs">
             {alignment}
           </pre>
 
-          <div className="mt-4 bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">Design Primers in Conserved Region</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Conserved column start</label>
-                <input type="number" min={0} value={colStart} onChange={(e) => setColStart(parseInt(e.target.value, 10) || 0)} className="w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Conserved column end</label>
-                <input type="number" min={0} value={colEnd} onChange={(e) => setColEnd(parseInt(e.target.value, 10) || 0)} className="w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border" />
-              </div>
+          <div className="mt-4 rounded-md border border-line bg-surface-2 p-4">
+            <h4 className="mb-3 text-sm font-semibold text-ink">Design Primers in Conserved Region</h4>
+            <div className="mb-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Conserved column start">
+                <TextInput type="number" min={0} value={colStart} onChange={(e) => setColStart(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
+              </Field>
+              <Field label="Conserved column end">
+                <TextInput type="number" min={0} value={colEnd} onChange={(e) => setColEnd(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
+              </Field>
             </div>
 
-            <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700 dark:text-slate-300 mb-3">
-              <input type="checkbox" checked={useTarget} onChange={(e) => setUseTarget(e.target.checked)} className="accent-green-600 rounded w-4 h-4" />
-              Design a pair flanking a specific target (otherwise: scan for individual candidates)
-            </label>
+            <Checkbox
+              className="mb-3"
+              label={<span className="text-sm">Design a pair flanking a specific target (otherwise: scan for individual candidates)</span>}
+              checked={useTarget}
+              onChange={(e) => setUseTarget(e.target.checked)}
+            />
 
             {useTarget && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Target start (consensus-relative)</label>
-                  <input type="number" min={0} value={targetStart} onChange={(e) => setTargetStart(parseInt(e.target.value, 10) || 0)} className="w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Target end (consensus-relative)</label>
-                  <input type="number" min={0} value={targetEnd} onChange={(e) => setTargetEnd(parseInt(e.target.value, 10) || 0)} className="w-full rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border" />
-                </div>
+              <div className="mb-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field label="Target start (consensus-relative)">
+                  <TextInput type="number" min={0} value={targetStart} onChange={(e) => setTargetStart(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
+                </Field>
+                <Field label="Target end (consensus-relative)">
+                  <TextInput type="number" min={0} value={targetEnd} onChange={(e) => setTargetEnd(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
+                </Field>
               </div>
             )}
 
             <div className="mb-3">
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Calculation engine</label>
-              <select value={backend} onChange={(e) => setBackend(e.target.value as 'primer3' | 'strider')} className="rounded-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-2 py-1.5 border">
-                <option value="strider">Strider (fast)</option>
-                <option value="primer3">Primer3 (FFI)</option>
-              </select>
+              <EngineSelect value={backend} onChange={setBackend} />
             </div>
 
-            <button disabled={designing} onClick={() => void runDesign()} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg px-5 py-2 transition-colors shadow-sm">
+            <Button variant="primary" disabled={designing} onClick={() => void runDesign()}>
               {designing ? 'Designing…' : 'Design Primers'}
-            </button>
+            </Button>
 
-            {designError && <div className="mt-3 p-3 text-sm text-red-800 dark:text-red-300 rounded-lg bg-red-50 dark:bg-red-950/40">{designError}</div>}
+            {designError && <div role="alert" className="mt-3 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{designError}</div>}
           </div>
 
           {candidates && candidates.length > 0 && (
@@ -171,7 +170,7 @@ export default function AlignmentPanel() {
                 rows={candidates}
                 keyOf={(c, i) => `${i}-${c.sequence}`}
                 columns={[
-                  { header: "Sequence (5'→3')", render: (c) => c.sequence, className: 'font-mono text-slate-800 dark:text-slate-200' },
+                  { header: "Sequence (5'→3')", render: (c) => c.sequence, className: 'font-mono text-ink' },
                   { header: 'Start', render: (c) => c.start },
                   { header: 'End', render: (c) => c.end },
                   { header: 'Tm', render: (c) => fmt(c.tm) },
@@ -189,8 +188,8 @@ export default function AlignmentPanel() {
                 rows={pairs}
                 keyOf={(p, i) => `${i}-${p.left.sequence}`}
                 columns={[
-                  { header: 'Left', render: (p) => p.left.sequence, className: 'font-mono text-slate-800 dark:text-slate-200' },
-                  { header: 'Right', render: (p) => p.right.sequence, className: 'font-mono text-slate-800 dark:text-slate-200' },
+                  { header: 'Left', render: (p) => p.left.sequence, className: 'font-mono text-ink' },
+                  { header: 'Right', render: (p) => p.right.sequence, className: 'font-mono text-ink' },
                   { header: 'Product', render: (p) => `${p.product_size} bp` },
                   { header: 'Left Tm', render: (p) => fmt(p.left.tm) },
                   { header: 'Right Tm', render: (p) => fmt(p.right.tm) },

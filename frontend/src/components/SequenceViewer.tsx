@@ -10,21 +10,21 @@ interface Segment {
   className: string;
   id?: string;
   /** Present iff these chars belong to (or buffer) an interactively
-   * editable primer/probe selection — see `INTERACTIVE_KEYS` below. */
+   * editable primer/probe selection - see `INTERACTIVE_KEYS` below. */
   key?: keyof Selections;
   /** True for the padding chars carved out on either side of an editable
-   * primer/probe (see `DRAG_BUFFER`) — rendered with the surrounding
+   * primer/probe (see `DRAG_BUFFER`) - rendered with the surrounding
    * region's normal styling until a drag actually grows into them. */
   isBuffer?: boolean;
-  /** What this segment would render as if it weren't highlighted — only
+  /** What this segment would render as if it weren't highlighted - only
    * set on editable/buffer segments, used to restore a char's look when a
    * live drag shrinks the primer away from it. */
   fallbackClassName?: string;
   /** Local index (into the rawSeq/gene_seq this segment was sliced from) of
-   * its first character — for editable segments this is always in the same
+   * its first character - for editable segments this is always in the same
    * coordinate space as the owning `Selection.start`/`end`. */
   startPos: number;
-  /** Which raw sequence `startPos` is local to — 'up'/'down' reset to 0 at
+  /** Which raw sequence `startPos` is local to - 'up'/'down' reset to 0 at
    * their own flank's start, 'gene' runs continuously across the whole
    * gene block. Needed by the sequence-search highlighter below to look up
    * match intervals (computed once per region against `data.*_seq`)
@@ -36,18 +36,18 @@ interface Segment {
  * highlighted span, sourced from the same chunk of sequence, so a drag can
  * grow the primer without needing to re-render neighboring segments. This
  * is also what bounds how far a single drag gesture can widen/move a
- * primer — dragging further requires picking a new candidate from the
+ * primer - dragging further requires picking a new candidate from the
  * design panels instead. */
 const DRAG_BUFFER = 15;
 
 /** Splits `rawSeq` into ordered, non-overlapping segments given a set of
  * (possibly-overlapping-but-pre-sorted) highlight intervals, each in
  * `[0, rawSeq.length)` local coordinates. Shared by both the flank and
- * gene-block renderers below — the legacy app duplicated this
+ * gene-block renderers below - the legacy app duplicated this
  * merge-and-slice loop three times with copy-pasted off-by-one-prone
  * arithmetic; collapsed into one function here.
  *
- * `baseOffset` shifts every `startPos` this produces by a fixed amount —
+ * `baseOffset` shifts every `startPos` this produces by a fixed amount -
  * needed because `geneBlockSegments` calls this once per exon/CDS/UTR/
  * intron chunk of `gene_seq`, each starting at a different absolute gene
  * position, but positions must come out in that absolute space to line up
@@ -56,7 +56,7 @@ const DRAG_BUFFER = 15;
  * When an interval carries a `key` (i.e. its selection is interactively
  * editable), up to `DRAG_BUFFER` extra characters immediately before/after
  * it are carved out as separate "buffer" segments tagged with the same
- * `key` — see `DRAG_BUFFER`'s doc comment. */
+ * `key` - see `DRAG_BUFFER`'s doc comment. */
 function sliceWithIntervals(rawSeq: string, intervals: { start: number; end: number; className: string; id?: string; key?: keyof Selections }[], baseClassName: string, baseOffset = 0): Omit<Segment, 'region'>[] {
   if (intervals.length === 0) return [{ text: rawSeq, className: baseClassName, startPos: baseOffset }];
 
@@ -94,7 +94,7 @@ function sliceWithIntervals(rawSeq: string, intervals: { start: number; end: num
 function flankSegments(rawSeq: string, regionName: 'up' | 'down', data: SequenceData, sel: Selections): Segment[] {
   const intervals: { start: number; end: number; className: string; key?: keyof Selections }[] = [];
   // Both WGA picks are checked against this flank independently, matching
-  // the legacy app — a forward pick normally lands in 'up' and a reverse
+  // the legacy app - a forward pick normally lands in 'up' and a reverse
   // pick in 'down', but nothing prevents either from landing in either.
   // Editable (own-region render, local coords === Selection coords).
   const wgaEntries: [keyof Selections, Selection | null][] = [
@@ -119,7 +119,7 @@ function flankSegments(rawSeq: string, regionName: 'up' | 'down', data: Sequence
     }
     // Not editable here: this is a gene-region primer bleeding across the
     // flank/gene boundary, rendered from a different coordinate space than
-    // this flank's own — dragging it here would need cross-region
+    // this flank's own - dragging it here would need cross-region
     // coordinate translation, which v1 doesn't support (see `App.tsx`'s
     // `onSelect` wiring notes).
     if (e > 0 && s < rawSeq.length) intervals.push({ start: s, end: e, className: 'seq-primer' });
@@ -153,7 +153,7 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
       for (const r of mapPrimerToGenomic(p, data)) {
         const s = Math.max(segStart, r.start);
         const e = Math.min(segStart + segLen, r.end);
-        // Only the primer's own 'gene'-region render is editable — local
+        // Only the primer's own 'gene'-region render is editable - local
         // coords here equal `Selection.start`/`end` exactly in that case.
         // wga/junction selections bleeding into the gene block (across the
         // flank boundary, or across exon splices) render read-only.
@@ -315,11 +315,11 @@ function computeDraggedInterval(session: DragSession, deltaChars: number, seqLen
 /** Fallback row width used for exactly one render, before the container
  * has been measured (see `useResponsiveLineWidth` below). */
 const DEFAULT_LINE_WIDTH = 60;
-/** Ceiling only — deliberately no floor above 1. A floor like "never go
+/** Ceiling only - deliberately no floor above 1. A floor like "never go
  * below 30 chars" sounds like a reasonable readability guard, but it
  * directly fights "never horizontal scroll": in a genuinely narrow
  * container (a phone-width window, a narrow split pane), forcing 30
- * characters when only, say, 8 fit doesn't make the row more readable —
+ * characters when only, say, 8 fit doesn't make the row more readable -
  * it makes ~22 of those characters render past the edge, silently clipped
  * by `overflow-x-hidden` instead of ever being visible. Respecting
  * whatever the container actually measures, however small, is what keeps
@@ -328,7 +328,7 @@ const MIN_LINE_WIDTH = 1;
 const MAX_LINE_WIDTH = 140;
 
 /** One contiguous run of same-styled text (or a single interactive
- * character) queued for row-chunking — a resolved, render-ready form of
+ * character) queued for row-chunking - a resolved, render-ready form of
  * `Segment`: `buildCells` below already makes every interactive-vs-plain,
  * dragging-vs-static decision the old per-render logic used to make
  * inline, so `buildRows` only ever needs to know how to *slice* a cell's
@@ -341,7 +341,7 @@ interface Cell {
   isPlaceholder?: boolean;
   cursorClass?: string;
   onMouseDown?: (e: React.MouseEvent<HTMLSpanElement>) => void;
-  /** Which raw sequence `startPos` is local to — see `Segment.region`.
+  /** Which raw sequence `startPos` is local to - see `Segment.region`.
    * Absent on placeholder cells (they don't correspond to real characters
    * a search could land on). */
   region?: Segment['region'];
@@ -359,8 +359,8 @@ interface Row {
 }
 
 /** Resolves every segment into render-ready `Cell`s. Plain segments stay
- * as one cell each — cheap, since a full genomic view can be ~19,000
- * characters across only ~20-50 segments — while an editable or
+ * as one cell each - cheap, since a full genomic view can be ~19,000
+ * characters across only ~20-50 segments - while an editable or
  * currently-dragging segment explodes into one cell per character,
  * exactly the granularity the interactive drag handling already needs
  * (unifying what used to be two separate per-character code paths: the
@@ -429,7 +429,7 @@ interface SearchMatch {
 const SEARCH_REGION_ORDER: Record<SearchMatch['region'], number> = { up: 0, gene: 1, down: 2 };
 
 /** Finds every occurrence of `query` (and, optionally, its reverse
- * complement) in each of the sequence's three raw regions independently —
+ * complement) in each of the sequence's three raw regions independently -
  * matches are reported in each region's own local coordinates, matching
  * `Segment`/`Cell.startPos`'s coordinate space, so `applySearchHighlight`
  * can look them up against a cell without any region-to-region offset
@@ -460,12 +460,12 @@ function computeSearchMatches(data: SequenceData, query: string, includeRevComp:
 }
 
 /** Splits any cell that overlaps a search match into up to three pieces
- * (before / hit / after), tagging the hit piece for styling — the same
+ * (before / hit / after), tagging the hit piece for styling - the same
  * merge-and-slice shape as `sliceWithIntervals`, one level later in the
  * pipeline (over already-built `Cell`s instead of raw sequence, since a
  * match can land inside any kind of cell: flank, CDS, an already-selected
  * primer, even a single dragged character). Placeholder cells (truncated
- * introns) are left alone — nothing to show inside a collapsed intron. */
+ * introns) are left alone - nothing to show inside a collapsed intron. */
 function applySearchHighlight(cells: Cell[], matches: SearchMatch[], activeIdx: number): Cell[] {
   if (matches.length === 0) return cells;
   const out: Cell[] = [];
@@ -502,13 +502,13 @@ function applySearchHighlight(cells: Cell[], matches: SearchMatch[], activeIdx: 
 /** Chunks `cells` into fixed-`lineWidth` rows for the position gutter.
  * Every cell already carries the real `startPos` its own originating
  * segment computed (a flank segment resets to 0 at its own start; a gene
- * segment runs continuously across the whole gene) — a row's number is
+ * segment runs continuously across the whole gene) - a row's number is
  * just whichever cell (or slice of one) happens to open it, so no
  * separate running position counter is needed here. An intron-truncation
  * placeholder always gets its own row: its visible text is far shorter
  * than the real span it stands in for, so folding it into normal
- * character counting would make that row's width — and every row after it
- * mid-row — meaningless. */
+ * character counting would make that row's width - and every row after it
+ * mid-row - meaningless. */
 function buildRows(cells: Cell[], lineWidth: number): Row[] {
   const rows: Row[] = [];
   let current: Cell[] = [];
@@ -561,7 +561,7 @@ function buildRows(cells: Cell[], lineWidth: number): Row[] {
 /** Recomputes how many characters fit in one row whenever the container
  * resizes (window resize, sidebar/density toggle, etc.) by measuring two
  * hidden probe elements built from the exact same classes the real
- * gutter/character spans use — more reliable than assuming a pixel width
+ * gutter/character spans use - more reliable than assuming a pixel width
  * from font-size, since it automatically tracks the actual rendered font
  * (loading, zoom, any future style tweak) instead of a guess. */
 function useResponsiveLineWidth(containerRef: React.RefObject<HTMLDivElement | null>, gutterProbeRef: React.RefObject<HTMLSpanElement | null>, charProbeRef: React.RefObject<HTMLSpanElement | null>): number {
@@ -578,12 +578,12 @@ function useResponsiveLineWidth(containerRef: React.RefObject<HTMLDivElement | n
       if (!charWidth) return;
       // Deliberately under-fill by two whole characters' width: one purely
       // as overflow-safety margin (a "never horizontal scroll" requirement
-      // can't rely on font-metric measurement being pixel-perfect —
+      // can't rely on font-metric measurement being pixel-perfect -
       // sub-pixel layout, a scrollbar appearing/disappearing between
-      // measurements, browser-specific rounding — one character of slack
+      // measurements, browser-specific rounding - one character of slack
       // makes those errors harmless instead of needing to be exactly
       // right), the other purely cosmetic (filling a row to the very last
-      // pixel reads as cramped — a little unused space on the right is
+      // pixel reads as cramped - a little unused space on the right is
       // what makes it look like a designed gutter/margin instead of text
       // that just happens to stop where the container does).
       const available = container.clientWidth - gutterWidth - charWidth * 2;
@@ -610,7 +610,7 @@ interface Props {
   truncateIntrons: boolean;
   /** Called when an interactive drag/resize commits a new primer/probe
    * span. Absent (not just a no-op) disables interactive editing entirely
-   * — primers render read-only, exactly as before. */
+   * - primers render read-only, exactly as before. */
   onSelect?: (key: keyof Selections, value: Selection) => void;
 }
 
@@ -618,7 +618,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   const interactive = Boolean(onSelect);
   const [dragSession, setDragSession] = useState<DragSession | null>(null);
   const [deltaChars, setDeltaChars] = useState(0);
-  // Mirrors `deltaChars`, kept in sync synchronously by `onMove` — read at
+  // Mirrors `deltaChars`, kept in sync synchronously by `onMove` - read at
   // `onUp` time instead of `deltaChars` itself so `commitDrag` (which has
   // side effects: it calls `onSelect` and fires an `analyzePrimer` request)
   // never runs inside a `setState` updater function. React (StrictMode
@@ -638,7 +638,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   }, [data, selections, truncateIntrons]);
 
   // A selection is only draggable when its highlighted primer/probe render
-  // is exactly one contiguous span — split across an exon/CDS/UTR boundary
+  // is exactly one contiguous span - split across an exon/CDS/UTR boundary
   // (or clamped away entirely), it falls back to plain read-only
   // highlighting instead (see `sliceWithIntervals`'s and `geneBlockSegments`'
   // docs for why crossing those boundaries isn't supported in v1).
@@ -653,7 +653,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     return keys;
   }, [segments, interactive]);
 
-  // "Find in sequence" — lets a reader locate a pasted primer/probe (or any
+  // "Find in sequence" - lets a reader locate a pasted primer/probe (or any
   // sequence) within the map below, forward and/or reverse-complement.
   const [searchQuery, setSearchQuery] = useState('');
   const [includeRevComp, setIncludeRevComp] = useState(true);
@@ -662,8 +662,8 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   // A newly loaded sequence invalidates any in-progress search, and a
   // changed query/checkbox should always land back on its first hit rather
   // than keep whatever numeric index the previous search happened to be
-  // on. Adjusted here (render-time), not in an effect — React's documented
-  // pattern for "reset state when a prop/derived value changes" — so it
+  // on. Adjusted here (render-time), not in an effect - React's documented
+  // pattern for "reset state when a prop/derived value changes" - so it
   // resolves before this render paints instead of costing an extra one.
   const [prevData, setPrevData] = useState(data);
   const searchKey = `${searchQuery} ${includeRevComp}`;
@@ -698,7 +698,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   }
 
   function commitDrag(session: DragSession, finalDeltaChars: number) {
-    if (finalDeltaChars === 0) return; // a click with no drag — leave the selection untouched
+    if (finalDeltaChars === 0) return; // a click with no drag - leave the selection untouched
     const sel = selections[session.selKey];
     if (!sel || !onSelect) return;
 
@@ -709,7 +709,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     const bindingSeq = rawSeq.substring(start, end);
     // `bindingSeq` is always the sense-strand slice; `primerSeq` matches it
     // for a forward-strand pick and is its reverse complement for a
-    // reverse-strand one — inferred from how the pre-drag selection itself
+    // reverse-strand one - inferred from how the pre-drag selection itself
     // relates the two (see `ArmsDesignPanel.tsx`/`ManualDesignPanel.tsx`,
     // which both set this invariant up when a selection is first made).
     const isReverseStrand = sel.primerSeq !== sel.bindingSeq;
@@ -766,23 +766,23 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
 
   return (
     <div>
-      <div className="mb-4 text-slate-700 dark:text-slate-300">
+      <div className="mb-4 text-sm text-ink-muted">
         <p>
-          <strong>Transcript:</strong> {data.transcript_name} ({data.transcript_id})
+          <strong className="font-medium text-ink">Transcript:</strong> {data.transcript_name} ({data.transcript_id})
         </p>
         <p>
-          <strong>Mode:</strong> {modeText} | <strong>Length:</strong> {data.gene_len} bp
+          <strong className="font-medium text-ink">Mode:</strong> {modeText} · <strong className="font-medium text-ink">Length:</strong> {data.gene_len} bp
         </p>
         <p>
-          <strong>Flanking:</strong> {data.upstream_len} bp upstream, {data.downstream_len} bp downstream
+          <strong className="font-medium text-ink">Flanking:</strong> {data.upstream_len} bp upstream, {data.downstream_len} bp downstream
         </p>
-        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-          Numbers on the left mark each row's first position — 0-based from the start of its own region (upstream flank, gene, or downstream flank).
+        <p className="mt-1 text-xs text-ink-faint">
+          Numbers on the left mark each row's first position: 0-based from the start of its own region (upstream flank, gene, or downstream flank).
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-3 bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
-        <label htmlFor="sequence-search-input" className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-2 p-3">
+        <label htmlFor="sequence-search-input" className="text-sm font-medium text-ink-muted">
           Find in sequence:
         </label>
         <input
@@ -796,15 +796,15 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
             if (e.shiftKey) gotoPrevMatch();
             else gotoNextMatch();
           }}
-          placeholder="Paste a primer or sequence to locate..."
-          className="flex-1 min-w-[220px] rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm focus:border-green-500 focus:ring-green-500 text-sm px-3 py-1.5 border font-mono"
+          placeholder="Paste a primer or sequence to locate…"
+          className="h-8 min-w-[220px] flex-1 rounded-md border border-line-strong bg-surface px-3 font-mono text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
         />
-        <label className="inline-flex items-center gap-1 text-xs cursor-pointer text-slate-600 dark:text-slate-300">
+        <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-xs text-ink-muted">
           <input
             type="checkbox"
             checked={includeRevComp}
             onChange={(e) => setIncludeRevComp(e.target.checked)}
-            className="h-3.5 w-3.5 text-green-600 rounded border-slate-300 focus:ring-green-500"
+            className="h-3.5 w-3.5 rounded accent-accent"
           />
           Include reverse complement
         </label>
@@ -812,7 +812,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
           type="button"
           onClick={gotoPrevMatch}
           title="Previous match"
-          className="px-2 py-1 text-xs font-medium bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-slate-200 rounded hover:bg-slate-100 dark:hover:bg-slate-600"
+          className="h-7 rounded-md border border-line-strong bg-surface px-2.5 text-xs font-medium text-ink-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
         >
           &#8592; Prev
         </button>
@@ -820,18 +820,18 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
           type="button"
           onClick={gotoNextMatch}
           title="Next match"
-          className="px-2 py-1 text-xs font-medium bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 dark:text-slate-200 rounded hover:bg-slate-100 dark:hover:bg-slate-600"
+          className="h-7 rounded-md border border-line-strong bg-surface px-2.5 text-xs font-medium text-ink-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
         >
           Next &#8594;
         </button>
         <button
           type="button"
           onClick={() => setSearchQuery('')}
-          className="px-2 py-1 text-xs font-medium text-slate-500 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 border border-slate-200 dark:border-slate-600 rounded hover:border-red-200 dark:hover:border-red-900 bg-white dark:bg-slate-700"
+          className="h-7 rounded-md px-2.5 text-xs font-medium text-ink-faint hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
         >
           Clear
         </button>
-        <span className="text-xs text-slate-500 dark:text-slate-400">
+        <span className="text-xs text-ink-faint" aria-live="polite">
           {searchQuery === '' ? '' : searchMatches.length === 0 ? 'No matches found' : `${activeSearchIdx + 1} of ${searchMatches.length} match${searchMatches.length === 1 ? '' : 'es'}`}
         </span>
       </div>
@@ -839,9 +839,9 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
       <div
         id="sequence-map"
         ref={containerRef}
-        className="sequence-viewer relative bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-4 text-sm overflow-y-auto overflow-x-hidden max-h-[520px] text-slate-800 dark:text-slate-200"
+        className="sequence-viewer relative max-h-[520px] overflow-y-auto overflow-x-hidden rounded-lg border border-line bg-base p-4 text-sm"
       >
-        {/* Unrendered (out of flow, invisible) — measured only, to figure
+        {/* Unrendered (out of flow, invisible) - measured only, to figure
          * out how many characters actually fit in one row of this
          * container at its current width/font, so rows can fill the
          * available space instead of wrapping at an arbitrary fixed
@@ -850,13 +850,13 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
          * nothing here can ever leak width to an ancestor and cause page-
          * level horizontal scroll; `overflow-x-hidden` (not `-auto`) below
          * makes "never horizontal scroll" a hard guarantee rather than a
-         * best-effort of the width math above — if a row's content is
+         * best-effort of the width math above - if a row's content is
          * ever a hair wider than computed (a rounding edge case), it's
          * silently clipped instead of ever showing a scrollbar. */}
         <span ref={gutterProbeRef} aria-hidden className="select-none pl-1 pr-3 text-right tabular-nums shrink-0 min-w-[5.5ch]" style={{ position: 'absolute', visibility: 'hidden', whiteSpace: 'pre' }}>
           -00000
         </span>
-        {/* `fontWeight: 700` deliberately — `seq-cds`/`seq-primer`/`seq-probe`
+        {/* `fontWeight: 700` deliberately - `seq-cds`/`seq-primer`/`seq-probe`
          * (see `index.css`) all render bold, and bold glyphs are wider than
          * regular ones even in a true monospace family. Measuring the
          * widest weight actually used, not just the default one, is what
@@ -867,7 +867,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         </span>
         {rows.map((row, ri) => (
           <div key={ri} className="flex whitespace-pre">
-            <span className="select-none pl-1 pr-3 text-right text-slate-400 dark:text-slate-600 tabular-nums shrink-0 min-w-[5.5ch]">{row.startPos}</span>
+            <span className="select-none pl-1 pr-3 text-right text-ink-faint tabular-nums shrink-0 min-w-[5.5ch]">{row.startPos}</span>
             <span>
               {row.pieces.map((p, pi) => (
                 <span

@@ -1,6 +1,6 @@
 /**
  * Renders an RNA/DNA secondary structure from a sequence + dot-bracket as a
- * clean 2D SVG diagram — ported verbatim from Oligool's `HairpinSVG.tsx`
+ * clean 2D SVG diagram - ported verbatim from Oligool's `HairpinSVG.tsx`
  * (same layout algorithm, same constants, same visual output), only the
  * prop names changed (`sequence`/`structure`, matching this app's existing
  * `PrimerAnalysis` field names, not Oligool's `seq`/`dotBracket`).
@@ -135,7 +135,7 @@ function splitStemGroups(seq: string, db: string): Array<{ seq: string; dotBrack
   return groups.map((g) => {
     // Within a group, pairs are sorted left-ascending and (by construction of
     // the grouping loop above) strictly nested, so g[0] is always the
-    // outermost pair — its right index is the domain's true closing bound,
+    // outermost pair - its right index is the domain's true closing bound,
     // not g[last]'s (which is the innermost pair and closes earliest).
     const start = g[0][0];
     const end = g[0][1];
@@ -158,21 +158,20 @@ function basePairSymbol(a: string, b: string): 'wc' | 'wobble' | 'none' {
 function baseColor(b: string): string {
   switch (b.toUpperCase()) {
     case 'A':
-      return '#e74c3c'; // red
+      return '#dc4b4b'; // red
     case 'T':
     case 'U':
-      return '#3498db'; // blue
+      return '#3f83d8'; // blue
     case 'G':
-      return '#f39c12'; // amber
+      return '#d99126'; // amber
     case 'C':
-      return '#2ecc71'; // green
+      return '#37a06a'; // green
     default:
-      return '#94a3b8';
+      return 'var(--ink-faint)';
   }
 }
 
 export default function HairpinSvg({ sequence: seq, structure: dotBracket, light = false }: Props) {
-  const dk = (darkClass: string): string => (light ? '' : darkClass);
   const valid = seq && dotBracket && seq.length === dotBracket.length;
   const allPairs = valid ? parseAllPairs(dotBracket) : null;
   const domains = allPairs ? topLevelDomains(dotBracket, allPairs) : null;
@@ -180,7 +179,7 @@ export default function HairpinSvg({ sequence: seq, structure: dotBracket, light
   if (!domains) {
     const allDots = dotBracket && !dotBracket.includes('(') && !dotBracket.includes(')');
     if (allDots) {
-      return <div className={`text-[13px] text-zinc-400 ${dk('dark:text-zinc-500')} italic py-1`}>No secondary structure predicted</div>;
+      return <div className={`text-[13px] italic py-1 ${light ? 'text-zinc-400' : 'text-ink-faint'}`}>No secondary structure predicted</div>;
     }
     // Branched multiloop: try splitting into individual stem-loop domains
     // and render each as a separate HairpinSvg side by side. Only recurse
@@ -195,12 +194,12 @@ export default function HairpinSvg({ sequence: seq, structure: dotBracket, light
         </div>
       );
     }
-    // Pseudoknot / unparseable – show dot-bracket
+    // Pseudoknot / unparseable - show dot-bracket
     const blockPairs: string[] = [];
     for (let start = 0; start < Math.max(seq.length, dotBracket.length); start += 50) {
       blockPairs.push(`${seq.slice(start, start + 50)}\n${dotBracket.slice(start, start + 50)}`);
     }
-    return <pre className={`font-mono text-[13px] text-zinc-500 ${dk('dark:text-zinc-400')} whitespace-pre-wrap break-all overflow-x-auto`}>{blockPairs.join('\n\n')}</pre>;
+    return <pre className={`font-mono text-[13px] whitespace-pre-wrap break-all overflow-x-auto ${light ? 'text-zinc-500' : 'text-ink-muted'}`}>{blockPairs.join('\n\n')}</pre>;
   }
 
   // ── Layout constants ──────────────────────────────
@@ -234,7 +233,7 @@ export default function HairpinSvg({ sequence: seq, structure: dotBracket, light
   // ── Position every base by sequence index ──────────
   const pos: Array<{ x: number; y: number } | null> = new Array(L).fill(null);
 
-  // 5' tail – horizontal, going left from the first domain's bottom rung
+  // 5' tail - horizontal, going left from the first domain's bottom rung
   const leftTailLen = domains[0][0][0]; // indices 0 .. first start-1
   const firstLeftX = 0;
   for (let i = 0; i < leftTailLen; i++) {
@@ -284,7 +283,7 @@ export default function HairpinSvg({ sequence: seq, structure: dotBracket, light
       }
     }
 
-    // Terminal loop – distributed along a semicircle above the top rung
+    // Terminal loop - distributed along a semicircle above the top rung
     const loopLen = d[n - 1][1] - d[n - 1][0] - 1;
     const stemTopY = levels[n - 1];
     const arcCx = cx;
@@ -313,7 +312,7 @@ export default function HairpinSvg({ sequence: seq, structure: dotBracket, light
       }
       cursor = rightX + gap;
     } else {
-      // 3' tail – horizontal, going right from the last domain
+      // 3' tail - horizontal, going right from the last domain
       for (let b = 0; b < connLen; b++) {
         pos[connStart + b] = { x: rightX + (b + 1) * tailStep, y: stemBottomY };
       }
@@ -330,7 +329,7 @@ export default function HairpinSvg({ sequence: seq, structure: dotBracket, light
     const a = pos[i],
       b = pos[i + 1];
     if (!a || !b) continue;
-    elements.push(<line key={`bb-${i}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#94a3b8" strokeWidth={1} opacity={0.35} />);
+    elements.push(<line key={`bb-${i}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={light ? '#94a3b8' : 'var(--ink-faint)'} strokeWidth={1} opacity={0.35} />);
   }
 
   // Base-pair bonds (rungs)
@@ -348,7 +347,7 @@ export default function HairpinSvg({ sequence: seq, structure: dotBracket, light
           y1={a.y}
           x2={b.x - baseR - 1}
           y2={b.y}
-          stroke={sym === 'wc' ? '#818cf8' : '#f59e0b'}
+          stroke={sym === 'wc' ? 'var(--accent)' : 'var(--warning)'}
           strokeWidth={1.5}
           opacity={sym === 'wc' ? 0.6 : 0.5}
           strokeDasharray={sym === 'wc' ? undefined : '2,2'}
@@ -375,13 +374,13 @@ export default function HairpinSvg({ sequence: seq, structure: dotBracket, light
   // 5' / 3' labels
   const fivePrimeX = pos[0]!.x - (leftTailLen > 0 ? 16 : 18);
   elements.push(
-    <text key="5p" x={fivePrimeX} y={stemBottomY + 1} textAnchor="middle" dominantBaseline="central" fontSize={13} fontFamily="sans-serif" fontWeight="bold" fill="#818cf8">
+    <text key="5p" x={fivePrimeX} y={stemBottomY + 1} textAnchor="middle" dominantBaseline="central" fontSize={13} fontFamily="sans-serif" fontWeight="bold" fill={light ? '#818cf8' : 'var(--accent)'}>
       5&apos;
     </text>
   );
   const threePrimeX = pos[L - 1]!.x + (rightTailLen > 0 ? 16 : 18);
   elements.push(
-    <text key="3p" x={threePrimeX} y={stemBottomY + 1} textAnchor="middle" dominantBaseline="central" fontSize={13} fontFamily="sans-serif" fontWeight="bold" fill="#fb923c">
+    <text key="3p" x={threePrimeX} y={stemBottomY + 1} textAnchor="middle" dominantBaseline="central" fontSize={13} fontFamily="sans-serif" fontWeight="bold" fill={light ? '#fb923c' : 'var(--ink-muted)'}>
       3&apos;
     </text>
   );

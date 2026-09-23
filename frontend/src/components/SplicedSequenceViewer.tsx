@@ -89,11 +89,11 @@ export default function SplicedSequenceViewer({ data, selections }: Props) {
 
   return (
     <div>
-      <h3 className="text-md font-semibold text-slate-800 dark:text-slate-200 mb-2">Spliced exon-only map (for exon–exon junction primers)</h3>
-      <div className="text-sm text-slate-500 dark:text-slate-400 mb-3 bg-blue-50 dark:bg-blue-950/40 p-2 rounded border border-blue-100 dark:border-blue-900">
+      <h3 className="mb-2 text-sm font-semibold text-ink">Spliced exon-only map (for exon-exon junction primers)</h3>
+      <div className="mb-3 rounded-md border border-line bg-surface-2 p-2 text-sm text-ink-muted">
         Junction positions in the sequence map refer to these sequences. Horizontal bars indicate exon boundaries.
       </div>
-      <div className="sequence-viewer bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-4 text-sm overflow-y-auto max-h-[520px] text-slate-800 dark:text-slate-200">
+      <div className="sequence-viewer max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base p-4 text-sm">
         {pieces.map((p, i) =>
           p.kind === 'label' ? (
             <span key={i} className="exon-label">

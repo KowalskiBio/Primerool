@@ -214,7 +214,7 @@ export default function SnpBatchPanel() {
   const [results, setResults] = useState<Record<string, BatchResult>>({});
   const [running, setRunning] = useState(false);
   const [openGene, setOpenGene] = useState<string | null>(null);
-  const [openPrimer, setOpenPrimer] = useState<{ label: string; sequence: string } | null>(null);
+  const [openPrimer, setOpenPrimer] = useState<{ label: string; forward: string; reverse: string } | null>(null);
   const [canonicalChecks, setCanonicalChecks] = useState<Record<string, CanonicalCheck>>({});
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
   // work checks this before each write so a stale check from a superseded
@@ -553,15 +553,17 @@ export default function SnpBatchPanel() {
     });
   }
 
-  /** Opens `PrimerStructureModal` for one primer clicked on the amplicon
-   * map - `side: 'start'` is the forward primer, `'end'` the reverse (same
-   * convention as `onEdgeDrag`/`onAmpliconMove`). */
-  function handlePrimerClick(rsid: string, side: 'start' | 'end') {
+  /** Opens `PrimerStructureModal` for the pair a clicked primer belongs to
+   * (both sequences are needed regardless of which one was clicked, since
+   * the modal also checks their heterodimer). `side` (which end was
+   * actually clicked) doesn't change what's shown - both primers'
+   * hairpin/self-dimer plus their shared heterodimer are always all
+   * shown together. */
+  function handlePrimerClick(rsid: string) {
     const b = (blocks || []).find((x) => x.rsid === rsid);
     const r = results[rsid];
-    const oligo = side === 'start' ? r?.fwd : r?.rev;
-    if (!b || !oligo) return;
-    setOpenPrimer({ label: `${b.rsid} ${side === 'start' ? 'forward' : 'reverse'}`, sequence: oligo.sequence });
+    if (!b || !r?.fwd || !r?.rev) return;
+    setOpenPrimer({ label: b.rsid, forward: r.fwd.sequence, reverse: r.rev.sequence });
   }
 
   function exportCsv() {
@@ -867,7 +869,7 @@ export default function SnpBatchPanel() {
       )}
 
       <SnpGeneMapModal gene={openGene} blocks={openGeneBlocks} onClose={() => setOpenGene(null)} />
-      <PrimerStructureModal primer={openPrimer} onClose={() => setOpenPrimer(null)} />
+      <PrimerStructureModal pair={openPrimer} onClose={() => setOpenPrimer(null)} />
     </>
   );
 }

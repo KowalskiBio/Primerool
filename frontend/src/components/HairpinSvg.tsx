@@ -14,6 +14,7 @@
  */
 import React from 'react';
 import { openSvgInNewTab } from '../utils/openSvgTab';
+import { basePairSymbol, baseColor } from '../utils/nucleotideColors';
 
 interface Props {
   sequence: string;
@@ -144,31 +145,6 @@ function splitStemGroups(seq: string, db: string): Array<{ seq: string; dotBrack
       dotBracket: db.slice(start, end + 1),
     };
   });
-}
-
-function basePairSymbol(a: string, b: string): 'wc' | 'wobble' | 'none' {
-  const pair = (a + b).toUpperCase();
-  const watson = ['AT', 'TA', 'AU', 'UA', 'GC', 'CG'];
-  const wobble = ['GT', 'TG', 'GU', 'UG'];
-  if (watson.includes(pair)) return 'wc';
-  if (wobble.includes(pair)) return 'wobble';
-  return 'none';
-}
-
-function baseColor(b: string): string {
-  switch (b.toUpperCase()) {
-    case 'A':
-      return '#dc4b4b'; // red
-    case 'T':
-    case 'U':
-      return '#3f83d8'; // blue
-    case 'G':
-      return '#d99126'; // amber
-    case 'C':
-      return '#37a06a'; // green
-    default:
-      return 'var(--ink-faint)';
-  }
 }
 
 export default function HairpinSvg({ sequence: seq, structure: dotBracket, light = false }: Props) {

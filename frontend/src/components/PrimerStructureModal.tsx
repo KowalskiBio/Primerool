@@ -1,91 +1,151 @@
-import { useEffect, useState } from 'react';
-import { analyzeStructure, type FullStructureAnalysis } from '../api/structure';
+import { useEffect, useState, type ReactNode } from 'react';
+import { analyzeStructure, type FullStructureAnalysis, type StructureCandidate } from '../api/structure';
 import Modal from './ui/Modal';
 import HairpinSvg from './HairpinSvg';
-import DimerAscii from './DimerAscii';
-import { VariantBox } from './PrimerCard';
+import DimerSvg from './DimerSvg';
 
 interface Props {
-  /** The primer to analyze, or `null` to keep the modal closed. `label`
-   * identifies it in the title (e.g. an rsID + "forward"/"reverse"). */
-  primer: { label: string; sequence: string } | null;
+  /** The pair to analyze, or `null` to keep the modal closed. Both
+   * sequences are always needed (not just whichever primer was clicked)
+   * since the heterodimer check is between them. */
+  pair: { label: string; forward: string; reverse: string } | null;
   onClose: () => void;
 }
 
-/** Click-a-primer-on-the-amplicon-map structure viewer - the same
- * dual-model (bulge-allowing MFE vs. no-bulge sliding-window) hairpin/
- * self-dimer breakdown `PrimerCard.tsx` shows for a selected design
- * candidate, ported from Oligool's own analyzeStriderIndividual view, just
- * triggered from a click on the SNP-batch amplicon map instead of the
- * primer-design panels. */
-export default function PrimerStructureModal({ primer, onClose }: Props) {
-  const [structure, setStructure] = useState<FullStructureAnalysis | null>(null);
+function fmtDg(v: number): string {
+  return `${v.toFixed(2)} kcal/mol`;
+}
+function fmtTm(v: number): string {
+  return `${v.toFixed(1)}°C`;
+}
+function fmtPct(v: number): string {
+  return `${(v * 100).toFixed(0)}%`;
+}
+function dgColor(dg: number): string {
+  if (dg < -6) return 'text-danger';
+  if (dg < -3) return 'text-warning';
+  return 'text-success';
+}
+
+/** One horizontally-scrollable strip of up to 5 subopt candidates for one
+ * category (a gene's hairpin, a primer's self-dimer, or the pair's
+ * heterodimer) - `diagram` draws whichever kind this category is. */
+function CandidateStrip({ candidates, diagram }: { candidates: StructureCandidate[]; diagram: (structure: string) => ReactNode }) {
+  if (candidates.length === 0) {
+    return <div className="text-[13px] italic text-ink-faint">No structure found</div>;
+  }
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {candidates.map((c, i) => (
+        <div key={i} className="w-60 shrink-0 rounded-md border border-line bg-base p-2">
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-ink-muted">
+            <span className="font-medium text-ink">#{i + 1}</span>
+            <span className="text-accent" title="Boltzmann share within this model's own top-5 subopt ensemble">
+              {fmtPct(c.population_fraction)}
+            </span>
+          </div>
+          <div className="mb-1.5 flex gap-2 text-[11px] text-ink-muted">
+            <span className={`font-mono font-medium tabular-nums ${dgColor(c.dg)}`}>{fmtDg(c.dg)}</span>
+            <span className="font-mono font-medium tabular-nums text-ink">{fmtTm(c.tm)}</span>
+          </div>
+          {diagram(c.structure)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CategorySection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="mb-4 last:mb-0">
+      <div className="mb-2 text-[12px] font-medium uppercase tracking-wider text-ink-faint">{title}</div>
+      {children}
+    </div>
+  );
+}
+
+/** Click-a-primer-on-the-amplicon-map structure viewer - up to 5 subopt
+ * candidates each for the forward primer's hairpin and self-dimer, the
+ * reverse primer's hairpin and self-dimer, and the pair's heterodimer
+ * (forward × reverse), all from Strider's own bulge-allowing MFE model.
+ * The diagrams are this app's own SVG renderings (`HairpinSvg`/
+ * `DimerSvg`), not Oligool's ASCII dimer view. */
+export default function PrimerStructureModal({ pair, onClose }: Props) {
+  const [fwdAnalysis, setFwdAnalysis] = useState<FullStructureAnalysis | null>(null);
+  const [revAnalysis, setRevAnalysis] = useState<FullStructureAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Which sequence `structure`/`error` actually belong to - see
-  // `SnpGeneMapModal.tsx`'s `resultFor` for the same pattern (avoids
-  // calling setState synchronously inside the effect body).
+  // Which pair (by its two sequences) the results above actually belong
+  // to - see `SnpGeneMapModal.tsx`'s `resultFor` for the same pattern.
   const [resultFor, setResultFor] = useState<string | null>(null);
 
+  const pairKey = pair ? `${pair.forward}:${pair.reverse}` : null;
+
   useEffect(() => {
-    if (!primer) return;
+    if (!pair) return;
     let cancelled = false;
-    analyzeStructure({ sequence: primer.sequence })
-      .then((res) => {
+    Promise.all([analyzeStructure({ sequence: pair.forward, partner_sequence: pair.reverse }), analyzeStructure({ sequence: pair.reverse, partner_sequence: pair.forward })])
+      .then(([fwd, rev]) => {
         if (cancelled) return;
-        setStructure(res);
+        setFwdAnalysis(fwd);
+        setRevAnalysis(rev);
         setError(null);
-        setResultFor(primer.sequence);
+        setResultFor(pairKey);
       })
       .catch((e) => {
         if (cancelled) return;
-        setStructure(null);
+        setFwdAnalysis(null);
+        setRevAnalysis(null);
         setError(e instanceof Error ? e.message : String(e));
-        setResultFor(primer.sequence);
+        setResultFor(pairKey);
       });
     return () => {
       cancelled = true;
     };
-  }, [primer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pairKey]);
 
-  const loading = primer !== null && resultFor !== primer.sequence;
-  const shown = primer !== null && resultFor === primer.sequence ? structure : null;
-  const shownError = primer !== null && resultFor === primer.sequence ? error : null;
+  const loading = pair !== null && resultFor !== pairKey;
+  const shownFwd = pair !== null && resultFor === pairKey ? fwdAnalysis : null;
+  const shownRev = pair !== null && resultFor === pairKey ? revAnalysis : null;
+  const shownError = pair !== null && resultFor === pairKey ? error : null;
 
   return (
-    <Modal open={primer !== null} onClose={onClose} title={primer ? `${primer.label} - secondary structure` : ''}>
-      {primer && (
-        <p className="mb-3 break-all font-mono text-sm text-ink">
-          {primer.sequence} <span className="text-ink-faint">({primer.sequence.length} bp)</span>
-        </p>
-      )}
+    <Modal open={pair !== null} onClose={onClose} title={pair ? `${pair.label} - primer structures` : ''}>
       {loading && <p className="text-sm text-ink-muted">Analyzing…</p>}
       {shownError && (
         <div role="alert" className="rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">
           {shownError}
         </div>
       )}
-      {shown && primer && (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <VariantBox
-            label="Hairpin - with bulges (Strider MFE)"
-            variant={shown.hairpin.with_bulge}
-            diagram={shown.hairpin.with_bulge.structure && <HairpinSvg sequence={primer.sequence} structure={shown.hairpin.with_bulge.structure} />}
-          />
-          <VariantBox
-            label="Hairpin - no bulge (pure sliding)"
-            variant={shown.hairpin.no_bulge}
-            diagram={shown.hairpin.no_bulge.structure && <HairpinSvg sequence={primer.sequence} structure={shown.hairpin.no_bulge.structure} />}
-          />
-          <VariantBox
-            label="Self-dimer - with bulges (Strider MFE)"
-            variant={shown.homodimer.with_bulge}
-            diagram={shown.homodimer.with_bulge.structure && <DimerAscii seq1={primer.sequence} seq2={primer.sequence} structure={shown.homodimer.with_bulge.structure} />}
-          />
-          <VariantBox
-            label="Self-dimer - no bulge (pure sliding)"
-            variant={shown.homodimer.no_bulge}
-            diagram={shown.homodimer.no_bulge.structure && <DimerAscii seq1={primer.sequence} seq2={primer.sequence} structure={shown.homodimer.no_bulge.structure} />}
-          />
+      {pair && shownFwd && shownRev && (
+        <div>
+          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <p className="mb-2 break-all font-mono text-xs text-ink">
+                Forward: {pair.forward} <span className="text-ink-faint">({pair.forward.length} bp)</span>
+              </p>
+              <CategorySection title="Hairpin (Strider MFE)">
+                <CandidateStrip candidates={shownFwd.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.forward} structure={s} />} />
+              </CategorySection>
+              <CategorySection title="Self-dimer (Strider MFE)">
+                <CandidateStrip candidates={shownFwd.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.forward} structure={s} />} />
+              </CategorySection>
+            </div>
+            <div>
+              <p className="mb-2 break-all font-mono text-xs text-ink">
+                Reverse: {pair.reverse} <span className="text-ink-faint">({pair.reverse.length} bp)</span>
+              </p>
+              <CategorySection title="Hairpin (Strider MFE)">
+                <CandidateStrip candidates={shownRev.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.reverse} structure={s} />} />
+              </CategorySection>
+              <CategorySection title="Self-dimer (Strider MFE)">
+                <CandidateStrip candidates={shownRev.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.reverse} seq2={pair.reverse} structure={s} />} />
+              </CategorySection>
+            </div>
+          </div>
+          <CategorySection title="Heterodimer - forward × reverse (Strider MFE)">
+            <CandidateStrip candidates={shownFwd.heterodimer?.with_bulge.candidates ?? []} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.reverse} structure={s} />} />
+          </CategorySection>
         </div>
       )}
     </Modal>

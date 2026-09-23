@@ -78,7 +78,22 @@ export default function AmpliconDetailModal({ amplicon, onPrimerEdit, onClose }:
   const [liveSelections, setLiveSelections] = useState<Selections>(EMPTY_SELECTIONS);
   const [liveFor, setLiveFor] = useState<string | null>(null);
 
-  const requiredPositions = amplicon ? [amplicon.ampStart, amplicon.ampEnd, ...amplicon.variants.map((v) => v.position)] : [];
+  // Frozen at whatever this amplicon's bounds were the moment it was
+  // opened (keyed by its own rsID, not the live `amplicon` object) - NOT
+  // recomputed from `amplicon.ampStart`/`ampEnd` on every render. Those
+  // shift every time a primer drag below commits, and `useGeneSequence`
+  // refetches whenever `requiredPositions` changes - without freezing this,
+  // every drag would re-run the whole gene/transcript search and reload
+  // the sequence map out from under the user, instead of only the
+  // secondary structures and amplicon length actually needing to update.
+  const openKey = amplicon ? (amplicon.variants[0]?.rsid ?? null) : null;
+  const [requiredPositions, setRequiredPositions] = useState<number[]>([]);
+  const [requiredPositionsFor, setRequiredPositionsFor] = useState<string | null>(null);
+  if (openKey !== requiredPositionsFor) {
+    setRequiredPositions(amplicon ? [amplicon.ampStart, amplicon.ampEnd, ...amplicon.variants.map((v) => v.position)] : []);
+    setRequiredPositionsFor(openKey);
+  }
+
   const { data, error, transcripts, switching, switchTranscript, loading } = useGeneSequence(amplicon?.gene ?? null, requiredPositions);
 
   const fwdSel = data && amplicon ? buildPrimerSelection(data, amplicon.ampStart, amplicon.ampStart + amplicon.fwd.sequence.length - 1, amplicon.fwd.sequence) : null;

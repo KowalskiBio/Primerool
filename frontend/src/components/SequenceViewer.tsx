@@ -189,17 +189,21 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
       .map((a): [number, number] => [a.start, a.end])
       .sort((x, y) => x[0] - y[0]);
 
+    // A truncated intron collapses to a short placeholder - fine for an
+    // unmarked one, but it would silently swallow any variant marker or
+    // gene-region primer/probe selection landing inside it (nothing left
+    // at that position to hang it on). Collected once, not per intron.
+    const geneSelectionRanges = (Object.values(sel) as (Selection | null)[]).filter((s): s is Selection => s !== null && s.region === 'gene').map((s) => ({ start: s.start, end: s.end }));
+
     const segments: Segment[] = [];
     let last = 0;
 
     const pushIntron = (intronSeq: string, offset: number) => {
-      // A truncated intron collapses to a short placeholder - fine for an
-      // unmarked intron, but it would silently swallow any variant marker
-      // landing inside it (nothing left at that position to hang the
-      // marker on). An intron carrying one of this map's markers is always
-      // rendered in full instead, regardless of the toggle - "truncate
-      // introns" means "the ones I don't need to see", not "hide my SNPs".
-      const hasMarker = variantMarkers.some((m) => m.end > offset && m.start < offset + intronSeq.length);
+      // An intron carrying one of these is always rendered in full
+      // instead, regardless of the toggle - "truncate introns" means "the
+      // ones I don't need to see", not "hide my SNPs/primers".
+      const hasMarker =
+        variantMarkers.some((m) => m.end > offset && m.start < offset + intronSeq.length) || geneSelectionRanges.some((r) => r.end > offset && r.start < offset + intronSeq.length);
       if (truncateIntrons && !hasMarker) {
         segments.push({ text: `...intron ${intronSeq.length}bp...`, className: 'seq-intron-placeholder', startPos: offset, region: 'gene' });
       } else {

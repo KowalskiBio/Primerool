@@ -1,8 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PlacedAmplicon } from './SnpAmpliconMap';
 import type { SequenceData } from '../api/sequence';
 import { EMPTY_SELECTIONS, type Selection, type Selections } from '../utils/regionMapping';
+import { localGenePos } from '../utils/variantMapping';
+import { useGeneSequence } from '../utils/useGeneSequence';
 import Modal from './ui/Modal';
+import Checkbox from './ui/Checkbox';
+import Select from './ui/Select';
 import SequenceViewer, { type VariantMarker } from './SequenceViewer';
 import PrimerStructurePanel from './PrimerStructurePanel';
 import { fmt } from '../utils/format';
@@ -23,99 +27,153 @@ interface Props {
   onClose: () => void;
 }
 
-/** A flat, structure-free `SequenceData` wrapping one amplicon's own
- * reference window - `gene_seq` is the whole window, with no
- * upstream/downstream flank and no exon/intron annotations, so
- * `SequenceViewer` falls into its existing "custom pasted sequence"
- * rendering path (see `geneBlockSegments`'s no-annotations branch)
- * instead of needing a real gene-structure fetch. */
-function buildSequenceData(amplicon: PlacedAmplicon): SequenceData {
-  return {
-    gene_name: amplicon.gene,
-    transcript_id: 'custom',
-    transcript_name: amplicon.rsid,
-    chrom: amplicon.chrom,
-    strand: '+',
-    gene_start_genomic: amplicon.intervalStart,
-    gene_end_genomic: amplicon.intervalStart + amplicon.refSeq.length - 1,
-    upstream_len: 0,
-    gene_len: amplicon.refSeq.length,
-    downstream_len: 0,
-    utr5_len: 0,
-    upstream_seq: '',
-    gene_seq: amplicon.refSeq,
-    downstream_seq: '',
-    spliced_seq: amplicon.refSeq,
-    spliced_exons_seq: amplicon.refSeq,
-    junctions: [],
-    annotations: [],
-    include_introns: false,
-    include_utr: false,
-  };
+/** Maps a primer's own PLUS-STRAND genomic span (`gStart <= gEnd`, both
+ * inclusive) onto a `gene`-region `Selection` within `data.gene_seq` -
+ * strand-aware, so it's correct even when the gene transcript is on the
+ * minus strand (where `gene_seq` is already reverse-complemented relative
+ * to the plus strand, and local coordinate order runs opposite to genomic
+ * order - `localGenePos` handles that reversal, `min`/`max` here just
+ * keeps `start <= end` regardless of which endpoint that puts first).
+ * `bindingSeq` is always read directly from `gene_seq` (ground truth for
+ * whatever's actually there); `primerSeq` is the primer's own known real
+ * sequence - their relationship (equal on a plus-strand gene, reverse
+ * complements of each other on a minus-strand one) is exactly what
+ * `SequenceViewer`'s existing `isReverseStrand` drag logic already
+ * expects, so no special-casing is needed beyond building this correctly.
+ * Returns `null` if either endpoint falls outside `data`'s exon span. */
+function buildPrimerSelection(data: SequenceData, gStart: number, gEnd: number, primerSeq: string): Selection | null {
+  const a = localGenePos(data, gStart);
+  const b = localGenePos(data, gEnd);
+  if (a === null || b === null) return null;
+  const start = Math.min(a, b);
+  const end = Math.max(a, b) + 1;
+  return { region: 'gene', start, end, primerSeq, bindingSeq: data.gene_seq.substring(start, end), source: 'manual' };
 }
 
-/** The current forward/reverse primers, expressed as `gene`-region
- * `Selection`s local to `buildSequenceData`'s `gene_seq` - draggable via
- * `SequenceViewer`'s existing `geneForward`/`geneReverse` editing, the
- * same mechanism the main gene workflow's manual-design panels use. */
-function buildSelections(amplicon: PlacedAmplicon): Selections {
-  const fwdStart = amplicon.ampStart - amplicon.intervalStart;
-  const fwdEnd = fwdStart + amplicon.fwd.sequence.length;
-  const revEnd = amplicon.ampEnd - amplicon.intervalStart + 1;
-  const revStart = revEnd - amplicon.rev.sequence.length;
-  return {
-    ...EMPTY_SELECTIONS,
-    geneForward: { region: 'gene', start: fwdStart, end: fwdEnd, primerSeq: amplicon.fwd.sequence, bindingSeq: amplicon.refSeq.substring(fwdStart, fwdEnd), source: 'manual' },
-    geneReverse: { region: 'gene', start: revStart, end: revEnd, primerSeq: amplicon.rev.sequence, bindingSeq: amplicon.refSeq.substring(revStart, revEnd), source: 'manual' },
-  };
+/** The inverse of `localGenePos`: a 0-based local `gene_seq` position back
+ * to a plus-strand genomic one. Needed because after a drag,
+ * `SequenceViewer` reports the new span in `data`'s own local coordinates
+ * - and `data.gene_seq` is the *gene's* sequence, not the amplicon's own
+ * window, so it can't be converted via `amplicon.intervalStart` the way
+ * the old (pre-whole-gene) version of this modal did. */
+function genomicFromLocal(data: SequenceData, local: number): number {
+  return data.strand === '-' ? data.gene_end_genomic - local : data.gene_start_genomic + local;
 }
 
 /** Full per-amplicon detail view, opened by clicking (not dragging) an
- * amplicon bar's body on the map: an editable sequence map (drag either
- * primer's highlighted span to reposition/resize it, exactly like the
- * main Primerool pipeline's own sequence-map primer editing) with the
- * SNP(s) marked, both primers' sequence/Tm/length, and their secondary
- * structures below (`PrimerStructurePanel` - the same hairpin/self-dimer/
- * heterodimer breakdown a primer-segment click opens standalone). */
+ * amplicon bar's body on the map: the *whole gene's* sequence map (same
+ * fetch-and-best-transcript logic as `SnpGeneMapModal.tsx`, via the
+ * shared `useGeneSequence` hook) scrolled to this amplicon on open, so
+ * scrolling up/down shows where it sits in the gene's real exon/intron
+ * structure - not just the amplicon's own short window in isolation. Both
+ * primers are draggable `geneForward`/`geneReverse` selections (exactly
+ * like the main Primerool pipeline's own sequence-map primer editing,
+ * resize-capable and auto-re-analyzed - distinct from the amplicon map's
+ * own edge-drag, which preserves primer length instead). Below the map:
+ * both primers' sequence/Tm/length, amplicon length, and their secondary
+ * structures (`PrimerStructurePanel` - the same breakdown a primer-segment
+ * click opens standalone). */
 export default function AmpliconDetailModal({ amplicon, onPrimerEdit, onClose }: Props) {
-  const [selections, setSelections] = useState<Selections>(EMPTY_SELECTIONS);
-  const [selectionsFor, setSelectionsFor] = useState<string | null>(null);
+  const [truncateIntrons, setTruncateIntrons] = useState(true);
+  const [liveSelections, setLiveSelections] = useState<Selections>(EMPTY_SELECTIONS);
+  const [liveFor, setLiveFor] = useState<string | null>(null);
 
-  const key = amplicon ? `${amplicon.rsid}:${amplicon.ampStart}:${amplicon.ampEnd}:${amplicon.fwd.sequence}:${amplicon.rev.sequence}` : null;
+  const requiredPositions = amplicon ? [amplicon.ampStart, amplicon.ampEnd, ...amplicon.variants.map((v) => v.position)] : [];
+  const { data, error, transcripts, switching, switchTranscript, loading } = useGeneSequence(amplicon?.gene ?? null, requiredPositions);
+
+  const fwdSel = data && amplicon ? buildPrimerSelection(data, amplicon.ampStart, amplicon.ampStart + amplicon.fwd.sequence.length - 1, amplicon.fwd.sequence) : null;
+  const revSel = data && amplicon ? buildPrimerSelection(data, amplicon.ampEnd - amplicon.rev.sequence.length + 1, amplicon.ampEnd, amplicon.rev.sequence) : null;
+  const baseSelections: Selections = { ...EMPTY_SELECTIONS, geneForward: fwdSel, geneReverse: revSel };
 
   // Render-time reset (React's documented "derive state from props"
-  // pattern, not an effect) whenever a different amplicon opens, or the
-  // parent's data changes after a commit below re-renders this with fresh
-  // props - see `SequenceViewer.tsx`'s own `prevData`/`prevSearchKey` for
-  // the same shape.
-  if (amplicon && key !== selectionsFor) {
-    setSelections(buildSelections(amplicon));
-    setSelectionsFor(key);
+  // pattern, not an effect) whenever a different amplicon/transcript loads,
+  // or the parent's data changes after a commit below re-renders this with
+  // fresh props - see `SequenceViewer.tsx`'s own `prevData`/`prevSearchKey`
+  // for the same shape.
+  const liveKey = data && amplicon ? `${data.transcript_id}:${amplicon.rsid}:${amplicon.ampStart}:${amplicon.ampEnd}:${amplicon.fwd.sequence}:${amplicon.rev.sequence}` : null;
+  if (liveKey !== liveFor) {
+    setLiveSelections(baseSelections);
+    setLiveFor(liveKey);
   }
 
-  function handleSelect(selKey: keyof Selections, value: Selection) {
-    setSelections((prev) => ({ ...prev, [selKey]: value }));
-    if (!amplicon || value.analysis === undefined) return; // still awaiting SequenceViewer's own recompute
+  // Scrolls to this amplicon's first variant once its gene loads (or a
+  // different transcript is picked) - keyed on stable ids, not the
+  // `amplicon`/`data` object references themselves, so an unrelated
+  // re-render elsewhere in the app can't yank the user's own scroll
+  // position back here mid-browse.
+  useEffect(() => {
+    if (!data || !amplicon) return;
+    const rsid = amplicon.variants[0]?.rsid;
+    if (!rsid) return;
+    const el = document.querySelector(`[data-variant-rsid="${CSS.escape(rsid)}"]`);
+    el?.scrollIntoView({ block: 'center', behavior: 'auto' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.transcript_id, amplicon?.rsid]);
+
+  function handleSelect(key: keyof Selections, value: Selection) {
+    setLiveSelections((prev) => ({ ...prev, [key]: value }));
+    if (!amplicon || !data || value.analysis === undefined) return; // still awaiting SequenceViewer's own recompute
     const groupRsids = amplicon.variants.map((v) => v.rsid);
-    if (selKey === 'geneForward') {
-      onPrimerEdit(groupRsids, 'start', amplicon.intervalStart + value.start, value.primerSeq, value.analysis?.tm ?? null);
-    } else if (selKey === 'geneReverse') {
-      onPrimerEdit(groupRsids, 'end', amplicon.intervalStart + value.end - 1, value.primerSeq, value.analysis?.tm ?? null);
+    // Both endpoints go through `genomicFromLocal` and are then min/max'd,
+    // not assumed start<end, because local order runs opposite to genomic
+    // order on a minus-strand gene (see `buildPrimerSelection`'s doc).
+    // `ampStart`/`ampEnd` are always plus-strand genomic positions
+    // regardless of which strand the gene transcript itself is on.
+    const gA = genomicFromLocal(data, value.start);
+    const gB = genomicFromLocal(data, value.end - 1);
+    const gSpanStart = Math.min(gA, gB);
+    const gSpanEnd = Math.max(gA, gB);
+    if (key === 'geneForward') {
+      onPrimerEdit(groupRsids, 'start', gSpanStart, value.primerSeq, value.analysis?.tm ?? null);
+    } else if (key === 'geneReverse') {
+      onPrimerEdit(groupRsids, 'end', gSpanEnd, value.primerSeq, value.analysis?.tm ?? null);
     }
   }
 
-  const data = amplicon ? buildSequenceData(amplicon) : null;
-  const variantMarkers: VariantMarker[] = amplicon ? amplicon.variants.map((v) => ({ rsid: v.rsid, start: v.position - amplicon.intervalStart, end: v.position - amplicon.intervalStart + 1, alleles: v.alleles })) : [];
+  const variantMarkers: VariantMarker[] = data
+    ? (amplicon?.variants
+        .map((v): VariantMarker | null => {
+          const local = localGenePos(data, v.position);
+          if (local === null) return null;
+          return { rsid: v.rsid, start: local, end: local + 1, alleles: v.alleles };
+        })
+        .filter((m): m is VariantMarker => m !== null) ?? [])
+    : [];
 
   return (
-    <Modal open={amplicon !== null} onClose={onClose} title={amplicon ? `${amplicon.rsid} - amplicon detail` : ''}>
+    <Modal open={amplicon !== null} onClose={onClose} title={amplicon ? `${amplicon.rsid} - amplicon detail (${amplicon.gene})` : ''}>
+      {loading && <p className="text-sm text-ink-muted">Loading {amplicon?.gene}'s sequence…</p>}
+      {error && (
+        <div role="alert" className="mb-3 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">
+          {error}
+        </div>
+      )}
       {data && amplicon && (
         <div>
-          <p className="mb-3 text-xs text-ink-muted">
-            Drag the highlighted forward/reverse primer spans below to reposition or resize them - the same interactive editing the main gene workflow's sequence map uses. Each drag is
-            re-analyzed automatically and written back to the results table once released.
-          </p>
-          <SequenceViewer data={data} selections={selections} truncateIntrons={false} onSelect={handleSelect} variantMarkers={variantMarkers} />
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-ink-muted">
+              Drag the highlighted primer spans to reposition or resize them (same interactive editing as the main gene workflow) - each drag is re-analyzed automatically and written back to the
+              results table. Scroll to see where this amplicon sits in the gene.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <Checkbox label="Truncate introns" checked={truncateIntrons} onChange={(e) => setTruncateIntrons(e.target.checked)} />
+              {transcripts.length > 1 && (
+                <label className="inline-flex items-center gap-1.5 text-xs text-ink-muted">
+                  Transcript:
+                  <Select size="sm" value={data.transcript_id} disabled={switching} onChange={(e) => void switchTranscript(e.target.value)}>
+                    {transcripts.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.id}){t.is_canonical ? ' - canonical' : ''}
+                      </option>
+                    ))}
+                  </Select>
+                  {switching && <span>loading…</span>}
+                </label>
+              )}
+            </div>
+          </div>
+
+          <SequenceViewer data={data} selections={liveSelections} truncateIntrons={truncateIntrons} onSelect={handleSelect} variantMarkers={variantMarkers} />
 
           <div className="mt-5 grid grid-cols-1 gap-3 border-t border-line pt-4 sm:grid-cols-3">
             <div className="rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">

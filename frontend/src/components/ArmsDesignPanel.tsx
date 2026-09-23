@@ -251,7 +251,9 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
     if (!canUseVariantSearch) return "Enable 'Include introns' in step 2 to select a variant.";
     if (hit.chrom && data.chrom && hit.chrom !== data.chrom) return `This variant is on chromosome ${hit.chrom}, not the loaded gene's chromosome (${data.chrom}).`;
     if (localPosForHit(hit) === null) return 'This variant maps outside the loaded gene sequence.';
-    if (new Set(orientedAlleles(hit)).size < 2) return "This variant's allele data isn't available from the source — add it manually using position/ref/alt below instead.";
+    if (refAltCandidates(hit) === null && new Set(orientedAlleles(hit)).size < 2) {
+      return "This variant's allele data isn't available from the source — add it manually using position/ref/alt below instead.";
+    }
     return null;
   }
 
@@ -279,14 +281,16 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
     return local;
   }
 
-  /** Classic notation for a search/lookup hit, before the user has picked
-   * which allele is ref/alt: the *actual* template base at that position
-   * (ground truth from `data.gene_seq`, not trusted from Ensembl's
-   * `alleles[0]`) is treated as ref, and every other reported allele as a
-   * possible alt. `null` when unavailable (off-sequence/wrong chromosome,
-   * matching `localPosForHit`) or when this isn't a clean set of
-   * single-base alleles (an indel — no notation to show). */
-  function snpNameForHit(hit: VariantHit): string | null {
+  /** The *actual* template base at this hit's position (ground truth from
+   * `data.gene_seq`, never trusted from the provider's allele order — see
+   * `VariantHit.alleles`'s doc) as ref, and every other reported allele as
+   * a possible alt — so the UI never has to ask the user to disambiguate
+   * ref/alt for a plain biallelic SNP, only to pick among alts when a site
+   * genuinely has more than one. `null` when unavailable (off-sequence/
+   * wrong chromosome, matching `localPosForHit`), when this isn't a clean
+   * set of single-base alleles (an indel), or when none of the reported
+   * alleles differ from the true ref (a mapping/strand mismatch). */
+  function refAltCandidates(hit: VariantHit): { ref: string; alts: string[] } | null {
     const local = localPosForHit(hit);
     if (local === null) return null;
     const alleles = orientedAlleles(hit);
@@ -295,7 +299,17 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
     if (!isSingleBase(trueRef)) return null;
     const alts = [...new Set(alleles.map((a) => a.toUpperCase()).filter((a) => a !== trueRef))];
     if (alts.length === 0) return null;
-    return `${trueRef}${local + 1}${alts.join('/')}`;
+    return { ref: trueRef, alts };
+  }
+
+  /** Classic notation for a search/lookup hit, before the user has picked
+   * which allele is ref/alt. `null` when `refAltCandidates` can't determine
+   * one (see its doc). */
+  function snpNameForHit(hit: VariantHit): string | null {
+    const local = localPosForHit(hit);
+    const candidates = refAltCandidates(hit);
+    if (local === null || candidates === null) return null;
+    return `${candidates.ref}${local + 1}${candidates.alts.join('/')}`;
   }
 
   /** A hit's frequency, merging what the search/lookup response already
@@ -364,56 +378,71 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
       column: {
         header: 'Select',
         width: '19%',
-        render: (h) => (
-          <div>
-            {selectedVariants.some((v) => v.key === h.id) ? (
-              <span className="px-2 py-1 text-xs font-medium text-green-700 dark:text-green-400">✓ Added</span>
-            ) : expandedHitId !== h.id ? (
-              <button
-                className="px-2 py-1 text-xs font-medium text-green-700 dark:text-green-400 border border-green-600 rounded hover:bg-green-600 hover:text-white dark:hover:text-white transition disabled:opacity-50"
-                disabled={hitSelectDisabledReason(h) !== null}
-                title={hitSelectDisabledReason(h) ?? undefined}
-                onClick={() => setExpandedHitId(h.id)}
-              >
-                Select
-              </button>
-            ) : (
-              <div className="flex flex-col gap-1 w-full max-w-[10rem]">
-                <div className="flex items-center gap-1">
-                  <span className="text-xs shrink-0">Ref:</span>
-                  <select
-                    className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 flex-1 min-w-0"
-                    value={hitRefAllele[h.id] ?? orientedAlleles(h)[0] ?? ''}
-                    onChange={(e) => setHitRefAllele((prev) => ({ ...prev, [h.id]: e.target.value }))}
-                  >
-                    {orientedAlleles(h).map((a) => (
-                      <option key={a} value={a}>
-                        {a}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs shrink-0">Alt:</span>
-                  <select
-                    className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 flex-1 min-w-0"
-                    value={hitAltAllele[h.id] ?? orientedAlleles(h)[1] ?? ''}
-                    onChange={(e) => setHitAltAllele((prev) => ({ ...prev, [h.id]: e.target.value }))}
-                  >
-                    {orientedAlleles(h).map((a) => (
-                      <option key={a} value={a}>
-                        {a}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition mt-1" onClick={() => confirmHitSelection(h)}>
-                  Add Variant
+        render: (h) => {
+          const candidates = refAltCandidates(h);
+          const alleles = orientedAlleles(h);
+          const altOptions = candidates ? candidates.alts : alleles;
+          return (
+            <div>
+              {selectedVariants.some((v) => v.key === h.id) ? (
+                <span className="px-2 py-1 text-xs font-medium text-green-700 dark:text-green-400">✓ Added</span>
+              ) : expandedHitId !== h.id ? (
+                <button
+                  className="px-2 py-1 text-xs font-medium text-green-700 dark:text-green-400 border border-green-600 rounded hover:bg-green-600 hover:text-white dark:hover:text-white transition disabled:opacity-50"
+                  disabled={hitSelectDisabledReason(h) !== null}
+                  title={hitSelectDisabledReason(h) ?? undefined}
+                  onClick={() => setExpandedHitId(h.id)}
+                >
+                  Select
                 </button>
-              </div>
-            )}
-          </div>
-        ),
+              ) : (
+                <div className="flex flex-col gap-1 w-full max-w-[10rem]">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs shrink-0">Ref:</span>
+                    {/* Ground truth once `refAltCandidates` can determine it
+                     * (from `data.gene_seq`, not the provider) — offering it
+                     * as an editable select would just invite a mismatch the
+                     * backend rejects anyway, see `orientedAlleles`'s doc. */}
+                    {candidates ? (
+                      <span className="text-xs font-mono">{candidates.ref}</span>
+                    ) : (
+                      <select
+                        className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 flex-1 min-w-0"
+                        value={hitRefAllele[h.id] ?? alleles[0] ?? ''}
+                        onChange={(e) => setHitRefAllele((prev) => ({ ...prev, [h.id]: e.target.value }))}
+                      >
+                        {alleles.map((a) => (
+                          <option key={a} value={a}>
+                            {a}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs shrink-0">Alt:</span>
+                    {/* Multiple options here means a genuinely multi-allelic
+                     * site — the user picks which alt they mean. */}
+                    <select
+                      className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 flex-1 min-w-0"
+                      value={hitAltAllele[h.id] ?? altOptions[0] ?? ''}
+                      onChange={(e) => setHitAltAllele((prev) => ({ ...prev, [h.id]: e.target.value }))}
+                    >
+                      {altOptions.map((a) => (
+                        <option key={a} value={a}>
+                          {a}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button className="px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition mt-1" onClick={() => confirmHitSelection(h)}>
+                    Add Variant
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        },
       },
     },
   ];
@@ -484,9 +513,10 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
       setSearchError(reason ?? 'This variant maps outside the loaded gene sequence.');
       return;
     }
+    const candidates = refAltCandidates(hit);
     const alleles = orientedAlleles(hit);
-    const ref = hitRefAllele[hit.id] ?? alleles[0] ?? '';
-    const alt = hitAltAllele[hit.id] ?? alleles[1] ?? '';
+    const ref = candidates?.ref ?? hitRefAllele[hit.id] ?? alleles[0] ?? '';
+    const alt = hitAltAllele[hit.id] ?? candidates?.alts[0] ?? alleles[1] ?? '';
     if (!ref || !alt || ref === alt) {
       setSearchError('Pick two distinct alleles (ref and alt) before using this variant.');
       return;

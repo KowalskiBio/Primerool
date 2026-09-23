@@ -8,24 +8,7 @@ import Checkbox from './ui/Checkbox';
 import Select from './ui/Select';
 import SequenceViewer from './SequenceViewer';
 import { EMPTY_SELECTIONS } from '../utils/regionMapping';
-
-/** The SNP-flanking-report workflow only ever deals in GRCh38 human
- * variants (see `SNP_flanking_sequences_GRCh38.docx`), so unlike the main
- * gene-search workflow there's no species/source picker upstream to read
- * this from - it's fixed here instead. */
-const SPECIES = 'homo_sapiens';
-
-/** A gene's "canonical" transcript (per whichever source has it) can cover
- * only part of the gene's full genomic locus - a large gene like OPRM1
- * has isoforms differing by tens of kb at either end, and its
- * RefSeq-flagged canonical pick is a short one. A batch SNP that's
- * genuinely inside the gene can still land outside that one transcript's
- * exon span. Rather than surface that as a dead end, up to this many
- * *other* transcripts from the same search result are tried in order
- * (their natural list order already tends to put the well-characterized
- * RefSeq/Ensembl transcripts before predicted ones) until one covers every
- * batch SNP, or attempts run out - whichever covers the most wins. */
-const MAX_AUTO_TRANSCRIPT_ATTEMPTS = 6;
+import { localGenePos, SNP_WORKFLOW_SPECIES } from '../utils/variantMapping';
 
 interface Props {
   /** The gene symbol to load, or `null` to keep the modal closed. */
@@ -34,17 +17,6 @@ interface Props {
    * one marker on the map (see `SequenceViewer`'s `variantMarkers`). */
   blocks: SnpBlock[];
   onClose: () => void;
-}
-
-/** Maps a 1-based genomic position onto a 0-based offset into
- * `data.gene_seq` - only meaningful when `data.include_introns` is true
- * (only then is `gene_seq` the linear genomic template `gene_start_genomic`/
- * `gene_end_genomic` describe). Same formula `ArmsDesignPanel.tsx` uses for
- * variant-search hits. */
-function localGenePos(data: SequenceData, genomicPos: number): number | null {
-  const local = data.strand === '-' ? data.gene_end_genomic - genomicPos : genomicPos - data.gene_start_genomic;
-  if (local < 0 || local >= data.gene_seq.length) return null;
-  return local;
 }
 
 function markersFor(data: SequenceData, blocks: SnpBlock[]): VariantMarker[] {
@@ -85,13 +57,13 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
       // the user pick.
       for (const apiSource of ['ncbi', 'ensembl'] as const) {
         try {
-          const found = await searchGene({ gene_name: gene!, species: SPECIES, api_source: apiSource });
+          const found = await searchGene({ gene_name: gene!, species: SNP_WORKFLOW_SPECIES, api_source: apiSource });
           const canonical = found.transcripts.find((t) => t.is_canonical) || found.transcripts[0];
           if (!canonical) continue;
           const canonicalSeq = await getSequence({
             gene_name: gene!,
             transcript_id: canonical.id,
-            species: SPECIES,
+            species: SNP_WORKFLOW_SPECIES,
             api_source: apiSource,
             upstream_bp: 200,
             downstream_bp: 200,
@@ -102,20 +74,25 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
 
           let best = canonicalSeq;
           let bestCoverage = markersFor(canonicalSeq, blocks).length;
-          // The canonical transcript doesn't cover every batch SNP - try a
-          // handful of this gene's other transcripts for one that does
-          // (see `MAX_AUTO_TRANSCRIPT_ATTEMPTS`'s doc). A candidate that
-          // fails to load (some very large transcripts do, from this
-          // backend) is just skipped, not treated as an error.
+          // The canonical transcript doesn't cover every batch SNP - a
+          // gene's RefSeq/Ensembl-flagged "canonical" pick can span only
+          // part of its full genomic locus (e.g. OPRM1's canonical
+          // transcript covers ~122kb of its ~236kb gene), so a batch SNP
+          // genuinely inside the gene can still fall outside it. Every
+          // other transcript this gene has is tried, in order, until one
+          // covers every batch SNP or the list runs out - whichever covers
+          // the most wins. A candidate that fails to load (some very large
+          // transcripts do, from this backend) is just skipped, not
+          // treated as an error.
           if (bestCoverage < blocks.length) {
-            const others = found.transcripts.filter((t) => t.id !== canonical.id).slice(0, MAX_AUTO_TRANSCRIPT_ATTEMPTS);
+            const others = found.transcripts.filter((t) => t.id !== canonical.id);
             for (const t of others) {
               if (bestCoverage >= blocks.length) break;
               try {
                 const seq = await getSequence({
                   gene_name: gene!,
                   transcript_id: t.id,
-                  species: SPECIES,
+                  species: SNP_WORKFLOW_SPECIES,
                   api_source: apiSource,
                   upstream_bp: 200,
                   downstream_bp: 200,
@@ -172,7 +149,7 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
       const seq = await getSequence({
         gene_name: gene,
         transcript_id: transcriptId,
-        species: SPECIES,
+        species: SNP_WORKFLOW_SPECIES,
         api_source: apiSourceUsed,
         upstream_bp: 200,
         downstream_bp: 200,

@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
 import { designFlanking, type DesignEngine, type FlankingOligoResult } from '../api/design';
+import { searchGene } from '../api/gene';
+import { getSequence } from '../api/sequence';
 import { ApiError } from '../api/client';
 import EngineSelect from './EngineSelect';
 import SnpAmpliconMap, { type PlacedAmplicon } from './SnpAmpliconMap';
@@ -11,6 +13,18 @@ import Button from './ui/Button';
 import Field from './ui/Field';
 import TextInput, { controlClasses } from './ui/TextInput';
 import { fmt } from '../utils/format';
+import { localGenePos, SNP_WORKFLOW_SPECIES } from '../utils/variantMapping';
+
+/** Per-rsID result of checking whether it falls inside its gene's
+ * *canonical* transcript's exon span - deliberately narrower than
+ * `SnpGeneMapModal`'s own all-transcripts search (which exists precisely
+ * to recover from this), since the point here is to flag "the canonical
+ * transcript alone misses this one", not to say the SNP is unreachable. */
+interface CanonicalCheck {
+  status: 'checking' | 'done' | 'error';
+  inCanonical?: boolean;
+  transcriptName?: string;
+}
 
 interface BatchResult {
   status: 'pending' | 'running' | 'done' | 'error';
@@ -100,6 +114,69 @@ export default function SnpBatchPanel() {
   const [results, setResults] = useState<Record<string, BatchResult>>({});
   const [running, setRunning] = useState(false);
   const [openGene, setOpenGene] = useState<string | null>(null);
+  const [canonicalChecks, setCanonicalChecks] = useState<Record<string, CanonicalCheck>>({});
+  // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
+  // work checks this before each write so a stale check from a superseded
+  // import can't clobber a fresh one (same purpose as the `cancelled` flag
+  // `SnpGeneMapModal.tsx`'s fetch effect uses, just not effect-scoped since
+  // this runs from event handlers, not an effect).
+  const checkGenRef = useRef(0);
+
+  /** For every unique gene in `newBlocks`, fetches that gene's canonical
+   * transcript once and flags each of its blocks whose genomic position
+   * falls outside that transcript's exon span - "not in canonical", shown
+   * as a badge in the results table. Deliberately checks only the
+   * canonical transcript (see `CanonicalCheck`'s doc); the flag exists to
+   * point at `SnpGeneMapModal`'s own broader search, not to duplicate it. */
+  async function checkCanonicalCoverage(newBlocks: SnpBlock[]) {
+    const gen = ++checkGenRef.current;
+    const byGene = new Map<string, SnpBlock[]>();
+    for (const b of newBlocks) {
+      const list = byGene.get(b.gene);
+      if (list) list.push(b);
+      else byGene.set(b.gene, [b]);
+    }
+
+    for (const [gene, geneBlocks] of byGene) {
+      if (checkGenRef.current !== gen) return;
+      setCanonicalChecks((prev) => {
+        const next = { ...prev };
+        for (const b of geneBlocks) next[b.rsid] = { status: 'checking' };
+        return next;
+      });
+
+      let data = null;
+      for (const apiSource of ['ncbi', 'ensembl'] as const) {
+        try {
+          const found = await searchGene({ gene_name: gene, species: SNP_WORKFLOW_SPECIES, api_source: apiSource });
+          const canonical = found.transcripts.find((t) => t.is_canonical) || found.transcripts[0];
+          if (!canonical) continue;
+          data = await getSequence({
+            gene_name: gene,
+            transcript_id: canonical.id,
+            species: SNP_WORKFLOW_SPECIES,
+            api_source: apiSource,
+            upstream_bp: 200,
+            downstream_bp: 200,
+            include_introns: true,
+            include_utr: false,
+          });
+          break;
+        } catch {
+          // try the next source
+        }
+      }
+      if (checkGenRef.current !== gen) return;
+
+      setCanonicalChecks((prev) => {
+        const next = { ...prev };
+        for (const b of geneBlocks) {
+          next[b.rsid] = data ? { status: 'done', inCanonical: localGenePos(data, b.position) !== null, transcriptName: data.transcript_name } : { status: 'error' };
+        }
+        return next;
+      });
+    }
+  }
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -108,10 +185,12 @@ export default function SnpBatchPanel() {
     setImportError(null);
     setImporting(true);
     setResults({});
+    setCanonicalChecks({});
     try {
       const base64 = await readFileAsBase64(file);
       const res = await importSnpDocx(base64);
       setBlocks(res.blocks);
+      void checkCanonicalCoverage(res.blocks);
     } catch (err) {
       setBlocks(null);
       setImportError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err));
@@ -125,9 +204,11 @@ export default function SnpBatchPanel() {
     setImportError(null);
     setImporting(true);
     setResults({});
+    setCanonicalChecks({});
     try {
       const res = await importSnpText(pastedText);
       setBlocks(res.blocks);
+      void checkCanonicalCoverage(res.blocks);
     } catch (err) {
       setBlocks(null);
       setImportError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err));
@@ -371,6 +452,20 @@ export default function SnpBatchPanel() {
                             <span title={`Shares this window with: ${b.other_targets.join(', ')}. Primer design tries to pick a candidate whose binding site clears it (see "Primer notes" once designed).`} className="ml-1 text-warning">
                               *
                             </span>
+                          )}
+                          {canonicalChecks[b.rsid]?.status === 'checking' && (
+                            <span title="Checking canonical-transcript coverage…" className="ml-1 text-ink-faint">
+                              ⋯
+                            </span>
+                          )}
+                          {canonicalChecks[b.rsid]?.status === 'done' && canonicalChecks[b.rsid].inCanonical === false && (
+                            <Badge
+                              tone="warning"
+                              title={`Outside ${canonicalChecks[b.rsid].transcriptName}'s canonical-transcript span - this SNP may still be in the gene under a different transcript. Open the sequence map (click this row) and try the transcript picker there.`}
+                              className="ml-1"
+                            >
+                              not in canonical
+                            </Badge>
                           )}
                         </td>
                         <td className="px-2 py-2 font-mono tabular-nums">

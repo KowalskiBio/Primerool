@@ -1,3 +1,5 @@
+import { useRef, useState } from 'react';
+
 export interface PlacedAmplicon {
   rsid: string;
   gene: string;
@@ -14,14 +16,24 @@ interface Props {
   overlaps: Record<string, string[]>;
 }
 
+interface ViewState {
+  start: number;
+  end: number;
+}
+
 const WIDTH = 1000;
 const MARGIN = 20;
 const TRACK_HEIGHT = 22;
 const ROW_HEIGHT = 11;
 const RULER_GAP = 20;
-/** Rough SVG-unit width per character at the label's 9px font size — used only
- * to greedily pack rsID labels into non-overlapping rows, not for pixel-perfect layout. */
+/** Rough SVG-unit width per character at the 9px label font — used only to
+ * greedily pack labels into non-overlapping rows/spacing, not for
+ * pixel-perfect layout. */
 const CHAR_WIDTH = 5.4;
+const MIN_TICK_LABEL_GAP = 14;
+/** The smallest region a drag-to-zoom can select — keeps a near-zero-width
+ * drag from producing a degenerate view. */
+const MIN_ZOOM_BP = 5;
 /** Amplicons more than this far apart (same chromosome) never end up on the
  * same track — each gets its own, locally-scaled one instead. This is what
  * keeps a lone, far-flung SNP's amplicon a legible box rather than a
@@ -45,31 +57,82 @@ function clusterAmplicons(amplicons: PlacedAmplicon[]): PlacedAmplicon[][] {
   return clusters;
 }
 
+/** Picks a "nice" (1/2/5 × 10^n) tick step that keeps adjacent tick labels
+ * at least `minPxGap` apart on screen, however many digits the genomic
+ * coordinates need — a fixed step (as a plain fraction of the view span)
+ * looks fine for small numbers but overlaps once positions run into the
+ * hundreds of millions. */
+function pickTickStep(pxPerBp: number, minPxGap: number): number {
+  const rawStep = minPxGap / pxPerBp;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const residual = rawStep / magnitude;
+  const niceMultiplier = residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 5 ? 5 : 10;
+  return Math.max(1, niceMultiplier * magnitude);
+}
+
+function estimateLabelWidth(value: number): number {
+  const digits = Math.round(Math.abs(value)).toLocaleString().length;
+  return digits * CHAR_WIDTH;
+}
+
 function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: Record<string, string[]> }) {
-  const genes = [...new Set(items.map((i) => i.gene))].join(' / ');
   const minPos = Math.min(...items.map((i) => i.ampStart));
   const maxPos = Math.max(...items.map((i) => i.ampEnd));
   const span = Math.max(1, maxPos - minPos);
   const pad = Math.max(50, span * 0.15);
-  const start = minPos - pad;
-  const end = maxPos + pad;
-  const viewLen = end - start;
-  const scale = (bp: number) => ((bp - start) / viewLen) * (WIDTH - 2 * MARGIN) + MARGIN;
+  const naturalStart = minPos - pad;
+  const naturalEnd = maxPos + pad;
 
-  const tickStep = Math.pow(10, Math.floor(Math.log10(viewLen)) - 1) || 1;
-  const effectiveStep = tickStep * (viewLen / tickStep > 20 ? 2 : 1) * (viewLen / tickStep > 50 ? 2.5 : 1);
-  const startTick = Math.floor(start / effectiveStep) * effectiveStep;
-  const ticks: number[] = [];
-  for (let t = startTick; t <= end; t += effectiveStep) {
-    if (t >= start) ticks.push(t);
+  const [view, setView] = useState<ViewState>({ start: naturalStart, end: naturalEnd });
+  const [drag, setDrag] = useState<{ startBp: number; currentBp: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  const zoomed = view.start !== naturalStart || view.end !== naturalEnd;
+  const viewLen = view.end - view.start;
+  const scale = (bp: number) => ((bp - view.start) / viewLen) * (WIDTH - 2 * MARGIN) + MARGIN;
+  const bpFromClientX = (clientX: number) => {
+    const rect = svgRef.current!.getBoundingClientRect();
+    const x = ((clientX - rect.left) / rect.width) * WIDTH - MARGIN;
+    return (x / (WIDTH - 2 * MARGIN)) * viewLen + view.start;
+  };
+  const isVisible = (s: number, e: number) => !(e < view.start || s > view.end);
+
+  function resetZoom() {
+    setView({ start: naturalStart, end: naturalEnd });
   }
+
+  function handleMouseDown(e: React.MouseEvent<SVGSVGElement>) {
+    const startBp = Math.max(view.start, Math.min(view.end, bpFromClientX(e.clientX)));
+    setDrag({ startBp, currentBp: startBp });
+
+    const onMove = (ev: MouseEvent) => {
+      const bp = Math.max(view.start, Math.min(view.end, bpFromClientX(ev.clientX)));
+      setDrag((d) => (d ? { ...d, currentBp: bp } : d));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setDrag((d) => {
+        if (d) {
+          const start = Math.min(d.startBp, d.currentBp);
+          const end = Math.max(d.startBp, d.currentBp);
+          if (end - start >= MIN_ZOOM_BP) setView({ start, end });
+        }
+        return null;
+      });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  const visibleItems = items.filter((it) => isVisible(it.ampStart, it.ampEnd));
 
   // Greedy row-packing so rsID labels never overlap: sort by horizontal
   // position, then place each in the lowest row whose last label doesn't
   // collide with it.
-  const bars = items.map((it) => {
-    const x1 = scale(it.ampStart);
-    const x2raw = scale(it.ampEnd);
+  const bars = visibleItems.map((it) => {
+    const x1 = Math.max(MARGIN, scale(it.ampStart));
+    const x2raw = Math.min(WIDTH - MARGIN, scale(it.ampEnd));
     const x2 = Math.max(x2raw, x1 + 2);
     const xMid = (x1 + x2) / 2;
     const halfLabelWidth = (it.rsid.length * CHAR_WIDTH) / 2;
@@ -91,13 +154,29 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
   const rulerY = trackY + TRACK_HEIGHT + RULER_GAP;
   const height = rulerY + 20;
 
+  // Ruler ticks: a "nice" step guaranteed to keep labels from overlapping
+  // regardless of how many digits these genomic coordinates need.
+  const pxPerBp = (WIDTH - 2 * MARGIN) / viewLen;
+  const worstLabelWidth = Math.max(estimateLabelWidth(view.start), estimateLabelWidth(view.end));
+  const tickStep = pickTickStep(pxPerBp, worstLabelWidth + MIN_TICK_LABEL_GAP);
+  const startTick = Math.ceil(view.start / tickStep) * tickStep;
+  const ticks: number[] = [];
+  for (let t = startTick; t <= view.end; t += tickStep) ticks.push(t);
+
   return (
     <div className="mb-4 last:mb-0">
-      <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-        {genes} <span className="font-normal text-slate-400">— {items.length} SNP{items.length > 1 ? 's' : ''} on {items[0].chrom}</span>
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+          {[...new Set(items.map((i) => i.gene))].join(' / ')} <span className="font-normal text-slate-400">— {items.length} SNP{items.length > 1 ? 's' : ''} on {items[0].chrom}</span>
+        </div>
+        {zoomed && (
+          <button onClick={resetZoom} className="text-[10px] bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-600 transition-colors">
+            Reset zoom
+          </button>
+        )}
       </div>
       <div className="overflow-hidden border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800">
-        <svg width="100%" viewBox={`0 0 ${WIDTH} ${height}`} style={{ fontFamily: 'var(--font-sans)' }}>
+        <svg ref={svgRef} width="100%" viewBox={`0 0 ${WIDTH} ${height}`} style={{ fontFamily: 'var(--font-sans)', cursor: 'crosshair' }} onMouseDown={handleMouseDown}>
           <line x1={MARGIN} y1={trackY + TRACK_HEIGHT / 2} x2={WIDTH - MARGIN} y2={trackY + TRACK_HEIGHT / 2} stroke="#cbd5e1" strokeWidth={1} />
 
           {bars.map(({ item: it, x1, x2 }) => {
@@ -108,14 +187,20 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
             const stroke = hasOverlap ? '#b91c1c' : '#15803d';
             const row = rowOf.get(it.rsid) ?? 0;
             const labelY = trackY - 6 - row * ROW_HEIGHT;
+            const markerX = it.position >= view.start && it.position <= view.end ? scale(it.position) : null;
             return (
               <g key={it.rsid}>
                 <rect x={x1} y={trackY} width={w} height={TRACK_HEIGHT} fill={fill} opacity={0.75} stroke={stroke} strokeWidth={1} rx={2}>
                   <title>
-                    {`${it.rsid} (${it.gene})\n${it.chrom}:${it.ampStart.toLocaleString()}-${it.ampEnd.toLocaleString()} (${it.productSize} bp amplicon)`}
+                    {`${it.rsid} (${it.gene})\nVariant: ${it.chrom}:${it.position.toLocaleString()}\nAmplicon: ${it.ampStart.toLocaleString()}-${it.ampEnd.toLocaleString()} (${it.productSize} bp)`}
                     {hasOverlap ? `\nOverlaps: ${overlapsWith.join(', ')}` : '\nNo overlap with another designed amplicon'}
                   </title>
                 </rect>
+                {markerX !== null && (
+                  <line x1={markerX} y1={trackY - 3} x2={markerX} y2={trackY + TRACK_HEIGHT + 3} stroke="#1e293b" strokeWidth={1.5}>
+                    <title>{`${it.rsid} variant @ ${it.chrom}:${it.position.toLocaleString()}`}</title>
+                  </line>
+                )}
                 <text x={(x1 + x2) / 2} y={labelY} fontSize={9} fill="#475569" textAnchor="middle" pointerEvents="none">
                   {it.rsid}
                 </text>
@@ -123,10 +208,28 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
             );
           })}
 
+          {drag &&
+            (() => {
+              const s = Math.min(drag.startBp, drag.currentBp);
+              const e = Math.max(drag.startBp, drag.currentBp);
+              if (e - s <= 0) return null;
+              const x1 = Math.max(MARGIN, scale(s));
+              const x2 = Math.min(WIDTH - MARGIN, scale(e));
+              const w = Math.max(1, x2 - x1);
+              return (
+                <>
+                  <rect x={x1} y={trackY} width={w} height={TRACK_HEIGHT} fill="rgba(74, 222, 128, 0.2)" stroke="#22c55e" strokeWidth={1} pointerEvents="none" />
+                  <text x={x1 + w / 2} y={trackY + TRACK_HEIGHT / 2 + 4} fontSize={10} fill="#15803d" textAnchor="middle" fontWeight="bold" pointerEvents="none">
+                    {Math.round(e - s)} bp
+                  </text>
+                </>
+              );
+            })()}
+
           <line x1={MARGIN} y1={rulerY} x2={WIDTH - MARGIN} y2={rulerY} stroke="#334155" strokeWidth={1} />
           {ticks.map((t, i) => {
             const x = scale(t);
-            if (x > WIDTH - MARGIN) return null;
+            if (x > WIDTH - MARGIN || x < MARGIN) return null;
             return (
               <g key={i}>
                 <line x1={x} y1={rulerY} x2={x} y2={rulerY + 5} stroke="#334155" strokeWidth={1} />
@@ -146,10 +249,11 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
  * SNPs scattered across tens of kb would otherwise all share one track
  * scaled to that whole span, making every amplicon a sub-pixel sliver).
  * Amplicons more than `CLUSTER_GAP_BP` apart always get their own track,
- * scaled to their own span — visually consistent boxes regardless of how
- * spread out the rest of that gene's SNPs are. Amplicons that overlap
- * another designed amplicon render red instead of green; rsID labels are
- * packed into rows so close-together SNPs' names never overlap. */
+ * scaled to their own span. Amplicons that overlap another designed
+ * amplicon render red instead of green; a dark tick marks the exact
+ * variant position inside each amplicon; rsID labels are packed into rows
+ * so close-together SNPs' names never overlap; drag on a track to zoom
+ * into it (down to base resolution), and "Reset zoom" to back out. */
 export default function SnpAmpliconMap({ amplicons, overlaps }: Props) {
   if (!amplicons.length) return null;
   const clusters = clusterAmplicons(amplicons);
@@ -157,9 +261,9 @@ export default function SnpAmpliconMap({ amplicons, overlaps }: Props) {
   return (
     <div>
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-        Each bar is one designed amplicon, scaled per cluster of nearby SNPs (each &gt;{CLUSTER_GAP_BP.toLocaleString()} bp from its neighbors gets its own, separately-scaled track).{' '}
-        <span className="text-green-600 dark:text-green-400 font-medium">Green</span> = no overlap with another designed amplicon; <span className="text-red-600 dark:text-red-400 font-medium">red</span> = overlaps one. Hover a
-        bar for exact coordinates.
+        Each bar is one designed amplicon, scaled per cluster of nearby SNPs (each &gt;{CLUSTER_GAP_BP.toLocaleString()} bp from its neighbors gets its own, separately-scaled track). The dark tick inside a bar marks the exact variant
+        position. <span className="text-green-600 dark:text-green-400 font-medium">Green</span> = no overlap with another designed amplicon; <span className="text-red-600 dark:text-red-400 font-medium">red</span> = overlaps one.
+        Drag across a track to zoom in (down to base resolution); "Reset zoom" backs out.
       </p>
       {clusters.map((items) => (
         <ClusterTrack key={items.map((i) => i.rsid).join(',')} items={items} overlaps={overlaps} />

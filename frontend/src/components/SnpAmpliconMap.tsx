@@ -23,6 +23,12 @@ interface Props {
   amplicons: PlacedAmplicon[];
   /** rsid -> rsIDs of other designed amplicons it genomically overlaps. */
   overlaps: Record<string, string[]>;
+  /** Fired once, on mouseup, after dragging an amplicon's start or end
+   * handle - `genomicPos` is the (integer) genomic coordinate dropped on.
+   * The caller owns recomputing the actual primer/Tm for that edge (see
+   * `SnpBatchPanel.tsx`'s `handleManualEdgeEdit`); this component only
+   * reports the gesture. Omitted entirely disables the drag handles. */
+  onEdgeDrag?: (rsid: string, side: 'start' | 'end', genomicPos: number) => void;
 }
 
 interface ViewState {
@@ -104,7 +110,11 @@ function estimateLabelWidth(value: number): number {
   return digits * CHAR_WIDTH;
 }
 
-function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: Record<string, string[]> }) {
+/** How many SVG units wide each edge's invisible drag hit-area is - wider
+ * than the bar's own 1px stroke so it's actually grabbable with a mouse. */
+const EDGE_HANDLE_WIDTH = 6;
+
+function ClusterTrack({ items, overlaps, onEdgeDrag }: { items: PlacedAmplicon[]; overlaps: Record<string, string[]>; onEdgeDrag?: Props['onEdgeDrag'] }) {
   const minPos = Math.min(...items.map((i) => i.ampStart));
   const maxPos = Math.max(...items.map((i) => i.ampEnd));
   const span = Math.max(1, maxPos - minPos);
@@ -114,6 +124,7 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
 
   const [view, setView] = useState<ViewState>({ start: naturalStart, end: naturalEnd });
   const [drag, setDrag] = useState<{ startBp: number; currentBp: number } | null>(null);
+  const [edgeDrag, setEdgeDrag] = useState<{ rsid: string; side: 'start' | 'end'; currentBp: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
   const zoomed = view.start !== naturalStart || view.end !== naturalEnd;
@@ -165,6 +176,31 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
         }
         return null;
       });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  /** Starts dragging one amplicon's start or end handle - `stopPropagation`
+   * keeps this from also triggering `handleMouseDown`'s drag-to-zoom on the
+   * same mousedown. Reports the final position via `onEdgeDrag` on mouseup;
+   * this component itself has no idea what a valid primer position is
+   * (that's `SnpBatchPanel.tsx`'s `handleManualEdgeEdit`), so nothing here
+   * is clamped beyond the view's own visible range. */
+  function startEdgeDrag(e: React.MouseEvent<SVGRectElement>, rsid: string, side: 'start' | 'end') {
+    e.preventDefault();
+    e.stopPropagation();
+    const startBp = bpFromClientX(e.clientX);
+    setEdgeDrag({ rsid, side, currentBp: startBp });
+
+    const onMove = (ev: MouseEvent) => {
+      setEdgeDrag((d) => (d ? { ...d, currentBp: bpFromClientX(ev.clientX) } : d));
+    };
+    const onUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      onEdgeDrag?.(rsid, side, Math.round(bpFromClientX(ev.clientX)));
+      setEdgeDrag(null);
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -277,6 +313,16 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
                 <text x={labelX} y={labelY} fontSize={9} fill="var(--ink-muted)" textAnchor="middle" pointerEvents="none">
                   {it.rsid}
                 </text>
+                {onEdgeDrag && (
+                  <>
+                    <rect x={x1 - EDGE_HANDLE_WIDTH / 2} y={trackY - 2} width={EDGE_HANDLE_WIDTH} height={TRACK_HEIGHT + 4} fill="transparent" style={{ cursor: 'ew-resize' }} onMouseDown={(e) => startEdgeDrag(e, it.rsid, 'start')}>
+                      <title>{`Drag to move ${it.rsid}'s forward-primer position`}</title>
+                    </rect>
+                    <rect x={x2 - EDGE_HANDLE_WIDTH / 2} y={trackY - 2} width={EDGE_HANDLE_WIDTH} height={TRACK_HEIGHT + 4} fill="transparent" style={{ cursor: 'ew-resize' }} onMouseDown={(e) => startEdgeDrag(e, it.rsid, 'end')}>
+                      <title>{`Drag to move ${it.rsid}'s reverse-primer position`}</title>
+                    </rect>
+                  </>
+                )}
               </g>
             );
           })}
@@ -316,6 +362,21 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
               );
             })()}
 
+          {edgeDrag &&
+            items.some((it) => it.rsid === edgeDrag.rsid) &&
+            (() => {
+              const x = scale(edgeDrag.currentBp);
+              if (x < MARGIN || x > WIDTH - MARGIN) return null;
+              return (
+                <g pointerEvents="none">
+                  <line x1={x} y1={trackY - 8} x2={x} y2={trackY + TRACK_HEIGHT + 8} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="3,2" />
+                  <text x={x} y={trackY - 10} fontSize={9} fill="var(--accent)" textAnchor="middle" fontWeight="bold">
+                    {Math.round(edgeDrag.currentBp).toLocaleString()}
+                  </text>
+                </g>
+              );
+            })()}
+
           <line x1={MARGIN} y1={rulerY} x2={WIDTH - MARGIN} y2={rulerY} stroke="var(--ink-muted)" strokeWidth={1} />
           {ticks.map((t, i) => {
             const x = scale(t);
@@ -347,7 +408,7 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
  * directly to zoom in. Below ~10px/bp a dark tick marks the exact variant
  * position; above it, the amplicon bar fades and the actual reference
  * bases are drawn instead, with the variant's own base highlighted amber. */
-export default function SnpAmpliconMap({ amplicons, overlaps }: Props) {
+export default function SnpAmpliconMap({ amplicons, overlaps, onEdgeDrag }: Props) {
   if (!amplicons.length) return null;
   const clusters = clusterAmplicons(amplicons);
 
@@ -358,9 +419,16 @@ export default function SnpAmpliconMap({ amplicons, overlaps }: Props) {
         <span className="font-medium text-success">Green</span> = no overlap with another designed amplicon; <span className="font-medium text-danger">red</span> = overlaps one. Use a track's
         +/− buttons to zoom in or out, or drag across it to jump straight to a region; "Reset zoom" backs out to the overview. Zoomed in close enough, the actual reference bases are shown, with the variant's own base highlighted{' '}
         <span className="font-medium text-warning">amber</span>.
+        {onEdgeDrag && (
+          <>
+            {' '}
+            Drag a bar's own start or end (cursor turns to <span className="font-mono">↔</span>) to reposition that primer - it's re-analyzed for the new spot and marked{' '}
+            <span className="font-medium text-accent">★ manual</span> in the results table above.
+          </>
+        )}
       </p>
       {clusters.map((items) => (
-        <ClusterTrack key={items.map((i) => i.rsid).join(',')} items={items} overlaps={overlaps} />
+        <ClusterTrack key={items.map((i) => i.rsid).join(',')} items={items} overlaps={overlaps} onEdgeDrag={onEdgeDrag} />
       ))}
     </div>
   );

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
-import { designFlanking, type DesignEngine, type FlankingOligoResult } from '../api/design';
+import { analyzePrimer, designFlanking, type DesignEngine } from '../api/design';
 import { searchGene } from '../api/gene';
 import { getSequence } from '../api/sequence';
 import { ApiError } from '../api/client';
@@ -14,6 +14,7 @@ import Field from './ui/Field';
 import TextInput, { controlClasses } from './ui/TextInput';
 import { fmt } from '../utils/format';
 import { localGenePos, SNP_WORKFLOW_SPECIES } from '../utils/variantMapping';
+import { reverseComplement } from '../utils/dna';
 
 /** Per-rsID result of checking whether it falls inside its gene's
  * *canonical* transcript's exon span - deliberately narrower than
@@ -26,10 +27,25 @@ interface CanonicalCheck {
   transcriptName?: string;
 }
 
+/** What the results table and CSV export actually read off a designed
+ * oligo - deliberately narrower than `FlankingOligoResult` (which every
+ * auto-picked candidate structurally satisfies, so those assign here with
+ * no conversion) so a manually-repositioned primer, which only has a
+ * sequence and a re-analyzed Tm, fits the same field without fabricating
+ * the rest of primer3's per-candidate metadata. */
+interface OligoDisplay {
+  sequence: string;
+  tm: number | null;
+  /** Set when this side's position came from dragging its edge on the
+   * amplicon map (`handleManualEdgeEdit`) rather than from the ranked
+   * candidate list - shown as a star in the table. */
+  manual?: boolean;
+}
+
 interface BatchResult {
   status: 'pending' | 'running' | 'done' | 'error';
-  fwd?: FlankingOligoResult;
-  rev?: FlankingOligoResult;
+  fwd?: OligoDisplay;
+  rev?: OligoDisplay;
   productSize?: number;
   /** Genomic coordinates of the designed amplicon (1-based, inclusive), only set on success. */
   ampStart?: number;
@@ -295,6 +311,64 @@ export default function SnpBatchPanel() {
     setRunning(false);
   }
 
+  /** Recomputes one side of an already-designed pair after its edge is
+   * dragged on the amplicon map (see `SnpAmpliconMap`'s `onEdgeDrag`).
+   * `genomicPos` is the dragged-to genomic coordinate for that edge -
+   * `side: 'start'` moves the forward primer's outer (5') edge, `'end'`
+   * the reverse primer's outer (5') edge - each clamped so the resulting
+   * primer stays the same length and inside the block's own flank, then
+   * re-analyzed for Tm/GC/hairpin via the same `/analyze_primer` route
+   * `SequenceViewer.tsx`'s interactive drag editing already uses. Silently
+   * a no-op if the drag would collapse or invert the amplicon (dragged
+   * past the other primer), or if this block isn't a finished result. */
+  async function handleManualEdgeEdit(rsid: string, side: 'start' | 'end', genomicPos: number) {
+    const b = (blocks || []).find((x) => x.rsid === rsid);
+    const r = results[rsid];
+    if (!b || !r || r.status !== 'done' || !r.fwd || !r.rev || r.ampStart === undefined || r.ampEnd === undefined) return;
+
+    let sequence: string;
+    let newAmpStart = r.ampStart;
+    let newAmpEnd = r.ampEnd;
+
+    if (side === 'start') {
+      const len = r.fwd.sequence.length;
+      const s = Math.max(0, Math.min(genomicPos - b.interval_start, b.upstream_seq.length - len));
+      newAmpStart = b.interval_start + s;
+      if (newAmpStart >= r.ampEnd) return;
+      sequence = b.upstream_seq.substring(s, s + len);
+    } else {
+      const len = r.rev.sequence.length;
+      const e0 = Math.max(len, Math.min(genomicPos - b.position, b.downstream_seq.length));
+      newAmpEnd = b.position + e0;
+      if (newAmpEnd <= r.ampStart) return;
+      sequence = reverseComplement(b.downstream_seq.substring(e0 - len, e0));
+    }
+
+    const productSize = newAmpEnd - newAmpStart + 1;
+    const analysis = await analyzePrimer({ sequence }).catch(() => null);
+    const oligo: OligoDisplay = { sequence, tm: analysis?.tm ?? null, manual: true };
+
+    setResults((prev) => {
+      const prevR = prev[rsid];
+      if (!prevR) return prev; // superseded by a re-import mid-drag
+      return {
+        ...prev,
+        [rsid]: {
+          ...prevR,
+          fwd: side === 'start' ? oligo : prevR.fwd,
+          rev: side === 'end' ? oligo : prevR.rev,
+          ampStart: newAmpStart,
+          ampEnd: newAmpEnd,
+          productSize,
+          // The server's heterodimer check was only ever computed for the
+          // pair this replaces - no longer applicable to the manual pair.
+          pairFound: undefined,
+          pairDg: undefined,
+        },
+      };
+    });
+  }
+
   function exportCsv() {
     if (!blocks) return;
     const header = ['gene', 'rsid', 'chrom', 'position', 'alleles', 'other_targets', 'forward_primer', 'forward_tm', 'reverse_primer', 'reverse_tm', 'product_size', 'amplicon_start', 'amplicon_end', 'amplicon_overlaps', 'primer_notes', 'heterodimer_found', 'heterodimer_dg', 'status'];
@@ -471,8 +545,34 @@ export default function SnpBatchPanel() {
                         <td className="px-2 py-2 font-mono tabular-nums">
                           {b.chrom}:{b.position.toLocaleString()}
                         </td>
-                        <td className="break-all px-2 py-2 font-mono">{r?.fwd ? `${r.fwd.sequence} (${fmt(r.fwd.tm)}°C)` : '-'}</td>
-                        <td className="break-all px-2 py-2 font-mono">{r?.rev ? `${r.rev.sequence} (${fmt(r.rev.tm)}°C)` : '-'}</td>
+                        <td className="break-all px-2 py-2 font-mono">
+                          {r?.fwd ? (
+                            <>
+                              {r.fwd.sequence} ({fmt(r.fwd.tm)}°C)
+                              {r.fwd.manual && (
+                                <span title="Manually repositioned by dragging this amplicon's start on the map - Tm recalculated for this position" className="ml-1 text-accent">
+                                  ★
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            '-'
+                          )}
+                        </td>
+                        <td className="break-all px-2 py-2 font-mono">
+                          {r?.rev ? (
+                            <>
+                              {r.rev.sequence} ({fmt(r.rev.tm)}°C)
+                              {r.rev.manual && (
+                                <span title="Manually repositioned by dragging this amplicon's end on the map - Tm recalculated for this position" className="ml-1 text-accent">
+                                  ★
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            '-'
+                          )}
+                        </td>
                         <td className="px-2 py-2 tabular-nums">{r?.productSize ?? '-'}</td>
                         <td className="px-2 py-2">
                           {r?.status !== 'done' && '-'}
@@ -517,7 +617,7 @@ export default function SnpBatchPanel() {
 
       {placedAmplicons.length > 0 && (
         <Section title="Amplicon map">
-          <SnpAmpliconMap amplicons={placedAmplicons} overlaps={overlaps} />
+          <SnpAmpliconMap amplicons={placedAmplicons} overlaps={overlaps} onEdgeDrag={(rsid, side, pos) => void handleManualEdgeEdit(rsid, side, pos)} />
         </Section>
       )}
 

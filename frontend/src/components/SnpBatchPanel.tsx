@@ -7,6 +7,7 @@ import { ApiError } from '../api/client';
 import EngineSelect from './EngineSelect';
 import SnpAmpliconMap, { type PlacedAmplicon } from './SnpAmpliconMap';
 import SnpGeneMapModal from './SnpGeneMapModal';
+import PrimerStructureModal from './PrimerStructureModal';
 import Section from './ui/Section';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
@@ -213,6 +214,7 @@ export default function SnpBatchPanel() {
   const [results, setResults] = useState<Record<string, BatchResult>>({});
   const [running, setRunning] = useState(false);
   const [openGene, setOpenGene] = useState<string | null>(null);
+  const [openPrimer, setOpenPrimer] = useState<{ label: string; sequence: string } | null>(null);
   const [canonicalChecks, setCanonicalChecks] = useState<Record<string, CanonicalCheck>>({});
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
   // work checks this before each write so a stale check from a superseded
@@ -435,48 +437,52 @@ export default function SnpBatchPanel() {
     setRunning(false);
   }
 
-  /** Recomputes one side of an already-designed pair after its edge is
-   * dragged on the amplicon map (see `SnpAmpliconMap`'s `onEdgeDrag`, which
-   * for a merged group passes the *leftmost* member's rsID for `'start'`
-   * and the *rightmost*'s for `'end'` - the same blocks `runBatch`'s merged
-   * design path itself anchored the shared forward/reverse primer to, so
-   * `b.interval_start`/`b.upstream_seq` (or `b.position`/`b.downstream_seq`)
-   * looked up from `rsid` alone are correct for either group size). `side:
-   * 'start'` moves the forward primer's outer (5') edge, `'end'` the
-   * reverse primer's outer (5') edge - each clamped so the resulting
-   * primer stays the same length and inside that block's own flank, then
-   * re-analyzed for Tm/GC/hairpin via the same `/analyze_primer` route
-   * `SequenceViewer.tsx`'s interactive drag editing already uses. The
-   * update is written to every rsID sharing this result (`mergedWith`),
-   * not just `rsid` itself. Silently a no-op if the drag would collapse or
-   * invert the amplicon (dragged past the other primer), or if this block
-   * isn't a finished result. */
+  /** Pure geometry step shared by `handleManualEdgeEdit` (one side) and
+   * `handleManualMove` (both sides at once, same shift): clamps the
+   * requested genomic edge to a same-length primer that still fits inside
+   * `b`'s own flank, and slices that primer's sequence out (reverse-
+   * complemented for the reverse side, whose flank reads 5'->3' away from
+   * the variant on the plus strand). Returns `null` only when there's no
+   * room at all for a primer this long in that flank - never true for a
+   * flank this app itself designed from, but a drag is free-form input. */
+  function computeSideAt(b: SnpBlock, side: 'start' | 'end', len: number, genomicPos: number): { sequence: string; ampEdge: number } | null {
+    if (side === 'start') {
+      if (len > b.upstream_seq.length) return null;
+      const s = Math.max(0, Math.min(genomicPos - b.interval_start, b.upstream_seq.length - len));
+      return { sequence: b.upstream_seq.substring(s, s + len), ampEdge: b.interval_start + s };
+    }
+    if (len > b.downstream_seq.length) return null;
+    const e0 = Math.max(len, Math.min(genomicPos - b.position, b.downstream_seq.length));
+    return { sequence: reverseComplement(b.downstream_seq.substring(e0 - len, e0)), ampEdge: b.position + e0 };
+  }
+
+  /** Recomputes one side of an already-designed pair after its primer
+   * segment is dragged on the amplicon map (see `SnpAmpliconMap`'s
+   * `onEdgeDrag`, which for a merged group passes the *leftmost* member's
+   * rsID for `'start'` and the *rightmost*'s for `'end'` - the same blocks
+   * `runBatch`'s merged design path itself anchored the shared forward/
+   * reverse primer to, so `computeSideAt` looking `b` up from `rsid` alone
+   * is correct for either group size). Re-analyzed for Tm/GC/hairpin via
+   * the same `/analyze_primer` route `SequenceViewer.tsx`'s interactive
+   * drag editing already uses, then written to every rsID sharing this
+   * result (`mergedWith`), not just `rsid` itself. Silently a no-op if the
+   * drag would collapse or invert the amplicon (dragged past the other
+   * primer), or if this block isn't a finished result. */
   async function handleManualEdgeEdit(rsid: string, side: 'start' | 'end', genomicPos: number) {
     const b = (blocks || []).find((x) => x.rsid === rsid);
     const r = results[rsid];
     if (!b || !r || r.status !== 'done' || !r.fwd || !r.rev || r.ampStart === undefined || r.ampEnd === undefined) return;
 
-    let sequence: string;
-    let newAmpStart = r.ampStart;
-    let newAmpEnd = r.ampEnd;
-
-    if (side === 'start') {
-      const len = r.fwd.sequence.length;
-      const s = Math.max(0, Math.min(genomicPos - b.interval_start, b.upstream_seq.length - len));
-      newAmpStart = b.interval_start + s;
-      if (newAmpStart >= r.ampEnd) return;
-      sequence = b.upstream_seq.substring(s, s + len);
-    } else {
-      const len = r.rev.sequence.length;
-      const e0 = Math.max(len, Math.min(genomicPos - b.position, b.downstream_seq.length));
-      newAmpEnd = b.position + e0;
-      if (newAmpEnd <= r.ampStart) return;
-      sequence = reverseComplement(b.downstream_seq.substring(e0 - len, e0));
-    }
+    const len = side === 'start' ? r.fwd.sequence.length : r.rev.sequence.length;
+    const computed = computeSideAt(b, side, len, genomicPos);
+    if (!computed) return;
+    const newAmpStart = side === 'start' ? computed.ampEdge : r.ampStart;
+    const newAmpEnd = side === 'end' ? computed.ampEdge : r.ampEnd;
+    if (newAmpStart >= newAmpEnd) return;
 
     const productSize = newAmpEnd - newAmpStart + 1;
-    const analysis = await analyzePrimer({ sequence }).catch(() => null);
-    const oligo: OligoDisplay = { sequence, tm: analysis?.tm ?? null, manual: true };
+    const analysis = await analyzePrimer({ sequence: computed.sequence }).catch(() => null);
+    const oligo: OligoDisplay = { sequence: computed.sequence, tm: analysis?.tm ?? null, manual: true };
     const groupRsids = r.mergedWith && r.mergedWith.length > 1 ? r.mergedWith : [rsid];
 
     setResults((prev) => {
@@ -498,6 +504,64 @@ export default function SnpBatchPanel() {
       for (const id of groupRsids) next[id] = updated;
       return next;
     });
+  }
+
+  /** Recomputes BOTH primers after the whole amplicon bar is dragged (see
+   * `SnpAmpliconMap`'s `onAmpliconMove`) - the same per-side clamp/slice/
+   * re-analyze `handleManualEdgeEdit` does for one edge, applied to both
+   * ends with the same shift. `startRsid`/`endRsid` are the group's own
+   * leftmost/rightmost member (identical to each other for an unmerged
+   * SNP) - see `SnpAmpliconMap.tsx`'s note on why the specific member, not
+   * the group's joined display label, must be used. A no-op if either side
+   * has nowhere valid to land, or the shift would invert the amplicon. */
+  async function handleManualMove(startRsid: string, endRsid: string, deltaBp: number) {
+    if (!deltaBp) return;
+    const bStart = (blocks || []).find((x) => x.rsid === startRsid);
+    const bEnd = (blocks || []).find((x) => x.rsid === endRsid);
+    const r = results[startRsid];
+    if (!bStart || !bEnd || !r || r.status !== 'done' || !r.fwd || !r.rev || r.ampStart === undefined || r.ampEnd === undefined) return;
+
+    const fwdComputed = computeSideAt(bStart, 'start', r.fwd.sequence.length, r.ampStart + deltaBp);
+    const revComputed = computeSideAt(bEnd, 'end', r.rev.sequence.length, r.ampEnd + deltaBp);
+    if (!fwdComputed || !revComputed) return;
+    const newAmpStart = fwdComputed.ampEdge;
+    const newAmpEnd = revComputed.ampEdge;
+    if (newAmpStart >= newAmpEnd) return;
+
+    const productSize = newAmpEnd - newAmpStart + 1;
+    const [fwdAnalysis, revAnalysis] = await Promise.all([analyzePrimer({ sequence: fwdComputed.sequence }).catch(() => null), analyzePrimer({ sequence: revComputed.sequence }).catch(() => null)]);
+    const fwdOligo: OligoDisplay = { sequence: fwdComputed.sequence, tm: fwdAnalysis?.tm ?? null, manual: true };
+    const revOligo: OligoDisplay = { sequence: revComputed.sequence, tm: revAnalysis?.tm ?? null, manual: true };
+    const groupRsids = r.mergedWith && r.mergedWith.length > 1 ? r.mergedWith : [startRsid];
+
+    setResults((prev) => {
+      const prevR = prev[startRsid];
+      if (!prevR) return prev; // superseded by a re-import mid-drag
+      const updated: BatchResult = {
+        ...prevR,
+        fwd: fwdOligo,
+        rev: revOligo,
+        ampStart: newAmpStart,
+        ampEnd: newAmpEnd,
+        productSize,
+        pairFound: undefined,
+        pairDg: undefined,
+      };
+      const next = { ...prev };
+      for (const id of groupRsids) next[id] = updated;
+      return next;
+    });
+  }
+
+  /** Opens `PrimerStructureModal` for one primer clicked on the amplicon
+   * map - `side: 'start'` is the forward primer, `'end'` the reverse (same
+   * convention as `onEdgeDrag`/`onAmpliconMove`). */
+  function handlePrimerClick(rsid: string, side: 'start' | 'end') {
+    const b = (blocks || []).find((x) => x.rsid === rsid);
+    const r = results[rsid];
+    const oligo = side === 'start' ? r?.fwd : r?.rev;
+    if (!b || !oligo) return;
+    setOpenPrimer({ label: `${b.rsid} ${side === 'start' ? 'forward' : 'reverse'}`, sequence: oligo.sequence });
   }
 
   function exportCsv() {
@@ -553,7 +617,10 @@ export default function SnpBatchPanel() {
   const placedAmplicons: PlacedAmplicon[] = (() => {
     const done = (blocks || [])
       .map((b) => ({ b, r: results[b.rsid] }))
-      .filter((x): x is { b: SnpBlock; r: BatchResult & { ampStart: number; ampEnd: number; productSize: number } } => x.r?.status === 'done' && x.r.ampStart !== undefined && x.r.ampEnd !== undefined && x.r.productSize !== undefined);
+      .filter(
+        (x): x is { b: SnpBlock; r: BatchResult & { ampStart: number; ampEnd: number; productSize: number; fwd: OligoDisplay; rev: OligoDisplay } } =>
+          x.r?.status === 'done' && x.r.ampStart !== undefined && x.r.ampEnd !== undefined && x.r.productSize !== undefined && x.r.fwd !== undefined && x.r.rev !== undefined,
+      );
 
     const seen = new Set<string>();
     const placed: PlacedAmplicon[] = [];
@@ -576,6 +643,8 @@ export default function SnpBatchPanel() {
         intervalStart: combined ? combined.start : b.interval_start,
         refSeq: combined ? combined.chars : ownRefSeq,
         variants: groupBlocks.map((x) => ({ rsid: x.rsid, position: x.position, alleles: x.alleles })),
+        fwdLen: r.fwd.sequence.length,
+        revLen: r.rev.sequence.length,
       });
     }
     return placed;
@@ -787,11 +856,18 @@ export default function SnpBatchPanel() {
 
       {placedAmplicons.length > 0 && (
         <Section title="Amplicon map">
-          <SnpAmpliconMap amplicons={placedAmplicons} overlaps={overlaps} onEdgeDrag={(rsid, side, pos) => void handleManualEdgeEdit(rsid, side, pos)} />
+          <SnpAmpliconMap
+            amplicons={placedAmplicons}
+            overlaps={overlaps}
+            onEdgeDrag={(rsid, side, pos) => void handleManualEdgeEdit(rsid, side, pos)}
+            onAmpliconMove={(startRsid, endRsid, delta) => void handleManualMove(startRsid, endRsid, delta)}
+            onPrimerClick={handlePrimerClick}
+          />
         </Section>
       )}
 
       <SnpGeneMapModal gene={openGene} blocks={openGeneBlocks} onClose={() => setOpenGene(null)} />
+      <PrimerStructureModal primer={openPrimer} onClose={() => setOpenPrimer(null)} />
     </>
   );
 }

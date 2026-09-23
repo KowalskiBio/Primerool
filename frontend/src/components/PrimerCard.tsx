@@ -45,8 +45,10 @@ function fmtPct(v: number | null): string {
 
 /** One structural-model box: ΔG/Tm/% of (this model's own) ensemble, plus
  * the fold diagram when one was found. `diagram` is `null` when there's
- * nothing to draw (e.g. a no-bulge model with zero pairs). */
-function VariantBox({ label, variant, diagram }: { label: string; variant: StructureVariant; diagram: ReactNode }) {
+ * nothing to draw (e.g. a no-bulge model with zero pairs). Exported for
+ * `PrimerStructureModal.tsx`, which reuses this exact box (and the dual
+ * with-bulge/no-bulge layout below) outside the primer-design cards. */
+export function VariantBox({ label, variant, diagram }: { label: string; variant: StructureVariant; diagram: ReactNode }) {
   return (
     <div className="rounded-md border border-line bg-base p-3">
       <div className="mb-2 flex items-center justify-between">

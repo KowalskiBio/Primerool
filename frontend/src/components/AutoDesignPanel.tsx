@@ -34,6 +34,7 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [engine, setEngine] = useState<DesignEngine>('strider');
+  const [flankWindow, setFlankWindow] = useState('');
   const [flankingResult, setFlankingResult] = useState<{ forward: FlankingOligoResult[]; reverse: FlankingOligoResult[]; pairDg: number | null; pairFound: boolean } | null>(null);
   const [junctionPairs, setJunctionPairs] = useState<JunctionPairResult[] | null>(null);
   const [generalPairs, setGeneralPairs] = useState<InternalDesignPair[] | null>(null);
@@ -63,7 +64,8 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
     setJunctionPairs(null);
     setGeneralPairs(null);
     try {
-      const res = await designFlanking(data.upstream_seq, data.downstream_seq, engine);
+      const window = flankWindow.trim() ? parseInt(flankWindow, 10) : undefined;
+      const res = await designFlanking(data.upstream_seq, data.downstream_seq, engine, window);
       const fwd = res.primers.forward.primers;
       const rev = res.primers.reverse.primers;
       if (!fwd.length || !rev.length) {
@@ -228,6 +230,23 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
               <input type="number" min={1} value={ampliconMax} onChange={(e) => setAmpliconMax(parseInt(e.target.value, 10) || 1)} className="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border" />
             </div>
           </div>
+        </div>
+      )}
+
+      {primerMode === 'flanking' && (
+        <div className="bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-6">
+          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Primer search window (bp from target; blank = full flank):</label>
+          <input
+            type="number"
+            min={1}
+            placeholder="e.g. 130 for 2×150bp sequencing"
+            value={flankWindow}
+            onChange={(e) => setFlankWindow(e.target.value)}
+            className="w-full max-w-xs rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm text-sm px-3 py-2 border"
+          />
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Restricts each primer's search to the last/first N bases of its flank (the bases nearest the target), so the primer-to-target distance never exceeds N. Leave blank to search the whole provided flank.
+          </p>
         </div>
       )}
 

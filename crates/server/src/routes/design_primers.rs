@@ -34,6 +34,10 @@ pub struct DesignPrimersRequest {
     pub junction_max_candidates: i64,
     pub upstream_seq: Option<String>,
     pub downstream_seq: Option<String>,
+    /// Flanking/WGA mode only: caps primer search to the last/first N bases
+    /// of `upstream_seq`/`downstream_seq` (the bases nearest the target),
+    /// instead of the full flank. `None`/absent uses the full flank.
+    pub flank_window: Option<i64>,
     pub engine: String,
 }
 
@@ -54,6 +58,7 @@ impl Default for DesignPrimersRequest {
             junction_max_candidates: 25,
             upstream_seq: None,
             downstream_seq: None,
+            flank_window: None,
             engine: "strider".to_string(),
         }
     }
@@ -234,7 +239,8 @@ fn design_flanking_mode(req: &DesignPrimersRequest, backend: &dyn engine::backen
         return Err(AppError::bad_request("No flanking sequences provided"));
     }
 
-    let result = design_primers_for_flanking_regions(backend, upstream, downstream, None, ThermoParams::default()).map_err(|e| AppError::server_error(format!("Server error: {e}")))?;
+    let flank_window = req.flank_window.map(|w| w as i32);
+    let result = design_primers_for_flanking_regions(backend, upstream, downstream, flank_window, ThermoParams::default()).map_err(|e| AppError::server_error(format!("Server error: {e}")))?;
 
     if result.forward.primers.is_empty() || result.reverse.primers.is_empty() {
         let mut details = Vec::new();

@@ -39,6 +39,9 @@ dist/
 make_pdf.py
 Oligool_and_Primerool_Features.md
 
+# Working data
+SNP_flanking*
+
 # Rust
 /target/
 crates/*/target/

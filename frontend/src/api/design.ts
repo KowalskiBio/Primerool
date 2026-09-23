@@ -178,8 +178,8 @@ export interface FlankingDesignResponse {
   };
 }
 
-export function designFlanking(upstream_seq: string, downstream_seq: string, engine?: DesignEngine): Promise<FlankingDesignResponse> {
-  return postJson<FlankingDesignResponse>('/design_primers', { mode: 'flanking', upstream_seq, downstream_seq, engine });
+export function designFlanking(upstream_seq: string, downstream_seq: string, engine?: DesignEngine, flank_window?: number): Promise<FlankingDesignResponse> {
+  return postJson<FlankingDesignResponse>('/design_primers', { mode: 'flanking', upstream_seq, downstream_seq, engine, flank_window });
 }
 
 // ---------------------------------------------------------------------

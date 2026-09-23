@@ -108,7 +108,20 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
         })
         .filter((m): m is VariantMarker => m !== null)
     : [];
+  const markedRsids = new Set(markers.map((m) => m.rsid));
   const offMapCount = shownData ? blocks.length - markers.length : 0;
+
+  /** Jumps the sequence map to a marker rendered by `SequenceViewer` -
+   * found by the `data-variant-rsid` attribute it sets on that marker's
+   * span (see `SequenceViewer.tsx`), the same way `SequenceViewer`'s own
+   * "Find in sequence" jumps to a match. Queried from the document rather
+   * than a ref into `SequenceViewer` (which exposes no imperative API)
+   * since the marker is a real DOM node under this same modal regardless
+   * of the component tree between here and there. */
+  function scrollToVariant(rsid: string) {
+    const el = document.querySelector(`[data-variant-rsid="${CSS.escape(rsid)}"]`);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
 
   return (
     <Modal open={gene !== null} onClose={onClose} title={gene ? `${gene} - sequence map (${blocks.length} SNP${blocks.length === 1 ? '' : 's'})` : ''}>
@@ -124,7 +137,26 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
             <Checkbox label="Truncate introns (show length only)" checked={truncateIntrons} onChange={(e) => setTruncateIntrons(e.target.checked)} />
             <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
               <span aria-hidden="true" className="inline-block h-2.5 w-4 rounded-sm" style={{ outline: '2px dashed var(--warning)', outlineOffset: 1 }} />
-              marks this batch's SNPs: {blocks.map((b) => b.rsid).join(', ')}
+              <span>marks this batch's SNPs:</span>
+              {blocks.map((b, i) => (
+                <span key={b.rsid}>
+                  {markedRsids.has(b.rsid) ? (
+                    <button
+                      type="button"
+                      onClick={() => scrollToVariant(b.rsid)}
+                      title={`Jump to ${b.rsid}`}
+                      className="font-medium text-warning underline decoration-dotted hover:decoration-solid focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+                    >
+                      {b.rsid}
+                    </button>
+                  ) : (
+                    <span title="Outside this transcript's span - not shown" className="text-ink-faint line-through">
+                      {b.rsid}
+                    </span>
+                  )}
+                  {i < blocks.length - 1 && ', '}
+                </span>
+              ))}
               {offMapCount > 0 && ` (${offMapCount} outside this transcript's span, not shown)`}
             </div>
           </div>

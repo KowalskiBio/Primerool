@@ -361,6 +361,11 @@ interface Cell {
    * `VariantMarker`'s position. */
   isVariant?: boolean;
   variantLabel?: string;
+  /** The bare rsID (unlike `variantLabel`, which may have alleles appended
+   * for the tooltip) - rendered as a `data-variant-rsid` attribute so an
+   * outside "jump to this SNP" control can find and scroll to it without
+   * `SequenceViewer` needing to expose an imperative API. */
+  variantRsid?: string;
 }
 
 interface Row {
@@ -476,6 +481,7 @@ function applyVariantHighlight(cells: Cell[], markers: VariantMarker[]): Cell[] 
         startPos: s,
         isVariant: true,
         variantLabel: m.alleles?.length ? `${m.rsid} (${m.alleles.join('/')})` : m.rsid,
+        variantRsid: m.rsid,
       });
       cur = e;
     }
@@ -614,6 +620,7 @@ function buildRows(cells: Cell[], lineWidth: number): Row[] {
         searchIdx: cell.searchIdx,
         isVariant: cell.isVariant,
         variantLabel: cell.variantLabel,
+        variantRsid: cell.variantRsid,
       });
       firstPiece = false;
       currentLen += take.length;
@@ -947,6 +954,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
                   className={`${p.className}${p.cursorClass ? ` ${p.cursorClass}` : ''}${p.isSearchHit ? ' seq-search-hit' : ''}${p.isActiveSearchHit ? ' seq-search-hit-active' : ''}${p.isVariant ? ' seq-variant-hit' : ''}`}
                   id={p.id}
                   data-search-idx={p.searchIdx}
+                  data-variant-rsid={p.variantRsid}
                   title={p.variantLabel}
                   onMouseDown={p.onMouseDown}
                 >

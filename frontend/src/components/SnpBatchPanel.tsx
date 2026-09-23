@@ -239,6 +239,7 @@ export default function SnpBatchPanel() {
   const [flankWindow, setFlankWindow] = useState('130');
   const [mergeDistance, setMergeDistance] = useState('20');
   const [maxProduct, setMaxProduct] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [engine, setEngine] = useState<DesignEngine>('strider');
   const [results, setResults] = useState<Record<string, BatchResult>>({});
   const [running, setRunning] = useState(false);
@@ -692,6 +693,22 @@ export default function SnpBatchPanel() {
   // on every render (rather than reaching for useMemo) is cheap enough.
   const overlaps = findOverlaps(blocks || [], results);
 
+  // Search box above the table - matches by rsID, gene, or either
+  // designed primer's own sequence (a substring search, case-insensitive),
+  // so "find this SNP" and "find this primer" are the same box.
+  const searchTerm = searchQuery.trim().toLowerCase();
+  const filteredBlocks = !searchTerm
+    ? blocks || []
+    : (blocks || []).filter((b) => {
+        const r = results[b.rsid];
+        return (
+          b.rsid.toLowerCase().includes(searchTerm) ||
+          b.gene.toLowerCase().includes(searchTerm) ||
+          (r?.fwd?.sequence.toLowerCase().includes(searchTerm) ?? false) ||
+          (r?.rev?.sequence.toLowerCase().includes(searchTerm) ?? false)
+        );
+      });
+
   // One `PlacedAmplicon` per *design*, not per block - a merged group's
   // members all point at the exact same `BatchResult` object (see
   // `runBatch`), so the first one seen claims the group and the rest are
@@ -818,6 +835,23 @@ export default function SnpBatchPanel() {
               )}
             </div>
 
+            <div className="mb-3 flex items-center gap-3">
+              <Field label="Search rsID, gene, or primer sequence">
+                <TextInput
+                  type="text"
+                  placeholder="e.g. rs123 or a primer sequence…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-80 font-mono"
+                />
+              </Field>
+              {searchTerm && (
+                <span className="text-xs text-ink-faint">
+                  {filteredBlocks.length} of {blocks.length} shown
+                </span>
+              )}
+            </div>
+
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full text-left text-xs text-ink-muted">
                 <thead className="uppercase text-ink-muted bg-surface-2">
@@ -834,13 +868,20 @@ export default function SnpBatchPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {blocks.map((b) => {
+                  {filteredBlocks.map((b) => {
                     const r = results[b.rsid];
+                    // Once this SNP has a finished design, a row opens the
+                    // full amplicon detail (gene-context sequence map with
+                    // both primers highlighted, plus their secondary
+                    // structures below) instead of the plain gene overview
+                    // - there's nothing primer-specific to show before
+                    // that, so it falls back to the overview until then.
+                    const hasDesign = r?.status === 'done';
                     return (
                       <tr
                         key={b.rsid}
-                        onClick={() => setOpenGene(b.gene)}
-                        title={`Open ${b.gene}'s sequence map`}
+                        onClick={() => (hasDesign ? setOpenAmpliconKey(b.rsid) : setOpenGene(b.gene))}
+                        title={hasDesign ? `Open ${b.rsid}'s amplicon detail (sequence map, primers & structures)` : `Open ${b.gene}'s sequence map`}
                         className="cursor-pointer border-b border-line bg-surface last:border-0 hover:bg-surface-2"
                       >
                         <td className="px-2 py-2">{b.gene}</td>
@@ -941,6 +982,13 @@ export default function SnpBatchPanel() {
                       </tr>
                     );
                   })}
+                  {filteredBlocks.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="px-2 py-4 text-center text-ink-faint">
+                        No SNPs or primers match "{searchQuery}"
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

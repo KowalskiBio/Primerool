@@ -1,22 +1,28 @@
 import { useRef, useState } from 'react';
 
 export interface PlacedAmplicon {
+  /** Display label - one rsID for an ordinary amplicon, `+`-joined for one
+   * produced by merging nearby SNPs into a single shared primer pair (see
+   * `SnpBatchPanel.tsx`'s merge-distance setting). */
   rsid: string;
   gene: string;
   chrom: string;
-  position: number;
   ampStart: number;
   ampEnd: number;
   productSize: number;
-  /** Reference allele first, matching the source report's convention. */
-  alleles: string[];
   /** Genomic position of `refSeq[0]` - lets any base within the amplicon
    * be looked up by its genomic coordinate (`refSeq[pos - intervalStart]`). */
   intervalStart: number;
   /** The full reference window (upstream flank + reference allele +
-   * downstream flank) - always a superset of `[ampStart, ampEnd]`, since
-   * the amplicon is designed from within that same flank. */
+   * downstream flank, or - for a merged group - all member blocks'
+   * windows spliced together, see `combineBlockWindows`) - always a
+   * superset of `[ampStart, ampEnd]`, since the amplicon is designed from
+   * within that same window. */
   refSeq: string;
+  /** One entry per SNP this amplicon actually covers - a single-element
+   * array for an ordinary amplicon, more for a merged one. Each gets its
+   * own tick mark (or, at base resolution, its own highlighted base). */
+  variants: { rsid: string; position: number; alleles: string[] }[];
 }
 
 interface Props {
@@ -219,10 +225,14 @@ function ClusterTrack({ items, overlaps, onEdgeDrag }: { items: PlacedAmplicon[]
     const x1 = Math.max(MARGIN, scale(it.ampStart));
     const x2raw = Math.min(WIDTH - MARGIN, scale(it.ampEnd));
     const x2 = Math.max(x2raw, x1 + 2);
-    const markerX = it.position >= view.start && it.position <= view.end ? Math.max(MARGIN, Math.min(WIDTH - MARGIN, scale(it.position))) : null;
-    const labelX = markerX ?? (x1 + x2) / 2;
+    // One marker per variant this amplicon covers (more than one for a
+    // merged group) - only those currently in view get a screen position.
+    const markers = it.variants
+      .filter((v) => v.position >= view.start && v.position <= view.end)
+      .map((v) => ({ variant: v, x: Math.max(MARGIN, Math.min(WIDTH - MARGIN, scale(v.position))) }));
+    const labelX = markers.length > 0 ? markers[0].x : (x1 + x2) / 2;
     const halfLabelWidth = (it.rsid.length * CHAR_WIDTH) / 2;
-    return { item: it, x1, x2, markerX, labelX, halfLabelWidth };
+    return { item: it, x1, x2, markers, labelX, halfLabelWidth };
   });
   const sortedByLabelX = [...bars].sort((a, b) => a.labelX - b.labelX);
   const rowEnds: number[] = [];
@@ -260,11 +270,12 @@ function ClusterTrack({ items, overlaps, onEdgeDrag }: { items: PlacedAmplicon[]
   const ticks: number[] = [];
   for (let t = startTick; t <= view.end; t += tickStep) ticks.push(t);
 
+  const snpCount = items.reduce((n, it) => n + it.variants.length, 0);
   return (
     <div className="mb-4 last:mb-0">
       <div className="flex items-center justify-between mb-1">
         <div className="text-xs font-semibold text-ink">
-          {[...new Set(items.map((i) => i.gene))].join(' / ')} <span className="font-normal text-ink-faint">({items.length} SNP{items.length > 1 ? 's' : ''} on {items[0].chrom})</span>
+          {[...new Set(items.map((i) => i.gene))].join(' / ')} <span className="font-normal text-ink-faint">({snpCount} SNP{snpCount > 1 ? 's' : ''} on {items[0].chrom}{items.length !== snpCount ? `, ${items.length} amplicon${items.length > 1 ? 's' : ''}` : ''})</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] tabular-nums text-ink-faint">showing {Math.round(viewLen).toLocaleString()} bp</span>
@@ -285,7 +296,7 @@ function ClusterTrack({ items, overlaps, onEdgeDrag }: { items: PlacedAmplicon[]
         <svg ref={svgRef} width="100%" viewBox={`0 0 ${WIDTH} ${height}`} style={{ fontFamily: 'var(--font-sans)', cursor: 'crosshair' }} onMouseDown={handleMouseDown}>
           <line x1={MARGIN} y1={trackY + TRACK_HEIGHT / 2} x2={WIDTH - MARGIN} y2={trackY + TRACK_HEIGHT / 2} stroke="var(--line-strong)" strokeWidth={1} />
 
-          {bars.map(({ item: it, x1, x2, markerX, labelX }) => {
+          {bars.map(({ item: it, x1, x2, markers, labelX }) => {
             const w = Math.max(2, x2 - x1);
             const overlapsWith = overlaps[it.rsid] || [];
             const hasOverlap = overlapsWith.length > 0;
@@ -297,28 +308,52 @@ function ClusterTrack({ items, overlaps, onEdgeDrag }: { items: PlacedAmplicon[]
               <g key={it.rsid}>
                 <rect x={x1} y={trackY} width={w} height={TRACK_HEIGHT} fill={fill} opacity={showBases ? 0.25 : 0.75} stroke={stroke} strokeWidth={1} rx={2}>
                   <title>
-                    {`${it.rsid} (${it.gene})\nVariant: ${it.chrom}:${it.position.toLocaleString()} (${it.alleles.join('/')})\nAmplicon: ${it.ampStart.toLocaleString()}-${it.ampEnd.toLocaleString()} (${it.productSize} bp)`}
+                    {`${it.rsid} (${it.gene})\n${it.variants.map((v) => `${v.rsid} @ ${it.chrom}:${v.position.toLocaleString()} (${v.alleles.join('/')})`).join('\n')}\nAmplicon: ${it.ampStart.toLocaleString()}-${it.ampEnd.toLocaleString()} (${it.productSize} bp)`}
                     {hasOverlap ? `\nOverlaps: ${overlapsWith.join(', ')}` : '\nNo overlap with another designed amplicon'}
                   </title>
                 </rect>
-                {!showBases && markerX !== null && (
-                  <line x1={markerX} y1={trackY - 3} x2={markerX} y2={trackY + TRACK_HEIGHT + 3} stroke="var(--ink)" strokeWidth={1.5}>
-                    <title>{`${it.rsid} variant @ ${it.chrom}:${it.position.toLocaleString()}`}</title>
-                  </line>
-                )}
+                {!showBases &&
+                  markers.map(({ variant, x }) => (
+                    <line key={variant.rsid} x1={x} y1={trackY - 3} x2={x} y2={trackY + TRACK_HEIGHT + 3} stroke="var(--ink)" strokeWidth={1.5}>
+                      <title>{`${variant.rsid} variant @ ${it.chrom}:${variant.position.toLocaleString()}`}</title>
+                    </line>
+                  ))}
                 {/* A stacked (row > 0) label sits further above the track, so
                  * without a leader line it's ambiguous which marker it names
-                 * once two ticks are close enough to need separate rows. */}
-                {row > 0 && markerX !== null && <line x1={labelX} y1={labelY + 2} x2={markerX} y2={trackY - 3} stroke="var(--ink-faint)" strokeWidth={1} strokeDasharray="2,2" pointerEvents="none" />}
+                 * once two ticks are close enough to need separate rows - it
+                 * points at the first (leftmost) visible variant. */}
+                {row > 0 && markers.length > 0 && <line x1={labelX} y1={labelY + 2} x2={markers[0].x} y2={trackY - 3} stroke="var(--ink-faint)" strokeWidth={1} strokeDasharray="2,2" pointerEvents="none" />}
                 <text x={labelX} y={labelY} fontSize={9} fill="var(--ink-muted)" textAnchor="middle" pointerEvents="none">
                   {it.rsid}
                 </text>
                 {onEdgeDrag && (
                   <>
-                    <rect x={x1 - EDGE_HANDLE_WIDTH / 2} y={trackY - 2} width={EDGE_HANDLE_WIDTH} height={TRACK_HEIGHT + 4} fill="transparent" style={{ cursor: 'ew-resize' }} onMouseDown={(e) => startEdgeDrag(e, it.rsid, 'start')}>
+                    {/* For a merged amplicon, the shared forward primer was
+                     * anchored to the *leftmost* member and the shared
+                     * reverse primer to the *rightmost* (see `runBatch`'s
+                     * merged design path) - `handleManualEdgeEdit` looks
+                     * the block back up by rsID, so each handle must pass
+                     * that specific one, not `it.rsid`'s joined label. */}
+                    <rect
+                      x={x1 - EDGE_HANDLE_WIDTH / 2}
+                      y={trackY - 2}
+                      width={EDGE_HANDLE_WIDTH}
+                      height={TRACK_HEIGHT + 4}
+                      fill="transparent"
+                      style={{ cursor: 'ew-resize' }}
+                      onMouseDown={(e) => startEdgeDrag(e, it.variants[0].rsid, 'start')}
+                    >
                       <title>{`Drag to move ${it.rsid}'s forward-primer position`}</title>
                     </rect>
-                    <rect x={x2 - EDGE_HANDLE_WIDTH / 2} y={trackY - 2} width={EDGE_HANDLE_WIDTH} height={TRACK_HEIGHT + 4} fill="transparent" style={{ cursor: 'ew-resize' }} onMouseDown={(e) => startEdgeDrag(e, it.rsid, 'end')}>
+                    <rect
+                      x={x2 - EDGE_HANDLE_WIDTH / 2}
+                      y={trackY - 2}
+                      width={EDGE_HANDLE_WIDTH}
+                      height={TRACK_HEIGHT + 4}
+                      fill="transparent"
+                      style={{ cursor: 'ew-resize' }}
+                      onMouseDown={(e) => startEdgeDrag(e, it.variants[it.variants.length - 1].rsid, 'end')}
+                    >
                       <title>{`Drag to move ${it.rsid}'s reverse-primer position`}</title>
                     </rect>
                   </>
@@ -332,14 +367,15 @@ function ClusterTrack({ items, overlaps, onEdgeDrag }: { items: PlacedAmplicon[]
               const cellX1 = scale(pos);
               const cellX2 = scale(pos + 1);
               const cx = (cellX1 + cellX2) / 2;
-              const isVariant = visibleItems.some((it) => it.position === pos);
+              const hitVariant = owner.variants.find((v) => v.position === pos);
+              const isVariant = hitVariant !== undefined;
               return (
                 <g key={pos}>
                   {isVariant && <rect x={cellX1} y={trackY} width={Math.max(1, cellX2 - cellX1)} height={TRACK_HEIGHT} fill="var(--warning)" opacity={0.55} />}
                   <text x={cx} y={trackY + TRACK_HEIGHT / 2 + 4} fontSize={11} fontFamily="var(--font-mono, monospace)" fontWeight={isVariant ? 'bold' : 'normal'} fill={isVariant ? 'var(--warning)' : 'var(--ink)'} textAnchor="middle" pointerEvents="none">
                     {base}
                   </text>
-                  {isVariant && <title>{`${owner.rsid} @ ${owner.chrom}:${pos.toLocaleString()}\nAlleles: ${owner.alleles.join('/')} (reference base shown here: ${base})`}</title>}
+                  {hitVariant && <title>{`${hitVariant.rsid} @ ${owner.chrom}:${pos.toLocaleString()}\nAlleles: ${hitVariant.alleles.join('/')} (reference base shown here: ${base})`}</title>}
                 </g>
               );
             })}
@@ -363,7 +399,7 @@ function ClusterTrack({ items, overlaps, onEdgeDrag }: { items: PlacedAmplicon[]
             })()}
 
           {edgeDrag &&
-            items.some((it) => it.rsid === edgeDrag.rsid) &&
+            items.some((it) => it.variants.some((v) => v.rsid === edgeDrag.rsid)) &&
             (() => {
               const x = scale(edgeDrag.currentBp);
               if (x < MARGIN || x > WIDTH - MARGIN) return null;

@@ -56,6 +56,85 @@ interface BatchResult {
   /** Notes on avoiding a neighboring listed SNP's exact position when
    * picking among the returned primer candidates (see `pickAvoidingCandidate`). */
   notes?: { tone: 'accent' | 'danger'; text: string }[];
+  /** Every rsID (including this one) that shares this exact primer pair,
+   * because they were close enough to merge into one design (see
+   * `buildMergeGroups`) - `undefined`/single-element for an ordinary,
+   * unmerged result. The same `BatchResult` object is stored under each
+   * member rsID, so this is also how the table/map tell a merged group's
+   * rows apart from an incidental identical result. */
+  mergedWith?: string[];
+}
+
+/** Splices multiple SNP blocks' own 401bp flanking windows into one
+ * indexed reference sequence, keyed to real genomic coordinates via each
+ * block's `interval_start` - what a merged group's design call needs for
+ * one combined forward/reverse flank, and what its placed amplicon needs
+ * for a `refSeq` wide enough to draw from (see `SnpAmpliconMap.tsx`).
+ * Returns `null` if the group's own windows don't fully cover the
+ * combined span - shouldn't happen for blocks the merge threshold judged
+ * close enough to pair up (each window reaches 200bp either side), but
+ * checked rather than assumed. */
+function combineBlockWindows(group: SnpBlock[]): { start: number; chars: string } | null {
+  let start = Infinity;
+  let end = -Infinity;
+  for (const b of group) {
+    const refSeq = b.upstream_seq + (b.alleles[0] || 'N') + b.downstream_seq;
+    start = Math.min(start, b.interval_start);
+    end = Math.max(end, b.interval_start + refSeq.length - 1);
+  }
+  const chars = new Array<string | undefined>(end - start + 1);
+  for (const b of group) {
+    const refSeq = b.upstream_seq + (b.alleles[0] || 'N') + b.downstream_seq;
+    for (let i = 0; i < refSeq.length; i++) {
+      const idx = b.interval_start + i - start;
+      if (chars[idx] === undefined) chars[idx] = refSeq[i];
+    }
+  }
+  if (chars.some((c) => c === undefined)) return null;
+  return { start, chars: chars.join('') };
+}
+
+/** Chains adjacent same-gene, same-chromosome SNPs into one group whenever
+ * consecutive positions are within `maxGapBp` of each other - transitively,
+ * so three SNPs each under `maxGapBp` from the next all merge into one
+ * group even if the first and last are further apart than that on their
+ * own. `maxGapBp <= 0` disables merging entirely (every block its own
+ * group of one). Designing one shared primer pair for a merged group
+ * (rather than one pair per SNP that happens to sit inside another's
+ * amplicon anyway) avoids ordering redundant, overlapping primer sets for
+ * variants close enough to already share a single PCR product. */
+function buildMergeGroups(blocks: SnpBlock[], maxGapBp: number): SnpBlock[][] {
+  if (!maxGapBp || maxGapBp <= 0) return blocks.map((b) => [b]);
+
+  const byGeneChrom = new Map<string, SnpBlock[]>();
+  for (const b of blocks) {
+    const key = `${b.gene}\u0000${b.chrom}`;
+    const list = byGeneChrom.get(key);
+    if (list) list.push(b);
+    else byGeneChrom.set(key, [b]);
+  }
+
+  const groups: SnpBlock[][] = [];
+  for (const list of byGeneChrom.values()) {
+    const sorted = [...list].sort((a, b) => a.position - b.position);
+    let current: SnpBlock[] = [];
+    for (const b of sorted) {
+      if (current.length > 0 && b.position - current[current.length - 1].position <= maxGapBp) {
+        current.push(b);
+      } else {
+        if (current.length > 0) groups.push(current);
+        current = [b];
+      }
+    }
+    if (current.length > 0) groups.push(current);
+  }
+
+  // Cosmetic only (doesn't affect correctness): keeps the table's
+  // top-to-bottom "running…" progress roughly matching row order instead
+  // of jumping around by gene/chromosome grouping order.
+  const orderOf = new Map(blocks.map((b, i) => [b.rsid, i]));
+  groups.sort((a, b) => (orderOf.get(a[0].rsid) ?? 0) - (orderOf.get(b[0].rsid) ?? 0));
+  return groups;
 }
 
 /** From the returned candidates for one side (forward/reverse), picks the
@@ -80,7 +159,9 @@ function pickAvoidingCandidate<T>(candidates: T[], toGenomicSpan: (c: T) => [num
 /** Every pair of same-chromosome amplicons whose [ampStart, ampEnd] spans
  * intersect - the actual PCR products, not the raw 200bp report windows
  * (those already get their own "shares this window with" flag from
- * `other_targets`). */
+ * `other_targets`). Two rsIDs merged into the same design (`mergedWith`)
+ * are excluded from each other's flags - they share the exact same
+ * amplicon on purpose, that's not a clash to warn about. */
 function findOverlaps(blocks: SnpBlock[], results: Record<string, BatchResult>): Record<string, string[]> {
   const placed = blocks
     .map((b) => ({ rsid: b.rsid, chrom: b.chrom, r: results[b.rsid] }))
@@ -92,6 +173,7 @@ function findOverlaps(blocks: SnpBlock[], results: Record<string, BatchResult>):
       const a = placed[i];
       const b = placed[j];
       if (a.chrom !== b.chrom) continue;
+      if (a.r.mergedWith?.includes(b.rsid)) continue;
       if (a.r.ampStart <= b.r.ampEnd && b.r.ampStart <= a.r.ampEnd) {
         (overlaps[a.rsid] ??= []).push(b.rsid);
         (overlaps[b.rsid] ??= []).push(a.rsid);
@@ -126,6 +208,7 @@ export default function SnpBatchPanel() {
   const [pastedText, setPastedText] = useState('');
 
   const [flankWindow, setFlankWindow] = useState('130');
+  const [mergeDistance, setMergeDistance] = useState('20');
   const [engine, setEngine] = useState<DesignEngine>('strider');
   const [results, setResults] = useState<Record<string, BatchResult>>({});
   const [running, setRunning] = useState(false);
@@ -237,31 +320,67 @@ export default function SnpBatchPanel() {
     if (!blocks || !blocks.length) return;
     setRunning(true);
     const window = flankWindow.trim() ? parseInt(flankWindow, 10) : undefined;
+    const maxGap = mergeDistance.trim() ? parseInt(mergeDistance, 10) : 0;
+    const groups = buildMergeGroups(blocks, maxGap);
+
     const next: Record<string, BatchResult> = {};
     for (const b of blocks) next[b.rsid] = { status: 'pending' };
     setResults(next);
 
     const positionByRsid = new Map(blocks.map((b) => [b.rsid, b.position]));
 
-    for (const b of blocks) {
-      setResults((prev) => ({ ...prev, [b.rsid]: { status: 'running' } }));
+    for (const group of groups) {
+      for (const b of group) setResults((prev) => ({ ...prev, [b.rsid]: { status: 'running' } }));
       try {
-        const res = await designFlanking(b.upstream_seq, b.downstream_seq, engine, window);
+        // A group of one behaves exactly as before (this branch's
+        // `combinedStart`/`lastPos`/flanks reduce to that single block's
+        // own `interval_start`/`position`/`upstream_seq`/`downstream_seq`);
+        // a merged group instead flanks the whole span from its leftmost
+        // to its rightmost SNP with one shared forward/reverse pair.
+        let combinedStart: number;
+        let lastPos: number;
+        let upstream: string;
+        let downstream: string;
+        if (group.length === 1) {
+          const b = group[0];
+          combinedStart = b.interval_start;
+          lastPos = b.position;
+          upstream = b.upstream_seq;
+          downstream = b.downstream_seq;
+        } else {
+          const combined = combineBlockWindows(group);
+          if (!combined) throw new Error("Merged SNPs' windows don't fully cover the combined region");
+          const first = group[0];
+          const last = group[group.length - 1];
+          combinedStart = combined.start;
+          lastPos = last.position;
+          upstream = combined.chars.substring(0, first.position - combined.start);
+          downstream = combined.chars.substring(last.position + 1 - combined.start);
+        }
+
+        const res = await designFlanking(upstream, downstream, engine, window);
         const fwdCandidates = res.primers.forward.primers;
         const revCandidates = res.primers.reverse.primers;
         if (!fwdCandidates.length || !revCandidates.length) {
-          setResults((prev) => ({ ...prev, [b.rsid]: { status: 'error', error: 'No primers found in window' } }));
+          for (const b of group) setResults((prev) => ({ ...prev, [b.rsid]: { status: 'error', error: 'No primers found in window' } }));
           continue;
         }
 
         // Prefer a candidate whose binding site clears every other listed
-        // SNP known to share this block's window — a primer sitting on an
-        // unrelated polymorphism can silently fail to anneal on the allele
-        // it doesn't match (allele dropout), which matters more than the
+        // SNP known to share this window (any member's `other_targets`,
+        // excluding this group's own rsIDs - those are inside the
+        // amplicon on purpose) — a primer sitting on an unrelated
+        // polymorphism can silently fail to anneal on the allele it
+        // doesn't match (allele dropout), which matters more than the
         // amplicons merely overlapping.
-        const avoid = b.other_targets.map((rsid) => ({ rsid, pos: positionByRsid.get(rsid) })).filter((x): x is { rsid: string; pos: number } => x.pos !== undefined);
-        const fwdPick = pickAvoidingCandidate(fwdCandidates, (c) => [b.interval_start + c.interval[0], b.interval_start + c.interval[1] - 1], avoid)!;
-        const revPick = pickAvoidingCandidate(revCandidates, (c) => [b.position + 1 + c.interval[0], b.position + c.interval[1]], avoid)!;
+        const groupRsids = new Set(group.map((b) => b.rsid));
+        const avoid = group
+          .flatMap((b) => b.other_targets)
+          .filter((rsid) => !groupRsids.has(rsid))
+          .map((rsid) => ({ rsid, pos: positionByRsid.get(rsid) }))
+          .filter((x): x is { rsid: string; pos: number } => x.pos !== undefined);
+        const fwdPick = pickAvoidingCandidate(fwdCandidates, (c) => [combinedStart + c.interval[0], combinedStart + c.interval[1] - 1], avoid)!;
+        const revPick = pickAvoidingCandidate(revCandidates, (c) => [lastPos + 1 + c.interval[0], lastPos + c.interval[1]], avoid)!;
         const fwd = fwdPick.chosen;
         const rev = revPick.chosen;
 
@@ -277,50 +396,61 @@ export default function SnpBatchPanel() {
           notes.push({ tone: 'accent', text: `Reverse: used alt candidate #${revPick.index + 1} to avoid ${revPick.hits0.map((h) => h.rsid).join(', ')}` });
         }
 
-        const productSize = b.upstream_seq.length - fwd.interval[0] + 1 + rev.interval[1];
         // Genomic coordinates of the amplicon: the forward primer's 5' end
-        // sits `upstream_seq.length - fwd.interval[0]` bases before the
-        // variant; the reverse primer's 5' end sits `rev.interval[1]`
-        // bases after it.
-        const ampStart = b.position - (b.upstream_seq.length - fwd.interval[0]);
-        const ampEnd = b.position + rev.interval[1];
+        // sits at `combinedStart + fwd.interval[0]`; the reverse primer's
+        // 5' end sits `rev.interval[1]` bases after the group's rightmost
+        // variant (for a group of one, `combinedStart`/`lastPos` are just
+        // that block's own `interval_start`/`position`, matching the
+        // original single-SNP formula exactly).
+        const ampStart = combinedStart + fwd.interval[0];
+        const ampEnd = lastPos + rev.interval[1];
+        const productSize = ampEnd - ampStart + 1;
         // The server's heterodimer check is only ever computed for the
         // top-ranked forward/reverse pair — if either side switched
         // candidates to avoid a neighbor, that check no longer applies to
         // the pair actually used, so don't report it as if it did.
         const usedDefaultPair = fwdPick.index === 0 && revPick.index === 0;
-        setResults((prev) => ({
-          ...prev,
-          [b.rsid]: {
-            status: 'done',
-            fwd,
-            rev,
-            productSize,
-            ampStart,
-            ampEnd,
-            pairFound: usedDefaultPair ? (res.primers.pair_metrics?.heterodimer.structure_found ?? false) : undefined,
-            pairDg: usedDefaultPair ? (res.primers.pair_metrics?.heterodimer.dg ?? null) : undefined,
-            notes,
-          },
-        }));
+        const result: BatchResult = {
+          status: 'done',
+          fwd,
+          rev,
+          productSize,
+          ampStart,
+          ampEnd,
+          pairFound: usedDefaultPair ? (res.primers.pair_metrics?.heterodimer.structure_found ?? false) : undefined,
+          pairDg: usedDefaultPair ? (res.primers.pair_metrics?.heterodimer.dg ?? null) : undefined,
+          notes,
+          mergedWith: group.length > 1 ? group.map((b) => b.rsid) : undefined,
+        };
+        setResults((prev) => {
+          const nextResults = { ...prev };
+          for (const b of group) nextResults[b.rsid] = result;
+          return nextResults;
+        });
       } catch (err) {
         const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
-        setResults((prev) => ({ ...prev, [b.rsid]: { status: 'error', error: message } }));
+        for (const b of group) setResults((prev) => ({ ...prev, [b.rsid]: { status: 'error', error: message } }));
       }
     }
     setRunning(false);
   }
 
   /** Recomputes one side of an already-designed pair after its edge is
-   * dragged on the amplicon map (see `SnpAmpliconMap`'s `onEdgeDrag`).
-   * `genomicPos` is the dragged-to genomic coordinate for that edge -
-   * `side: 'start'` moves the forward primer's outer (5') edge, `'end'`
-   * the reverse primer's outer (5') edge - each clamped so the resulting
-   * primer stays the same length and inside the block's own flank, then
+   * dragged on the amplicon map (see `SnpAmpliconMap`'s `onEdgeDrag`, which
+   * for a merged group passes the *leftmost* member's rsID for `'start'`
+   * and the *rightmost*'s for `'end'` - the same blocks `runBatch`'s merged
+   * design path itself anchored the shared forward/reverse primer to, so
+   * `b.interval_start`/`b.upstream_seq` (or `b.position`/`b.downstream_seq`)
+   * looked up from `rsid` alone are correct for either group size). `side:
+   * 'start'` moves the forward primer's outer (5') edge, `'end'` the
+   * reverse primer's outer (5') edge - each clamped so the resulting
+   * primer stays the same length and inside that block's own flank, then
    * re-analyzed for Tm/GC/hairpin via the same `/analyze_primer` route
-   * `SequenceViewer.tsx`'s interactive drag editing already uses. Silently
-   * a no-op if the drag would collapse or invert the amplicon (dragged
-   * past the other primer), or if this block isn't a finished result. */
+   * `SequenceViewer.tsx`'s interactive drag editing already uses. The
+   * update is written to every rsID sharing this result (`mergedWith`),
+   * not just `rsid` itself. Silently a no-op if the drag would collapse or
+   * invert the amplicon (dragged past the other primer), or if this block
+   * isn't a finished result. */
   async function handleManualEdgeEdit(rsid: string, side: 'start' | 'end', genomicPos: number) {
     const b = (blocks || []).find((x) => x.rsid === rsid);
     const r = results[rsid];
@@ -347,31 +477,32 @@ export default function SnpBatchPanel() {
     const productSize = newAmpEnd - newAmpStart + 1;
     const analysis = await analyzePrimer({ sequence }).catch(() => null);
     const oligo: OligoDisplay = { sequence, tm: analysis?.tm ?? null, manual: true };
+    const groupRsids = r.mergedWith && r.mergedWith.length > 1 ? r.mergedWith : [rsid];
 
     setResults((prev) => {
       const prevR = prev[rsid];
       if (!prevR) return prev; // superseded by a re-import mid-drag
-      return {
-        ...prev,
-        [rsid]: {
-          ...prevR,
-          fwd: side === 'start' ? oligo : prevR.fwd,
-          rev: side === 'end' ? oligo : prevR.rev,
-          ampStart: newAmpStart,
-          ampEnd: newAmpEnd,
-          productSize,
-          // The server's heterodimer check was only ever computed for the
-          // pair this replaces - no longer applicable to the manual pair.
-          pairFound: undefined,
-          pairDg: undefined,
-        },
+      const updated: BatchResult = {
+        ...prevR,
+        fwd: side === 'start' ? oligo : prevR.fwd,
+        rev: side === 'end' ? oligo : prevR.rev,
+        ampStart: newAmpStart,
+        ampEnd: newAmpEnd,
+        productSize,
+        // The server's heterodimer check was only ever computed for the
+        // pair this replaces - no longer applicable to the manual pair.
+        pairFound: undefined,
+        pairDg: undefined,
       };
+      const next = { ...prev };
+      for (const id of groupRsids) next[id] = updated;
+      return next;
     });
   }
 
   function exportCsv() {
     if (!blocks) return;
-    const header = ['gene', 'rsid', 'chrom', 'position', 'alleles', 'other_targets', 'forward_primer', 'forward_tm', 'reverse_primer', 'reverse_tm', 'product_size', 'amplicon_start', 'amplicon_end', 'amplicon_overlaps', 'primer_notes', 'heterodimer_found', 'heterodimer_dg', 'status'];
+    const header = ['gene', 'rsid', 'chrom', 'position', 'alleles', 'other_targets', 'merged_with', 'forward_primer', 'forward_tm', 'reverse_primer', 'reverse_tm', 'product_size', 'amplicon_start', 'amplicon_end', 'amplicon_overlaps', 'primer_notes', 'heterodimer_found', 'heterodimer_dg', 'status'];
     const rows = blocks.map((b) => {
       const r = results[b.rsid];
       return [
@@ -381,6 +512,7 @@ export default function SnpBatchPanel() {
         b.position,
         b.alleles.join('/'),
         b.other_targets.join(';'),
+        (r?.mergedWith || []).filter((id) => id !== b.rsid).join(';'),
         r?.fwd?.sequence ?? '',
         r?.fwd?.tm ?? '',
         r?.rev?.sequence ?? '',
@@ -414,21 +546,40 @@ export default function SnpBatchPanel() {
   // on every render (rather than reaching for useMemo) is cheap enough.
   const overlaps = findOverlaps(blocks || [], results);
 
-  const placedAmplicons: PlacedAmplicon[] = (blocks || [])
-    .map((b) => ({ b, r: results[b.rsid] }))
-    .filter((x): x is { b: SnpBlock; r: BatchResult & { ampStart: number; ampEnd: number; productSize: number } } => x.r?.status === 'done' && x.r.ampStart !== undefined && x.r.ampEnd !== undefined && x.r.productSize !== undefined)
-    .map(({ b, r }) => ({
-      rsid: b.rsid,
-      gene: b.gene,
-      chrom: b.chrom,
-      position: b.position,
-      ampStart: r.ampStart,
-      ampEnd: r.ampEnd,
-      productSize: r.productSize,
-      alleles: b.alleles,
-      intervalStart: b.interval_start,
-      refSeq: b.upstream_seq + (b.alleles[0] || 'N') + b.downstream_seq,
-    }));
+  // One `PlacedAmplicon` per *design*, not per block - a merged group's
+  // members all point at the exact same `BatchResult` object (see
+  // `runBatch`), so the first one seen claims the group and the rest are
+  // skipped rather than drawing the identical amplicon on top of itself.
+  const placedAmplicons: PlacedAmplicon[] = (() => {
+    const done = (blocks || [])
+      .map((b) => ({ b, r: results[b.rsid] }))
+      .filter((x): x is { b: SnpBlock; r: BatchResult & { ampStart: number; ampEnd: number; productSize: number } } => x.r?.status === 'done' && x.r.ampStart !== undefined && x.r.ampEnd !== undefined && x.r.productSize !== undefined);
+
+    const seen = new Set<string>();
+    const placed: PlacedAmplicon[] = [];
+    for (const { b, r } of done) {
+      if (seen.has(b.rsid)) continue;
+      const groupRsids = r.mergedWith && r.mergedWith.length > 1 ? r.mergedWith : [b.rsid];
+      const groupBlocks = groupRsids.map((id) => (blocks || []).find((x) => x.rsid === id)).filter((x): x is SnpBlock => x !== undefined);
+      for (const id of groupRsids) seen.add(id);
+
+      const combined = groupBlocks.length > 1 ? combineBlockWindows(groupBlocks) : null;
+      const ownRefSeq = b.upstream_seq + (b.alleles[0] || 'N') + b.downstream_seq;
+
+      placed.push({
+        rsid: groupBlocks.map((x) => x.rsid).join('+'),
+        gene: b.gene,
+        chrom: b.chrom,
+        ampStart: r.ampStart,
+        ampEnd: r.ampEnd,
+        productSize: r.productSize,
+        intervalStart: combined ? combined.start : b.interval_start,
+        refSeq: combined ? combined.chars : ownRefSeq,
+        variants: groupBlocks.map((x) => ({ rsid: x.rsid, position: x.position, alleles: x.alleles })),
+      });
+    }
+    return placed;
+  })();
 
   // Kept referentially stable across re-renders (unlike a plain inline
   // `.filter()` in the JSX below) so `SnpGeneMapModal`'s fetch effect,
@@ -482,6 +633,16 @@ export default function SnpBatchPanel() {
                   placeholder="e.g. 130 for 2x150bp sequencing…"
                   value={flankWindow}
                   onChange={(e) => setFlankWindow(e.target.value)}
+                  className="w-56 tabular-nums"
+                />
+              </Field>
+              <Field label="Merge SNPs within (bp on the same gene; 0 = never)">
+                <TextInput
+                  type="number"
+                  min={0}
+                  placeholder="e.g. 20"
+                  value={mergeDistance}
+                  onChange={(e) => setMergeDistance(e.target.value)}
                   className="w-56 tabular-nums"
                 />
               </Field>
@@ -539,6 +700,15 @@ export default function SnpBatchPanel() {
                               className="ml-1"
                             >
                               not in canonical
+                            </Badge>
+                          )}
+                          {r?.mergedWith && r.mergedWith.filter((id) => id !== b.rsid).length > 0 && (
+                            <Badge
+                              tone="accent"
+                              title={`Within the merge distance of ${r.mergedWith.filter((id) => id !== b.rsid).join(', ')} - one shared primer pair was designed to amplify all of them together.`}
+                              className="ml-1"
+                            >
+                              merged
                             </Badge>
                           )}
                         </td>

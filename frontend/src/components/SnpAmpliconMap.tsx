@@ -8,6 +8,15 @@ export interface PlacedAmplicon {
   ampStart: number;
   ampEnd: number;
   productSize: number;
+  /** Reference allele first, matching the source report's convention. */
+  alleles: string[];
+  /** Genomic position of `refSeq[0]` — lets any base within the amplicon
+   * be looked up by its genomic coordinate (`refSeq[pos - intervalStart]`). */
+  intervalStart: number;
+  /** The full reference window (upstream flank + reference allele +
+   * downstream flank) — always a superset of `[ampStart, ampEnd]`, since
+   * the amplicon is designed from within that same flank. */
+  refSeq: string;
 }
 
 interface Props {
@@ -45,6 +54,20 @@ const ZOOM_STEP_FACTOR = 2.5;
  * keeps a lone, far-flung SNP's amplicon a legible box rather than a
  * hairline sliver on a track sized for its whole gene's scattered SNPs. */
 const CLUSTER_GAP_BP = 2000;
+/** Below this many screen px per base pair, a letter wouldn't be legible
+ * anyway — above it, show the actual reference bases instead of a plain
+ * colored bar. */
+const MIN_PX_PER_BP_FOR_BASES = 10;
+
+function baseAt(items: PlacedAmplicon[], pos: number): { base: string; owner: PlacedAmplicon } | null {
+  for (const it of items) {
+    if (pos >= it.ampStart && pos <= it.ampEnd) {
+      const base = it.refSeq[pos - it.intervalStart];
+      if (base) return { base, owner: it };
+    }
+  }
+  return null;
+}
 
 function clusterAmplicons(amplicons: PlacedAmplicon[]): PlacedAmplicon[][] {
   const sorted = [...amplicons].sort((a, b) => (a.chrom === b.chrom ? a.ampStart - b.ampStart : a.chrom.localeCompare(b.chrom)));
@@ -181,9 +204,20 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
   const rulerY = trackY + TRACK_HEIGHT + RULER_GAP;
   const height = rulerY + 20;
 
+  const pxPerBp = (WIDTH - 2 * MARGIN) / viewLen;
+  const showBases = pxPerBp >= MIN_PX_PER_BP_FOR_BASES;
+  const baseCells: { pos: number; base: string; owner: PlacedAmplicon }[] = [];
+  if (showBases && visibleItems.length > 0) {
+    const from = Math.max(Math.ceil(view.start), Math.min(...visibleItems.map((i) => i.ampStart)));
+    const to = Math.min(Math.floor(view.end), Math.max(...visibleItems.map((i) => i.ampEnd)));
+    for (let pos = from; pos <= to; pos++) {
+      const hit = baseAt(visibleItems, pos);
+      if (hit) baseCells.push({ pos, ...hit });
+    }
+  }
+
   // Ruler ticks: a "nice" step guaranteed to keep labels from overlapping
   // regardless of how many digits these genomic coordinates need.
-  const pxPerBp = (WIDTH - 2 * MARGIN) / viewLen;
   const worstLabelWidth = Math.max(estimateLabelWidth(view.start), estimateLabelWidth(view.end));
   const tickStep = pickTickStep(pxPerBp, worstLabelWidth + MIN_TICK_LABEL_GAP);
   const startTick = Math.ceil(view.start / tickStep) * tickStep;
@@ -225,13 +259,13 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
             const labelY = trackY - 6 - row * ROW_HEIGHT;
             return (
               <g key={it.rsid}>
-                <rect x={x1} y={trackY} width={w} height={TRACK_HEIGHT} fill={fill} opacity={0.75} stroke={stroke} strokeWidth={1} rx={2}>
+                <rect x={x1} y={trackY} width={w} height={TRACK_HEIGHT} fill={fill} opacity={showBases ? 0.25 : 0.75} stroke={stroke} strokeWidth={1} rx={2}>
                   <title>
-                    {`${it.rsid} (${it.gene})\nVariant: ${it.chrom}:${it.position.toLocaleString()}\nAmplicon: ${it.ampStart.toLocaleString()}-${it.ampEnd.toLocaleString()} (${it.productSize} bp)`}
+                    {`${it.rsid} (${it.gene})\nVariant: ${it.chrom}:${it.position.toLocaleString()} (${it.alleles.join('/')})\nAmplicon: ${it.ampStart.toLocaleString()}-${it.ampEnd.toLocaleString()} (${it.productSize} bp)`}
                     {hasOverlap ? `\nOverlaps: ${overlapsWith.join(', ')}` : '\nNo overlap with another designed amplicon'}
                   </title>
                 </rect>
-                {markerX !== null && (
+                {!showBases && markerX !== null && (
                   <line x1={markerX} y1={trackY - 3} x2={markerX} y2={trackY + TRACK_HEIGHT + 3} stroke="#1e293b" strokeWidth={1.5}>
                     <title>{`${it.rsid} variant @ ${it.chrom}:${it.position.toLocaleString()}`}</title>
                   </line>
@@ -246,6 +280,23 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
               </g>
             );
           })}
+
+          {showBases &&
+            baseCells.map(({ pos, base, owner }) => {
+              const cellX1 = scale(pos);
+              const cellX2 = scale(pos + 1);
+              const cx = (cellX1 + cellX2) / 2;
+              const isVariant = visibleItems.some((it) => it.position === pos);
+              return (
+                <g key={pos}>
+                  {isVariant && <rect x={cellX1} y={trackY} width={Math.max(1, cellX2 - cellX1)} height={TRACK_HEIGHT} fill="#f59e0b" opacity={0.55} />}
+                  <text x={cx} y={trackY + TRACK_HEIGHT / 2 + 4} fontSize={11} fontFamily="var(--font-mono, monospace)" fontWeight={isVariant ? 'bold' : 'normal'} fill={isVariant ? '#78350f' : '#1e293b'} textAnchor="middle" pointerEvents="none">
+                    {base}
+                  </text>
+                  {isVariant && <title>{`${owner.rsid} @ ${owner.chrom}:${pos.toLocaleString()}\nAlleles: ${owner.alleles.join('/')} (reference base shown here: ${base})`}</title>}
+                </g>
+              );
+            })}
 
           {drag &&
             (() => {
@@ -289,12 +340,13 @@ function ClusterTrack({ items, overlaps }: { items: PlacedAmplicon[]; overlaps: 
  * scaled to that whole span, making every amplicon a sub-pixel sliver).
  * Amplicons more than `CLUSTER_GAP_BP` apart always get their own track,
  * scaled to their own span. Amplicons that overlap another designed
- * amplicon render red instead of green; a dark tick marks the exact
- * variant position inside each amplicon; rsID labels are packed into rows
+ * amplicon render red instead of green; rsID labels are packed into rows
  * so close-together SNPs' names never overlap (with a leader line back to
  * their own tick once stacked); use the +/− buttons (reliable, since
  * dragging a several-pixel-wide selection is not) or drag a sub-region
- * directly to zoom in, down to base resolution, and "Reset zoom" to back out. */
+ * directly to zoom in. Below ~10px/bp a dark tick marks the exact variant
+ * position; above it, the amplicon bar fades and the actual reference
+ * bases are drawn instead, with the variant's own base highlighted amber. */
 export default function SnpAmpliconMap({ amplicons, overlaps }: Props) {
   if (!amplicons.length) return null;
   const clusters = clusterAmplicons(amplicons);
@@ -302,9 +354,10 @@ export default function SnpAmpliconMap({ amplicons, overlaps }: Props) {
   return (
     <div>
       <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-        Each bar is one designed amplicon, scaled per cluster of nearby SNPs (each &gt;{CLUSTER_GAP_BP.toLocaleString()} bp from its neighbors gets its own, separately-scaled track). The dark tick inside a bar marks the exact variant
-        position. <span className="text-green-600 dark:text-green-400 font-medium">Green</span> = no overlap with another designed amplicon; <span className="text-red-600 dark:text-red-400 font-medium">red</span> = overlaps one.
-        Use a track's +/− buttons to zoom in (down to base resolution) or out, or drag across it to jump straight to a region; "Reset zoom" backs out to the overview.
+        Each bar is one designed amplicon, scaled per cluster of nearby SNPs (each &gt;{CLUSTER_GAP_BP.toLocaleString()} bp from its neighbors gets its own, separately-scaled track).{' '}
+        <span className="text-green-600 dark:text-green-400 font-medium">Green</span> = no overlap with another designed amplicon; <span className="text-red-600 dark:text-red-400 font-medium">red</span> = overlaps one. Use a track's
+        +/− buttons to zoom in or out, or drag across it to jump straight to a region; "Reset zoom" backs out to the overview. Zoomed in close enough, the actual reference bases are shown, with the variant's own base highlighted{' '}
+        <span className="text-amber-600 dark:text-amber-400 font-medium">amber</span>.
       </p>
       {clusters.map((items) => (
         <ClusterTrack key={items.map((i) => i.rsid).join(',')} items={items} overlaps={overlaps} />

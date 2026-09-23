@@ -201,7 +201,18 @@ export default function SnpBatchPanel() {
   const placedAmplicons: PlacedAmplicon[] = (blocks || [])
     .map((b) => ({ b, r: results[b.rsid] }))
     .filter((x): x is { b: SnpBlock; r: BatchResult & { ampStart: number; ampEnd: number; productSize: number } } => x.r?.status === 'done' && x.r.ampStart !== undefined && x.r.ampEnd !== undefined && x.r.productSize !== undefined)
-    .map(({ b, r }) => ({ rsid: b.rsid, gene: b.gene, chrom: b.chrom, position: b.position, ampStart: r.ampStart, ampEnd: r.ampEnd, productSize: r.productSize }));
+    .map(({ b, r }) => ({
+      rsid: b.rsid,
+      gene: b.gene,
+      chrom: b.chrom,
+      position: b.position,
+      ampStart: r.ampStart,
+      ampEnd: r.ampEnd,
+      productSize: r.productSize,
+      alleles: b.alleles,
+      intervalStart: b.interval_start,
+      refSeq: b.upstream_seq + (b.alleles[0] || 'N') + b.downstream_seq,
+    }));
 
   return (
     <>

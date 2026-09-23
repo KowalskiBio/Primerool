@@ -251,6 +251,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
     if (!canUseVariantSearch) return "Enable 'Include introns' in step 2 to select a variant.";
     if (hit.chrom && data.chrom && hit.chrom !== data.chrom) return `This variant is on chromosome ${hit.chrom}, not the loaded gene's chromosome (${data.chrom}).`;
     if (localPosForHit(hit) === null) return 'This variant maps outside the loaded gene sequence.';
+    if (new Set(orientedAlleles(hit)).size < 2) return "This variant's allele data isn't available from the source — add it manually using position/ref/alt below instead.";
     return null;
   }
 

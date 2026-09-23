@@ -30,6 +30,7 @@ export default defineConfig({
       '/align': 'http://127.0.0.1:5050',
       '/design_conserved': 'http://127.0.0.1:5050',
       '/idt': 'http://127.0.0.1:5050',
+      '/import_snp_blocks': 'http://127.0.0.1:5050',
     },
   },
 })

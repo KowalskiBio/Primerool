@@ -9,6 +9,7 @@ members = [
     "crates/blast",
     "crates/align",
     "crates/idt",
+    "crates/snp-import",
     "crates/server",
     "src-tauri",
 ]

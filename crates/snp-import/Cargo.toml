@@ -1,0 +1,14 @@
+[package]
+name = "snp-import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Parses per-SNP flanking-sequence .docx reports (e.g. the '200 bp each side of variant, [REF/ALT]-marked' format) into upstream/downstream flank pairs, ready for engine::design_flanking."
+
+[dependencies]
+zip = { version = "2", default-features = false, features = ["deflate"] }
+roxmltree = "0.20"
+serde = { workspace = true }
+thiserror = { workspace = true }
+regex = "1"

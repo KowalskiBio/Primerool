@@ -6,6 +6,7 @@ import type { SequenceData } from '../api/sequence';
 import { isAccessionId, cleanDNA } from '../utils/dna';
 import { SPECIES_BY_KINGDOM, KINGDOM_LABELS, findKingdomForSpecies, type Kingdom } from '../utils/species';
 import BlastResultsTable from './BlastResultsTable';
+import SnpBatchPanel from './SnpBatchPanel';
 
 interface Props {
   onGeneFound: (geneName: string, species: string, apiSource: 'ensembl' | 'ncbi', transcripts: Transcript[]) => void;
@@ -26,6 +27,7 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
   const [blastRunning, setBlastRunning] = useState(false);
   const [blastProgress, setBlastProgress] = useState(0);
   const [blastHits, setBlastHits] = useState<BlastHit[] | null>(null);
+  const [showSnpBatch, setShowSnpBatch] = useState(false);
 
   const effectiveSpecies = speciesValue === '__custom__' ? customSpecies.trim() : speciesValue;
 
@@ -313,7 +315,19 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
             >
               Use Custom Sequence
             </button>
+            <button
+              onClick={() => setShowSnpBatch((v) => !v)}
+              className="bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-green-50 dark:hover:bg-slate-600 font-medium rounded-lg px-5 py-2 transition-colors shadow-sm w-full sm:w-auto"
+            >
+              {showSnpBatch ? 'Hide SNP batch importer' : 'Import SNP flanking blocks (batch) →'}
+            </button>
           </div>
+
+          {showSnpBatch && (
+            <div className="mt-4">
+              <SnpBatchPanel />
+            </div>
+          )}
 
           {blastRunning && (
             <div className="mt-4 p-4 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg">

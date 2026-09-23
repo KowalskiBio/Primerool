@@ -350,6 +350,10 @@ interface Cell {
   isSearchHit?: boolean;
   isActiveSearchHit?: boolean;
   searchIdx?: number;
+  /** Set by `applyVariantHighlight` for a cell/sub-cell landing on a
+   * `VariantMarker`'s position. */
+  isVariant?: boolean;
+  variantLabel?: string;
 }
 
 interface Row {
@@ -417,6 +421,61 @@ function buildCells(
   }
 
   return cells;
+}
+
+export interface VariantMarker {
+  /** Shown in the marker's tooltip and used as the React key. */
+  rsid: string;
+  /** 0-based, in `data.gene_seq` coordinates (only meaningful when
+   * `data.include_introns` is true - see `SequenceData.gene_start_genomic`'s
+   * doc for how a genomic position maps here). */
+  start: number;
+  end: number;
+  alleles?: string[];
+}
+
+/** Marks every cell whose `('gene', startPos)` falls inside a variant's
+ * `[start, end)` span - same additive, non-destructive splitting shape as
+ * `applySearchHighlight` below (one level later in the pipeline, over
+ * already-built `Cell`s), so a variant marker never fights the base
+ * CDS/UTR/intron styling for the same character, it just decorates it. */
+function applyVariantHighlight(cells: Cell[], markers: VariantMarker[]): Cell[] {
+  if (markers.length === 0) return cells;
+  const out: Cell[] = [];
+
+  for (const cell of cells) {
+    if (cell.isPlaceholder || cell.region !== 'gene') {
+      out.push(cell);
+      continue;
+    }
+
+    const cellStart = cell.startPos;
+    const cellEnd = cellStart + cell.text.length;
+    const relevant = markers.filter((m) => m.end > cellStart && m.start < cellEnd).sort((a, b) => a.start - b.start);
+    if (relevant.length === 0) {
+      out.push(cell);
+      continue;
+    }
+
+    let cur = cellStart;
+    for (const m of relevant) {
+      const s = Math.max(cellStart, cur, m.start);
+      const e = Math.min(cellEnd, m.end);
+      if (e <= s) continue;
+      if (s > cur) out.push({ ...cell, text: cell.text.slice(cur - cellStart, s - cellStart), startPos: cur });
+      out.push({
+        ...cell,
+        text: cell.text.slice(s - cellStart, e - cellStart),
+        startPos: s,
+        isVariant: true,
+        variantLabel: m.alleles?.length ? `${m.rsid} (${m.alleles.join('/')})` : m.rsid,
+      });
+      cur = e;
+    }
+    if (cur < cellEnd) out.push({ ...cell, text: cell.text.slice(cur - cellStart), startPos: cur });
+  }
+
+  return out;
 }
 
 interface SearchMatch {
@@ -546,6 +605,8 @@ function buildRows(cells: Cell[], lineWidth: number): Row[] {
         isSearchHit: cell.isSearchHit,
         isActiveSearchHit: cell.isActiveSearchHit,
         searchIdx: cell.searchIdx,
+        isVariant: cell.isVariant,
+        variantLabel: cell.variantLabel,
       });
       firstPiece = false;
       currentLen += take.length;
@@ -612,9 +673,12 @@ interface Props {
    * span. Absent (not just a no-op) disables interactive editing entirely
    * - primers render read-only, exactly as before. */
   onSelect?: (key: keyof Selections, value: Selection) => void;
+  /** Read-only markers (e.g. a gene's known SNPs) decorated onto the gene
+   * block - see `VariantMarker`. */
+  variantMarkers?: VariantMarker[];
 }
 
-export default function SequenceViewer({ data, selections, truncateIntrons, onSelect }: Props) {
+export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, variantMarkers = [] }: Props) {
   const interactive = Boolean(onSelect);
   const [dragSession, setDragSession] = useState<DragSession | null>(null);
   const [deltaChars, setDeltaChars] = useState(0);
@@ -755,7 +819,8 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   }
 
   const rawCells = buildCells(segments, interactive, dragSession, deltaChars, editableKeys, data, selections, startDrag);
-  const cells = applySearchHighlight(rawCells, searchMatches, activeSearchIdx);
+  const variantCells = applyVariantHighlight(rawCells, variantMarkers);
+  const cells = applySearchHighlight(variantCells, searchMatches, activeSearchIdx);
   const rows = buildRows(cells, lineWidth);
 
   const modeText = data.include_introns
@@ -872,9 +937,10 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
               {row.pieces.map((p, pi) => (
                 <span
                   key={pi}
-                  className={`${p.className}${p.cursorClass ? ` ${p.cursorClass}` : ''}${p.isSearchHit ? ' seq-search-hit' : ''}${p.isActiveSearchHit ? ' seq-search-hit-active' : ''}`}
+                  className={`${p.className}${p.cursorClass ? ` ${p.cursorClass}` : ''}${p.isSearchHit ? ' seq-search-hit' : ''}${p.isActiveSearchHit ? ' seq-search-hit-active' : ''}${p.isVariant ? ' seq-variant-hit' : ''}`}
                   id={p.id}
                   data-search-idx={p.searchIdx}
+                  title={p.variantLabel}
                   onMouseDown={p.onMouseDown}
                 >
                   {p.text}

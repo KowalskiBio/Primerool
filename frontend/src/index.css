@@ -199,6 +199,12 @@
     background-color: var(--seq-hit-active-bg);
   }
 
+  .seq-variant-hit {
+    border-radius: 2px;
+    outline: 2px dashed var(--warning);
+    outline-offset: 1px;
+  }
+
   .exon-label {
     display: block;
     color: var(--ink-muted);

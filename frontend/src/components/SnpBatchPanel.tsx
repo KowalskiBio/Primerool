@@ -4,6 +4,7 @@ import { designFlanking, type DesignEngine, type FlankingOligoResult } from '../
 import { ApiError } from '../api/client';
 import EngineSelect from './EngineSelect';
 import SnpAmpliconMap, { type PlacedAmplicon } from './SnpAmpliconMap';
+import SnpGeneMapModal from './SnpGeneMapModal';
 import Section from './ui/Section';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
@@ -98,6 +99,7 @@ export default function SnpBatchPanel() {
   const [engine, setEngine] = useState<DesignEngine>('strider');
   const [results, setResults] = useState<Record<string, BatchResult>>({});
   const [running, setRunning] = useState(false);
+  const [openGene, setOpenGene] = useState<string | null>(null);
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -350,7 +352,12 @@ export default function SnpBatchPanel() {
                   {blocks.map((b) => {
                     const r = results[b.rsid];
                     return (
-                      <tr key={b.rsid} className="border-b border-line bg-surface last:border-0 hover:bg-surface-2">
+                      <tr
+                        key={b.rsid}
+                        onClick={() => setOpenGene(b.gene)}
+                        title={`Open ${b.gene}'s sequence map`}
+                        className="cursor-pointer border-b border-line bg-surface last:border-0 hover:bg-surface-2"
+                      >
                         <td className="px-2 py-2">{b.gene}</td>
                         <td className="px-2 py-2 font-mono">
                           {b.rsid}
@@ -412,6 +419,8 @@ export default function SnpBatchPanel() {
           <SnpAmpliconMap amplicons={placedAmplicons} overlaps={overlaps} />
         </Section>
       )}
+
+      <SnpGeneMapModal gene={openGene} blocks={(blocks || []).filter((b) => b.gene === openGene)} onClose={() => setOpenGene(null)} />
     </>
   );
 }

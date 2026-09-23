@@ -23,12 +23,13 @@ export interface PlacedAmplicon {
    * array for an ordinary amplicon, more for a merged one. Each gets its
    * own tick mark (or, at base resolution, its own highlighted base). */
   variants: { rsid: string; position: number; alleles: string[] }[];
-  /** Lengths (bp) of the forward primer occupying the bar's left end and
-   * the reverse primer occupying its right end - drawn as a distinct
-   * segment on the bar so its length is visible at a glance, and doubles
-   * as that segment's click/drag target (see `onPrimerClick`/`onEdgeDrag`). */
-  fwdLen: number;
-  revLen: number;
+  /** The forward primer occupying the bar's left end and the reverse
+   * primer occupying its right end - each drawn as a distinct segment
+   * sized to its actual length (so it's visible at a glance), doubling as
+   * that segment's click/drag target (see `onPrimerClick`/`onEdgeDrag`),
+   * and passed whole to `onAmpliconClick` for the detail view. */
+  fwd: { sequence: string; tm: number | null };
+  rev: { sequence: string; tm: number | null };
 }
 
 interface Props {
@@ -41,8 +42,8 @@ interface Props {
    * coordinate dropped on. The caller owns recomputing the actual primer/
    * Tm for that edge (see `SnpBatchPanel.tsx`'s `handleManualEdgeEdit`);
    * this component only reports the gesture. Omitted entirely disables
-   * both this and `onPrimerClick`/`onAmpliconMove` (no draggable/clickable
-   * affordances render without a caller ready to act on them). */
+   * every draggable/clickable affordance on the map (no caller ready to
+   * act on them). */
   onEdgeDrag?: (rsid: string, side: 'start' | 'end', genomicPos: number) => void;
   /** Fired on a plain click (mouse didn't move past the drag threshold) on
    * a primer segment - `side` says which end (`'start'` = forward,
@@ -54,6 +55,10 @@ interface Props {
    * `startRsid`/`endRsid` are the group's own leftmost/rightmost member
    * (see the same note on `onEdgeDrag`'s handles). */
   onAmpliconMove?: (startRsid: string, endRsid: string, deltaBp: number) => void;
+  /** Fired on a plain click (not a drag) on an amplicon bar's own body -
+   * the whole clicked amplicon, for a caller to open a detail view (see
+   * `SnpBatchPanel.tsx`'s `AmpliconDetailModal`). */
+  onAmpliconClick?: (amplicon: PlacedAmplicon) => void;
 }
 
 interface ViewState {
@@ -94,10 +99,11 @@ const MIN_PX_PER_BP_FOR_BASES = 10;
  * sub-pixel-wide target would be unclickable and undraggable. */
 const MIN_PRIMER_SEGMENT_PX = 8;
 /** How far the mouse has to move (in real screen pixels, not SVG units)
- * before a mousedown-then-mouseup on a primer segment counts as a drag
- * (resize) instead of a click (open its structure) - small enough that a
- * deliberate drag never reads as a click, large enough that a hand that
- * isn't perfectly still during a click doesn't accidentally start a resize. */
+ * before a mousedown-then-mouseup on a primer segment or a bar's body
+ * counts as a drag (resize/move) instead of a click (inspect) - small
+ * enough that a deliberate drag never reads as a click, large enough that
+ * a hand that isn't perfectly still during a click doesn't accidentally
+ * start one. */
 const CLICK_DRAG_THRESHOLD_PX = 4;
 
 function baseAt(items: PlacedAmplicon[], pos: number): { base: string; owner: PlacedAmplicon } | null {
@@ -151,12 +157,14 @@ function ClusterTrack({
   onEdgeDrag,
   onPrimerClick,
   onAmpliconMove,
+  onAmpliconClick,
 }: {
   items: PlacedAmplicon[];
   overlaps: Record<string, string[]>;
   onEdgeDrag?: Props['onEdgeDrag'];
   onPrimerClick?: Props['onPrimerClick'];
   onAmpliconMove?: Props['onAmpliconMove'];
+  onAmpliconClick?: Props['onAmpliconClick'];
 }) {
   const minPos = Math.min(...items.map((i) => i.ampStart));
   const maxPos = Math.max(...items.map((i) => i.ampEnd));
@@ -266,31 +274,40 @@ function ClusterTrack({
     document.addEventListener('mouseup', onUp);
   }
 
-  /** Starts dragging an amplicon bar's own body to shift the whole thing
-   * (both primers, same distance) - left button only; a live preview
-   * translates the bar's whole `<g>` (see `moveDrag`'s use in the render
-   * below) without touching any real data until mouseup, when
-   * `onAmpliconMove` reports the net shift for `SnpBatchPanel.tsx` to
-   * recompute both primers from. */
+  /** Starts interacting with an amplicon bar's own body (not a primer
+   * segment) - left button only. Resolves on mouseup into either a click
+   * (`onAmpliconClick`, opens the detail view - mouse never moved past
+   * `CLICK_DRAG_THRESHOLD_PX`) or a move drag (`onAmpliconMove`, shifts
+   * both primers by the same distance) - same click-vs-drag disambiguation
+   * as `startPrimerHandle`. A live preview translates the bar's whole `<g>`
+   * during a move (see `moveDrag`'s use in the render below) without
+   * touching any real data until mouseup. */
   function startBodyDrag(e: React.MouseEvent<SVGRectElement>, it: PlacedAmplicon) {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    const startClientX = e.clientX;
     const startBp = bpFromClientX(e.clientX);
     setMoveDrag({ rsid: it.rsid, deltaBp: 0 });
+    let moved = false;
 
     const onMove = (ev: MouseEvent) => {
+      if (Math.abs(ev.clientX - startClientX) > CLICK_DRAG_THRESHOLD_PX) moved = true;
       const bp = bpFromClientX(ev.clientX);
       setMoveDrag((d) => (d ? { ...d, deltaBp: bp - startBp } : d));
     };
     const onUp = (ev: MouseEvent) => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      const bp = bpFromClientX(ev.clientX);
-      const delta = Math.round(bp - startBp);
       setMoveDrag(null);
-      if (delta !== 0 && it.variants.length > 0) {
-        onAmpliconMove?.(it.variants[0].rsid, it.variants[it.variants.length - 1].rsid, delta);
+      if (moved) {
+        const bp = bpFromClientX(ev.clientX);
+        const delta = Math.round(bp - startBp);
+        if (delta !== 0 && it.variants.length > 0) {
+          onAmpliconMove?.(it.variants[0].rsid, it.variants[it.variants.length - 1].rsid, delta);
+        }
+      } else {
+        onAmpliconClick?.(it);
       }
     };
     document.addEventListener('mousemove', onMove);
@@ -315,9 +332,9 @@ function ClusterTrack({
     // edge (a primer longer than the whole visible bar at this zoom just
     // fills it) or past each other (a bar barely wider than MIN_ZOOM_BP).
     const fwdX1 = x1;
-    const fwdX2 = Math.min(x2, Math.max(x1 + MIN_PRIMER_SEGMENT_PX, scale(it.ampStart + it.fwdLen)));
+    const fwdX2 = Math.min(x2, Math.max(x1 + MIN_PRIMER_SEGMENT_PX, scale(it.ampStart + it.fwd.sequence.length)));
     const revX2 = x2;
-    const revX1 = Math.max(fwdX2, Math.min(x2 - MIN_PRIMER_SEGMENT_PX, scale(it.ampEnd - it.revLen + 1)));
+    const revX1 = Math.max(fwdX2, Math.min(x2 - MIN_PRIMER_SEGMENT_PX, scale(it.ampEnd - it.rev.sequence.length + 1)));
     // One marker per variant this amplicon covers (more than one for a
     // merged group) - only those currently in view get a screen position.
     const markers = it.variants
@@ -367,7 +384,11 @@ function ClusterTrack({
     <div className="mb-4 last:mb-0">
       <div className="flex items-center justify-between mb-1">
         <div className="text-xs font-semibold text-ink">
-          {[...new Set(items.map((i) => i.gene))].join(' / ')} <span className="font-normal text-ink-faint">({snpCount} SNP{snpCount > 1 ? 's' : ''} on {items[0].chrom}{items.length !== snpCount ? `, ${items.length} amplicon${items.length > 1 ? 's' : ''}` : ''})</span>
+          {[...new Set(items.map((i) => i.gene))].join(' / ')}{' '}
+          <span className="font-normal text-ink-faint">
+            ({snpCount} SNP{snpCount > 1 ? 's' : ''} on {items[0].chrom}
+            {items.length !== snpCount ? `, ${items.length} amplicon${items.length > 1 ? 's' : ''}` : ''}) - {items.map((it) => `${it.rsid} (${it.productSize} bp)`).join(', ')}
+          </span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] tabular-nums text-ink-faint">showing {Math.round(viewLen).toLocaleString()} bp</span>
@@ -400,6 +421,7 @@ function ClusterTrack({
             const endRsid = it.variants[it.variants.length - 1].rsid;
             const moving = moveDrag?.rsid === it.rsid;
             const moveDx = moving ? moveDrag.deltaBp * pxPerBp : 0;
+            const bodyInteractive = Boolean(onAmpliconMove || onAmpliconClick);
             const showPrimerSegments = Boolean(onEdgeDrag || onPrimerClick);
             const showFwdLabel = showPrimerSegments && fwdX2 - fwdX1 >= 18;
             const showRevLabel = showPrimerSegments && revX2 - revX1 >= 18;
@@ -415,11 +437,11 @@ function ClusterTrack({
                   stroke={stroke}
                   strokeWidth={1}
                   rx={2}
-                  style={onAmpliconMove ? { cursor: moving ? 'grabbing' : 'grab' } : undefined}
-                  onMouseDown={onAmpliconMove ? (e) => startBodyDrag(e, it) : undefined}
+                  style={bodyInteractive ? { cursor: moving ? 'grabbing' : 'pointer' } : undefined}
+                  onMouseDown={bodyInteractive ? (e) => startBodyDrag(e, it) : undefined}
                 >
                   <title>
-                    {`${it.rsid} (${it.gene})\n${it.variants.map((v) => `${v.rsid} @ ${it.chrom}:${v.position.toLocaleString()} (${v.alleles.join('/')})`).join('\n')}\nAmplicon: ${it.ampStart.toLocaleString()}-${it.ampEnd.toLocaleString()} (${it.productSize} bp)${onAmpliconMove ? '\nDrag the bar to move it; drag or click an end to resize/inspect that primer' : ''}`}
+                    {`${it.rsid} (${it.gene})\n${it.variants.map((v) => `${v.rsid} @ ${it.chrom}:${v.position.toLocaleString()} (${v.alleles.join('/')})`).join('\n')}\nAmplicon: ${it.ampStart.toLocaleString()}-${it.ampEnd.toLocaleString()} (${it.productSize} bp)${bodyInteractive ? '\nClick to see full detail; drag to move the whole amplicon' : ''}`}
                     {hasOverlap ? `\nOverlaps: ${overlapsWith.join(', ')}` : '\nNo overlap with another designed amplicon'}
                   </title>
                 </rect>
@@ -445,19 +467,19 @@ function ClusterTrack({
                      * merged design path) - each segment must pass that
                      * specific rsID, not `it.rsid`'s joined display label. */}
                     <rect x={fwdX1} y={trackY} width={Math.max(1, fwdX2 - fwdX1)} height={TRACK_HEIGHT} fill="var(--seq-primer-ink)" opacity={0.45} style={{ cursor: 'ew-resize' }} onMouseDown={(e) => startPrimerHandle(e, startRsid, 'start')}>
-                      <title>{`Forward primer - ${it.fwdLen} bp - click to view its secondary structure, drag to reposition`}</title>
+                      <title>{`Forward primer - ${it.fwd.sequence.length} bp - click to view its secondary structure, drag to reposition`}</title>
                     </rect>
                     <rect x={revX1} y={trackY} width={Math.max(1, revX2 - revX1)} height={TRACK_HEIGHT} fill="var(--seq-primer-ink)" opacity={0.45} style={{ cursor: 'ew-resize' }} onMouseDown={(e) => startPrimerHandle(e, endRsid, 'end')}>
-                      <title>{`Reverse primer - ${it.revLen} bp - click to view its secondary structure, drag to reposition`}</title>
+                      <title>{`Reverse primer - ${it.rev.sequence.length} bp - click to view its secondary structure, drag to reposition`}</title>
                     </rect>
                     {showFwdLabel && (
                       <text x={(fwdX1 + fwdX2) / 2} y={trackY + TRACK_HEIGHT + 11} fontSize={8} fill="var(--ink-faint)" textAnchor="middle" pointerEvents="none">
-                        {it.fwdLen}bp
+                        {it.fwd.sequence.length}bp
                       </text>
                     )}
                     {showRevLabel && (
                       <text x={(revX1 + revX2) / 2} y={trackY + TRACK_HEIGHT + 11} fontSize={8} fill="var(--ink-faint)" textAnchor="middle" pointerEvents="none">
-                        {it.revLen}bp
+                        {it.rev.sequence.length}bp
                       </text>
                     )}
                   </>
@@ -550,30 +572,37 @@ function ClusterTrack({
  * reference bases are drawn instead, with the variant's own base
  * highlighted amber. A darker segment at each end of a bar is that
  * primer's own footprint. */
-export default function SnpAmpliconMap({ amplicons, overlaps, onEdgeDrag, onPrimerClick, onAmpliconMove }: Props) {
+export default function SnpAmpliconMap({ amplicons, overlaps, onEdgeDrag, onPrimerClick, onAmpliconMove, onAmpliconClick }: Props) {
   if (!amplicons.length) return null;
   const clusters = clusterAmplicons(amplicons);
-  const interactive = Boolean(onEdgeDrag || onPrimerClick || onAmpliconMove);
+  const bodyInteractive = Boolean(onAmpliconMove || onAmpliconClick);
+  const primerInteractive = Boolean(onEdgeDrag || onPrimerClick);
 
   return (
     <div>
       <p className="mb-3 text-xs text-ink-muted">
-        Each bar is one designed amplicon, scaled per cluster of nearby SNPs (each &gt;{CLUSTER_GAP_BP.toLocaleString()} bp from its neighbors gets its own, separately-scaled track).{' '}
-        <span className="font-medium text-success">Green</span> = no overlap with another designed amplicon; <span className="font-medium text-danger">red</span> = overlaps one.
-        {' '}
+        Each bar is one designed amplicon, scaled per cluster of nearby SNPs (each &gt;{CLUSTER_GAP_BP.toLocaleString()} bp from its neighbors gets its own, separately-scaled track) - each
+        track's header lists its own rsID(s) and amplicon length(s) next to the gene name.{' '}
+        <span className="font-medium text-success">Green</span> = no overlap with another designed amplicon; <span className="font-medium text-danger">red</span> = overlaps one.{' '}
         <span className="font-medium text-accent">Darker ends</span> mark each primer's own length. Zoomed in close enough, the actual reference bases are shown, with the variant's own base
         highlighted <span className="font-medium text-warning">amber</span>. Use a track's +/− buttons, or right-click-drag across it, to zoom; "Reset zoom" backs out to the overview.
-        {interactive && (
+        {bodyInteractive && (
           <>
             {' '}
-            Left-drag a bar's middle to move the whole amplicon (both primers shift and are re-analyzed); drag a primer's own end to resize just it; click a primer without dragging to see its{' '}
-            <span className="font-medium text-accent">hairpin/dimer structure</span>. A moved or resized primer is marked <span className="font-medium text-accent">★ manual</span> in the
-            results table above.
+            Click a bar's middle (not an end) for its full detail view - an editable sequence map, both primers, and their structures; drag it instead to move the whole amplicon (both primers
+            shift and are re-analyzed).
+          </>
+        )}
+        {primerInteractive && (
+          <>
+            {' '}
+            Drag a primer's own end to resize just it; click it without dragging to see its <span className="font-medium text-accent">hairpin/dimer structure</span> directly. A moved or resized
+            primer is marked <span className="font-medium text-accent">★ manual</span> in the results table above.
           </>
         )}
       </p>
       {clusters.map((items) => (
-        <ClusterTrack key={items.map((i) => i.rsid).join(',')} items={items} overlaps={overlaps} onEdgeDrag={onEdgeDrag} onPrimerClick={onPrimerClick} onAmpliconMove={onAmpliconMove} />
+        <ClusterTrack key={items.map((i) => i.rsid).join(',')} items={items} overlaps={overlaps} onEdgeDrag={onEdgeDrag} onPrimerClick={onPrimerClick} onAmpliconMove={onAmpliconMove} onAmpliconClick={onAmpliconClick} />
       ))}
     </div>
   );

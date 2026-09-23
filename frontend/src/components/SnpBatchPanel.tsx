@@ -8,6 +8,7 @@ import EngineSelect from './EngineSelect';
 import SnpAmpliconMap, { type PlacedAmplicon } from './SnpAmpliconMap';
 import SnpGeneMapModal from './SnpGeneMapModal';
 import PrimerStructureModal from './PrimerStructureModal';
+import AmpliconDetailModal from './AmpliconDetailModal';
 import Section from './ui/Section';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
@@ -243,6 +244,12 @@ export default function SnpBatchPanel() {
   const [running, setRunning] = useState(false);
   const [openGene, setOpenGene] = useState<string | null>(null);
   const [openPrimer, setOpenPrimer] = useState<{ label: string; forward: string; reverse: string } | null>(null);
+  // Identifies the open amplicon by one of its member rsIDs, rather than
+  // storing the `PlacedAmplicon` object itself - `placedAmplicons` below
+  // is rebuilt fresh every render, so a stored object snapshot would go
+  // stale the moment `AmpliconDetailModal` commits an edit; looking it up
+  // by key on every render (see `openAmpliconData`) keeps it live instead.
+  const [openAmpliconKey, setOpenAmpliconKey] = useState<string | null>(null);
   const [canonicalChecks, setCanonicalChecks] = useState<Record<string, CanonicalCheck>>({});
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
   // work checks this before each write so a stale check from a superseded
@@ -602,6 +609,43 @@ export default function SnpBatchPanel() {
     setOpenPrimer({ label: b.rsid, forward: r.fwd.sequence, reverse: r.rev.sequence });
   }
 
+  /** Opens `AmpliconDetailModal` for the amplicon whose body (not a primer
+   * segment) was clicked on the map. */
+  function handleAmpliconClick(amplicon: PlacedAmplicon) {
+    setOpenAmpliconKey(amplicon.variants[0]?.rsid ?? null);
+  }
+
+  /** Writes a primer edit committed inside `AmpliconDetailModal`'s
+   * embedded sequence map straight into `results` - unlike
+   * `handleManualEdgeEdit`/`handleManualMove`, `SequenceViewer` has
+   * already done its own clamping, slicing, and `/analyze_primer` call
+   * (the main gene workflow's own drag-to-edit mechanism), so this just
+   * records what it produced rather than recomputing anything itself. */
+  function handleAmpliconDetailEdit(groupRsids: string[], side: 'start' | 'end', newAmpEdge: number, sequence: string, tm: number | null) {
+    const oligo: OligoDisplay = { sequence, tm, manual: true };
+    setResults((prev) => {
+      const first = groupRsids[0];
+      const prevR = first ? prev[first] : undefined;
+      if (!prevR || prevR.ampStart === undefined || prevR.ampEnd === undefined) return prev;
+      const newAmpStart = side === 'start' ? newAmpEdge : prevR.ampStart;
+      const newAmpEnd = side === 'end' ? newAmpEdge : prevR.ampEnd;
+      if (newAmpStart >= newAmpEnd) return prev;
+      const updated: BatchResult = {
+        ...prevR,
+        fwd: side === 'start' ? oligo : prevR.fwd,
+        rev: side === 'end' ? oligo : prevR.rev,
+        ampStart: newAmpStart,
+        ampEnd: newAmpEnd,
+        productSize: newAmpEnd - newAmpStart + 1,
+        pairFound: undefined,
+        pairDg: undefined,
+      };
+      const next = { ...prev };
+      for (const id of groupRsids) next[id] = updated;
+      return next;
+    });
+  }
+
   function exportCsv() {
     if (!blocks) return;
     const header = ['gene', 'rsid', 'chrom', 'position', 'alleles', 'other_targets', 'merged_with', 'forward_primer', 'forward_tm', 'reverse_primer', 'reverse_tm', 'product_size', 'amplicon_start', 'amplicon_end', 'amplicon_overlaps', 'primer_notes', 'heterodimer_found', 'heterodimer_dg', 'status'];
@@ -681,12 +725,14 @@ export default function SnpBatchPanel() {
         intervalStart: combined ? combined.start : b.interval_start,
         refSeq: combined ? combined.chars : ownRefSeq,
         variants: groupBlocks.map((x) => ({ rsid: x.rsid, position: x.position, alleles: x.alleles })),
-        fwdLen: r.fwd.sequence.length,
-        revLen: r.rev.sequence.length,
+        fwd: r.fwd,
+        rev: r.rev,
       });
     }
     return placed;
   })();
+
+  const openAmpliconData = openAmpliconKey ? (placedAmplicons.find((a) => a.variants.some((v) => v.rsid === openAmpliconKey)) ?? null) : null;
 
   // Kept referentially stable across re-renders (unlike a plain inline
   // `.filter()` in the JSX below) so `SnpGeneMapModal`'s fetch effect,
@@ -910,12 +956,14 @@ export default function SnpBatchPanel() {
             onEdgeDrag={(rsid, side, pos) => void handleManualEdgeEdit(rsid, side, pos)}
             onAmpliconMove={(startRsid, endRsid, delta) => void handleManualMove(startRsid, endRsid, delta)}
             onPrimerClick={handlePrimerClick}
+            onAmpliconClick={handleAmpliconClick}
           />
         </Section>
       )}
 
       <SnpGeneMapModal gene={openGene} blocks={openGeneBlocks} onClose={() => setOpenGene(null)} />
       <PrimerStructureModal pair={openPrimer} onClose={() => setOpenPrimer(null)} />
+      <AmpliconDetailModal amplicon={openAmpliconData} onPrimerEdit={handleAmpliconDetailEdit} onClose={() => setOpenAmpliconKey(null)} />
     </>
   );
 }

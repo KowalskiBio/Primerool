@@ -3,6 +3,7 @@ import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
 import { designFlanking, type DesignEngine, type FlankingOligoResult } from '../api/design';
 import { ApiError } from '../api/client';
 import EngineSelect from './EngineSelect';
+import SnpAmpliconMap, { type PlacedAmplicon } from './SnpAmpliconMap';
 import { fmt } from '../utils/format';
 
 interface BatchResult {
@@ -10,9 +11,36 @@ interface BatchResult {
   fwd?: FlankingOligoResult;
   rev?: FlankingOligoResult;
   productSize?: number;
+  /** Genomic coordinates of the designed amplicon (1-based, inclusive), only set on success. */
+  ampStart?: number;
+  ampEnd?: number;
   pairFound?: boolean;
   pairDg?: number | null;
   error?: string;
+}
+
+/** Every pair of same-chromosome amplicons whose [ampStart, ampEnd] spans
+ * intersect — the actual PCR products, not the raw 200bp report windows
+ * (those already get their own "shares this window with" flag from
+ * `other_targets`). */
+function findOverlaps(blocks: SnpBlock[], results: Record<string, BatchResult>): Record<string, string[]> {
+  const placed = blocks
+    .map((b) => ({ rsid: b.rsid, chrom: b.chrom, r: results[b.rsid] }))
+    .filter((p): p is { rsid: string; chrom: string; r: BatchResult & { ampStart: number; ampEnd: number } } => p.r?.status === 'done' && p.r.ampStart !== undefined && p.r.ampEnd !== undefined);
+
+  const overlaps: Record<string, string[]> = {};
+  for (let i = 0; i < placed.length; i++) {
+    for (let j = i + 1; j < placed.length; j++) {
+      const a = placed[i];
+      const b = placed[j];
+      if (a.chrom !== b.chrom) continue;
+      if (a.r.ampStart <= b.r.ampEnd && b.r.ampStart <= a.r.ampEnd) {
+        (overlaps[a.rsid] ??= []).push(b.rsid);
+        (overlaps[b.rsid] ??= []).push(a.rsid);
+      }
+    }
+  }
+  return overlaps;
 }
 
 function readFileAsBase64(file: File): Promise<string> {
@@ -98,6 +126,12 @@ export default function SnpBatchPanel() {
           continue;
         }
         const productSize = b.upstream_seq.length - fwd.interval[0] + 1 + rev.interval[1];
+        // Genomic coordinates of the amplicon: the forward primer's 5' end
+        // sits `upstream_seq.length - fwd.interval[0]` bases before the
+        // variant; the reverse primer's 5' end sits `rev.interval[1]`
+        // bases after it.
+        const ampStart = b.position - (b.upstream_seq.length - fwd.interval[0]);
+        const ampEnd = b.position + rev.interval[1];
         setResults((prev) => ({
           ...prev,
           [b.rsid]: {
@@ -105,6 +139,8 @@ export default function SnpBatchPanel() {
             fwd,
             rev,
             productSize,
+            ampStart,
+            ampEnd,
             pairFound: res.primers.pair_metrics?.heterodimer.structure_found ?? false,
             pairDg: res.primers.pair_metrics?.heterodimer.dg ?? null,
           },
@@ -119,7 +155,7 @@ export default function SnpBatchPanel() {
 
   function exportCsv() {
     if (!blocks) return;
-    const header = ['gene', 'rsid', 'chrom', 'position', 'alleles', 'other_targets', 'forward_primer', 'forward_tm', 'reverse_primer', 'reverse_tm', 'product_size', 'heterodimer_found', 'heterodimer_dg', 'status'];
+    const header = ['gene', 'rsid', 'chrom', 'position', 'alleles', 'other_targets', 'forward_primer', 'forward_tm', 'reverse_primer', 'reverse_tm', 'product_size', 'amplicon_start', 'amplicon_end', 'amplicon_overlaps', 'heterodimer_found', 'heterodimer_dg', 'status'];
     const rows = blocks.map((b) => {
       const r = results[b.rsid];
       return [
@@ -134,6 +170,9 @@ export default function SnpBatchPanel() {
         r?.rev?.sequence ?? '',
         r?.rev?.tm ?? '',
         r?.productSize ?? '',
+        r?.ampStart ?? '',
+        r?.ampEnd ?? '',
+        (overlaps[b.rsid] || []).join(';'),
         r?.pairFound ?? '',
         r?.pairDg ?? '',
         r?.status ?? 'not run',
@@ -153,6 +192,15 @@ export default function SnpBatchPanel() {
 
   const doneCount = Object.values(results).filter((r) => r.status === 'done').length;
   const errorCount = Object.values(results).filter((r) => r.status === 'error').length;
+
+  // Batches top out around a few dozen SNPs, so recomputing these plainly
+  // on every render (rather than reaching for useMemo) is cheap enough.
+  const overlaps = findOverlaps(blocks || [], results);
+
+  const placedAmplicons: PlacedAmplicon[] = (blocks || [])
+    .map((b) => ({ b, r: results[b.rsid] }))
+    .filter((x): x is { b: SnpBlock; r: BatchResult & { ampStart: number; ampEnd: number; productSize: number } } => x.r?.status === 'done' && x.r.ampStart !== undefined && x.r.ampEnd !== undefined && x.r.productSize !== undefined)
+    .map(({ b, r }) => ({ rsid: b.rsid, gene: b.gene, chrom: b.chrom, position: b.position, ampStart: r.ampStart, ampEnd: r.ampEnd, productSize: r.productSize }));
 
   return (
     <div className="bg-gradient-to-br from-green-50 to-emerald-50/30 dark:from-slate-800 dark:to-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-6">
@@ -231,6 +279,7 @@ export default function SnpBatchPanel() {
                   <th className="px-2 py-2 border-b border-slate-200 dark:border-slate-700">Forward (5'→3')</th>
                   <th className="px-2 py-2 border-b border-slate-200 dark:border-slate-700">Reverse (5'→3')</th>
                   <th className="px-2 py-2 border-b border-slate-200 dark:border-slate-700">Product</th>
+                  <th className="px-2 py-2 border-b border-slate-200 dark:border-slate-700">Amplicons overlap?</th>
                   <th className="px-2 py-2 border-b border-slate-200 dark:border-slate-700">Status</th>
                 </tr>
               </thead>
@@ -255,6 +304,17 @@ export default function SnpBatchPanel() {
                       <td className="px-2 py-2 font-mono break-all">{r?.rev ? `${r.rev.sequence} (${fmt(r.rev.tm)}°C)` : '—'}</td>
                       <td className="px-2 py-2">{r?.productSize ?? '—'}</td>
                       <td className="px-2 py-2">
+                        {r?.status !== 'done' && '—'}
+                        {r?.status === 'done' &&
+                          (overlaps[b.rsid]?.length ? (
+                            <span className="text-red-600 dark:text-red-400" title={`Amplicon overlaps: ${overlaps[b.rsid].join(', ')}`}>
+                              ⚠ overlaps {overlaps[b.rsid].join(', ')}
+                            </span>
+                          ) : (
+                            <span className="text-green-600 dark:text-green-400">✓ no overlap</span>
+                          ))}
+                      </td>
+                      <td className="px-2 py-2">
                         {!r && '—'}
                         {r?.status === 'pending' && <span className="text-slate-400">queued</span>}
                         {r?.status === 'running' && <span className="text-blue-500">designing…</span>}
@@ -267,6 +327,8 @@ export default function SnpBatchPanel() {
               </tbody>
             </table>
           </div>
+
+          <SnpAmpliconMap amplicons={placedAmplicons} overlaps={overlaps} />
         </>
       )}
     </div>

@@ -138,23 +138,50 @@ function buildMergeGroups(blocks: SnpBlock[], maxGapBp: number): SnpBlock[][] {
   return groups;
 }
 
-/** From the returned candidates for one side (forward/reverse), picks the
- * first whose genomic span clears every position in `avoid` — falling back
- * to the top-ranked candidate (with `unresolved` listing what it still
- * overlaps) if none do. `hits0` is what the top-ranked candidate alone hit,
- * used to explain *why* a switch happened even when it succeeded. */
-function pickAvoidingCandidate<T>(candidates: T[], toGenomicSpan: (c: T) => [number, number], avoid: { rsid: string; pos: number }[]): { chosen: T; index: number; hits0: { rsid: string; pos: number }[]; unresolved: { rsid: string; pos: number }[] } | null {
-  if (!candidates.length) return null;
-  const hitsOf = (c: T) => {
-    const [s, e] = toGenomicSpan(c);
-    return avoid.filter((a) => a.pos >= s && a.pos <= e);
-  };
-  const hits0 = hitsOf(candidates[0]);
-  if (!hits0.length) return { chosen: candidates[0], index: 0, hits0, unresolved: [] };
-  for (let i = 1; i < candidates.length; i++) {
-    if (hitsOf(candidates[i]).length === 0) return { chosen: candidates[i], index: i, hits0, unresolved: [] };
+/** Picks one (forward, reverse) candidate pair jointly, in ranked order,
+ * for two constraints that can't be resolved independently per side since
+ * they're properties of the *pair*: clearing every `avoid` position (a
+ * primer sitting on an unrelated listed SNP can silently fail to anneal
+ * on the allele it doesn't match) and - if `maxProduct` is set - not
+ * producing a longer product than that. Scans `fwdCandidates` outer,
+ * `revCandidates` inner, both already primer3-ranked, so the first pair
+ * satisfying everything is also the best-ranked one that does. Relaxes
+ * one constraint at a time when nothing satisfies both (avoid first, kept
+ * over length, since an unresolved overlap risks a silent allele dropout
+ * a sequencer won't flag, where an oversized product is at least visible
+ * on a gel/trace) before finally falling back to the top-ranked pair
+ * outright, so a design is always returned - `tooLong`/`avoidUnresolved`
+ * report which constraints, if any, that final pick still fails. */
+function pickPair<T extends { interval: [number, number] }>(
+  fwdCandidates: T[],
+  revCandidates: T[],
+  fwdSpan: (c: T) => [number, number],
+  revSpan: (c: T) => [number, number],
+  ampOf: (fwd: T, rev: T) => { ampStart: number; ampEnd: number; productSize: number },
+  avoid: { rsid: string; pos: number }[],
+  maxProduct: number | undefined,
+): { fwd: T; fwdIndex: number; rev: T; revIndex: number; ampStart: number; ampEnd: number; productSize: number; avoidHits0: { rsid: string; pos: number }[]; avoidUnresolved: { rsid: string; pos: number }[]; tooLong: boolean } | null {
+  if (!fwdCandidates.length || !revCandidates.length) return null;
+
+  const hitsOf = (span: [number, number]) => avoid.filter((a) => a.pos >= span[0] && a.pos <= span[1]);
+  const avoidHits0 = [...hitsOf(fwdSpan(fwdCandidates[0])), ...hitsOf(revSpan(revCandidates[0]))];
+
+  for (const requireLength of maxProduct !== undefined ? [true, false] : [false]) {
+    for (let i = 0; i < fwdCandidates.length; i++) {
+      if (hitsOf(fwdSpan(fwdCandidates[i])).length > 0) continue;
+      for (let j = 0; j < revCandidates.length; j++) {
+        if (hitsOf(revSpan(revCandidates[j])).length > 0) continue;
+        const amp = ampOf(fwdCandidates[i], revCandidates[j]);
+        if (requireLength && amp.productSize > maxProduct!) continue;
+        return { fwd: fwdCandidates[i], fwdIndex: i, rev: revCandidates[j], revIndex: j, ...amp, avoidHits0, avoidUnresolved: [], tooLong: maxProduct !== undefined && amp.productSize > maxProduct };
+      }
+    }
   }
-  return { chosen: candidates[0], index: 0, hits0, unresolved: hits0 };
+
+  // Nothing clears `avoid` at all (with or without the length cap) - fall
+  // back to the top-ranked pair, reporting every constraint it still fails.
+  const amp = ampOf(fwdCandidates[0], revCandidates[0]);
+  return { fwd: fwdCandidates[0], fwdIndex: 0, rev: revCandidates[0], revIndex: 0, ...amp, avoidHits0, avoidUnresolved: avoidHits0, tooLong: maxProduct !== undefined && amp.productSize > maxProduct };
 }
 
 /** Every pair of same-chromosome amplicons whose [ampStart, ampEnd] spans
@@ -210,6 +237,7 @@ export default function SnpBatchPanel() {
 
   const [flankWindow, setFlankWindow] = useState('130');
   const [mergeDistance, setMergeDistance] = useState('20');
+  const [maxProduct, setMaxProduct] = useState('');
   const [engine, setEngine] = useState<DesignEngine>('strider');
   const [results, setResults] = useState<Record<string, BatchResult>>({});
   const [running, setRunning] = useState(false);
@@ -368,57 +396,65 @@ export default function SnpBatchPanel() {
           continue;
         }
 
-        // Prefer a candidate whose binding site clears every other listed
-        // SNP known to share this window (any member's `other_targets`,
+        // Prefer a candidate PAIR that both clears every other listed SNP
+        // known to share this window (any member's `other_targets`,
         // excluding this group's own rsIDs - those are inside the
-        // amplicon on purpose) — a primer sitting on an unrelated
+        // amplicon on purpose) - a primer sitting on an unrelated
         // polymorphism can silently fail to anneal on the allele it
-        // doesn't match (allele dropout), which matters more than the
-        // amplicons merely overlapping.
+        // doesn't match (allele dropout) - and, if a max product size is
+        // set, doesn't produce a longer product than that. Genomic
+        // coordinates: the forward primer's 5' end sits at
+        // `combinedStart + fwd.interval[0]`; the reverse primer's 5' end
+        // sits `rev.interval[1]` bases after the group's rightmost variant
+        // (for a group of one, `combinedStart`/`lastPos` are just that
+        // block's own `interval_start`/`position`, matching the original
+        // single-SNP formula exactly).
         const groupRsids = new Set(group.map((b) => b.rsid));
         const avoid = group
           .flatMap((b) => b.other_targets)
           .filter((rsid) => !groupRsids.has(rsid))
           .map((rsid) => ({ rsid, pos: positionByRsid.get(rsid) }))
           .filter((x): x is { rsid: string; pos: number } => x.pos !== undefined);
-        const fwdPick = pickAvoidingCandidate(fwdCandidates, (c) => [combinedStart + c.interval[0], combinedStart + c.interval[1] - 1], avoid)!;
-        const revPick = pickAvoidingCandidate(revCandidates, (c) => [lastPos + 1 + c.interval[0], lastPos + c.interval[1]], avoid)!;
-        const fwd = fwdPick.chosen;
-        const rev = revPick.chosen;
+        const maxProductBp = maxProduct.trim() ? parseInt(maxProduct, 10) : undefined;
+        const pick = pickPair(
+          fwdCandidates,
+          revCandidates,
+          (c) => [combinedStart + c.interval[0], combinedStart + c.interval[1] - 1],
+          (c) => [lastPos + 1 + c.interval[0], lastPos + c.interval[1]],
+          (fwdC, revC) => {
+            const ampStart = combinedStart + fwdC.interval[0];
+            const ampEnd = lastPos + revC.interval[1];
+            return { ampStart, ampEnd, productSize: ampEnd - ampStart + 1 };
+          },
+          avoid,
+          maxProductBp,
+        )!;
+        const fwd = pick.fwd;
+        const rev = pick.rev;
 
         const notes: BatchResult['notes'] = [];
-        if (fwdPick.unresolved.length) {
-          notes.push({ tone: 'danger', text: `Forward primer overlaps ${fwdPick.unresolved.map((h) => h.rsid).join(', ')} (all ${fwdCandidates.length} candidates do; review manually)` });
-        } else if (fwdPick.hits0.length) {
-          notes.push({ tone: 'accent', text: `Forward: used alt candidate #${fwdPick.index + 1} to avoid ${fwdPick.hits0.map((h) => h.rsid).join(', ')}` });
+        if (pick.avoidUnresolved.length) {
+          notes.push({ tone: 'danger', text: `Overlaps ${[...new Set(pick.avoidUnresolved.map((h) => h.rsid))].join(', ')} (no candidate pair clears it; review manually)` });
+        } else if (pick.avoidHits0.length) {
+          notes.push({ tone: 'accent', text: `Used alt candidates (fwd #${pick.fwdIndex + 1}, rev #${pick.revIndex + 1}) to avoid ${[...new Set(pick.avoidHits0.map((h) => h.rsid))].join(', ')}` });
         }
-        if (revPick.unresolved.length) {
-          notes.push({ tone: 'danger', text: `Reverse primer overlaps ${revPick.unresolved.map((h) => h.rsid).join(', ')} (all ${revCandidates.length} candidates do; review manually)` });
-        } else if (revPick.hits0.length) {
-          notes.push({ tone: 'accent', text: `Reverse: used alt candidate #${revPick.index + 1} to avoid ${revPick.hits0.map((h) => h.rsid).join(', ')}` });
+        if (pick.tooLong) {
+          notes.push({ tone: 'danger', text: `Product ${pick.productSize} bp exceeds the ${maxProductBp} bp max (no candidate pair fits; review manually)` });
         }
 
-        // Genomic coordinates of the amplicon: the forward primer's 5' end
-        // sits at `combinedStart + fwd.interval[0]`; the reverse primer's
-        // 5' end sits `rev.interval[1]` bases after the group's rightmost
-        // variant (for a group of one, `combinedStart`/`lastPos` are just
-        // that block's own `interval_start`/`position`, matching the
-        // original single-SNP formula exactly).
-        const ampStart = combinedStart + fwd.interval[0];
-        const ampEnd = lastPos + rev.interval[1];
-        const productSize = ampEnd - ampStart + 1;
         // The server's heterodimer check is only ever computed for the
         // top-ranked forward/reverse pair — if either side switched
-        // candidates to avoid a neighbor, that check no longer applies to
-        // the pair actually used, so don't report it as if it did.
-        const usedDefaultPair = fwdPick.index === 0 && revPick.index === 0;
+        // candidates to avoid a neighbor or fit the length cap, that check
+        // no longer applies to the pair actually used, so don't report it
+        // as if it did.
+        const usedDefaultPair = pick.fwdIndex === 0 && pick.revIndex === 0;
         const result: BatchResult = {
           status: 'done',
           fwd,
           rev,
-          productSize,
-          ampStart,
-          ampEnd,
+          productSize: pick.productSize,
+          ampStart: pick.ampStart,
+          ampEnd: pick.ampEnd,
           pairFound: usedDefaultPair ? (res.primers.pair_metrics?.heterodimer.structure_found ?? false) : undefined,
           pairDg: usedDefaultPair ? (res.primers.pair_metrics?.heterodimer.dg ?? null) : undefined,
           notes,
@@ -714,6 +750,16 @@ export default function SnpBatchPanel() {
                   placeholder="e.g. 20"
                   value={mergeDistance}
                   onChange={(e) => setMergeDistance(e.target.value)}
+                  className="w-56 tabular-nums"
+                />
+              </Field>
+              <Field label="Max amplicon length (bp; blank = no limit)">
+                <TextInput
+                  type="number"
+                  min={1}
+                  placeholder="e.g. 260 for 2x150bp reads…"
+                  value={maxProduct}
+                  onChange={(e) => setMaxProduct(e.target.value)}
                   className="w-56 tabular-nums"
                 />
               </Field>

@@ -423,8 +423,10 @@ function buildCells(
         const pos = s.startPos + ci;
         const within = pos >= live.start && pos < live.end;
         const className = within ? colorClassName(s.key!) : (s.fallbackClassName ?? s.className);
-        const isEdge = ci === 0 || ci === chars.length - 1;
-        const type: 'move' | 'left' | 'right' = ci === 0 ? 'left' : ci === chars.length - 1 ? 'right' : 'move';
+        // Handles sit on the selection's own first/last base, not this
+        // piece's - a primer split across chunks has several pieces.
+        const type: 'move' | 'left' | 'right' = pos === sel.start ? 'left' : pos === sel.end - 1 ? 'right' : 'move';
+        const isEdge = type !== 'move';
         cells.push({ text: ch, className, startPos: pos, cursorClass: isEdge ? 'cursor-ew-resize' : 'cursor-grab', onMouseDown: (e) => startDrag(e, s.key!, type, sel), region: s.region });
       });
       continue;
@@ -887,19 +889,17 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     return [...up, ...gene, ...down];
   }, [data, selections, truncateIntrons, allVariantMarkers]);
 
-  // A selection is only draggable when its highlighted primer/probe render
-  // is exactly one contiguous span - split across an exon/CDS/UTR boundary
-  // (or clamped away entirely), it falls back to plain read-only
-  // highlighting instead (see `sliceWithIntervals`'s and `geneBlockSegments`'
-  // docs for why crossing those boundaries isn't supported in v1).
+  // Every selection rendered in its own region is draggable, even when its
+  // highlight is split into several pieces - a primer straddling an exon/
+  // intron or CDS/UTR boundary is drawn as one piece per chunk. (It used to
+  // require exactly one piece, so a primer dragged across such a boundary
+  // turned read-only and could never be moved back.) `buildCells` decides
+  // resize handles by the primer's real first/last base, so the pieces
+  // behave as one span.
   const editableKeys = useMemo(() => {
     if (!interactive) return new Set<keyof Selections>();
-    const counts = new Map<keyof Selections, number>();
-    for (const s of segments) {
-      if (s.key && !s.isBuffer) counts.set(s.key, (counts.get(s.key) ?? 0) + 1);
-    }
     const keys = new Set<keyof Selections>();
-    for (const [k, c] of counts) if (c === 1) keys.add(k);
+    for (const s of segments) if (s.key && !s.isBuffer) keys.add(s.key);
     return keys;
   }, [segments, interactive]);
 

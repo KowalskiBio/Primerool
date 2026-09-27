@@ -21,7 +21,12 @@ interface Tip {
   lines: string[];
 }
 
-function caretAt(x: number, y: number): { node: Node; offset: number } | null {
+/** The text node and insertion offset under a point, or `null` - the
+ * caret APIs return the nearest insertion point (between characters, and
+ * even from blank space past a short row's end). Exported for the
+ * sequence map's right-drag selection, which anchors/extends the
+ * browser's selection at the pointer. */
+export function caretAtPoint(x: number, y: number): { node: Node; offset: number } | null {
   const doc = document as Document & {
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
   };
@@ -39,7 +44,7 @@ function caretAt(x: number, y: number): { node: Node; offset: number } | null {
  * space past a short row's end), so both neighbouring characters are
  * checked against the actual pointer position rather than trusting it. */
 function baseAtPoint(x: number, y: number): HoveredBase | null {
-  const caret = caretAt(x, y);
+  const caret = caretAtPoint(x, y);
   if (!caret || caret.node.nodeType !== Node.TEXT_NODE) return null;
   const span = caret.node.parentElement;
   const region = span?.dataset.region;

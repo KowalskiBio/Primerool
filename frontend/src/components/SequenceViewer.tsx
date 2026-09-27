@@ -8,6 +8,7 @@ import { localGenePos } from '../utils/variantMapping';
 import { describeGenePosition, useBaseHover } from './BaseHoverTooltip';
 import { ALL_PICK_KINDS, armsMutantTwin, type PickKind } from '../utils/mapPickMenu';
 import { useMapPickMenu } from './useMapPickMenu';
+import { useMapDragSelect } from './useMapDragSelect';
 
 interface Segment {
   text: string;
@@ -988,6 +989,10 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   }, [dragSession]);
 
   function startDrag(e: React.MouseEvent<HTMLSpanElement>, key: keyof Selections, type: 'move' | 'left' | 'right', sel: Selection) {
+    // Left button only - a right-press (or any other button) must fall
+    // through to the container, where it starts the right-drag selection
+    // below instead of moving the primer.
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     const charWidth = e.currentTarget.getBoundingClientRect().width || 8;
@@ -1010,11 +1015,12 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   // the old native `title` on the marker span (which stacked a second,
   // OS-styled tooltip on top of this one).
   const variantByRsid = useMemo(() => new Map(allVariantMarkers.map((m) => [m.rsid, m])), [allVariantMarkers]);
+  const dragSelect = useMapDragSelect({ containerRef });
   const { handlers: hoverHandlers, tooltip } = useBaseHover(({ region, pos, base, variantRsid }) => {
     const local = region === 'up' ? pos - data.upstream_len : region === 'down' ? data.gene_len + pos : pos;
     const m = variantRsid !== undefined ? variantByRsid.get(variantRsid) : undefined;
     return describeGenePosition(data, local, base, m ? `${m.rsid}${m.alleles?.length ? ` (${m.alleles.join('/')})` : ''}` : undefined);
-  }, dragSession === null && !pickMenu.busy);
+  }, dragSession === null && !pickMenu.busy && !dragSelect.active);
 
   const modeText = data.include_introns
     ? 'Genomic DNA (with introns; CDS bold, UTR highlighted)'
@@ -1141,9 +1147,11 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         ref={containerRef}
         className="sequence-viewer relative max-h-[520px] overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg border border-line bg-base p-4 text-sm"
         {...hoverHandlers}
+        onMouseDown={dragSelect.onMouseDown}
         onContextMenu={pickMenu.onContextMenu}
       >
         {tooltip}
+        {dragSelect.overlay}
         {/* Unrendered (out of flow, invisible) - measured only, to figure
          * out how many characters actually fit in one row of this
          * container at its current width/font, so rows can fill the

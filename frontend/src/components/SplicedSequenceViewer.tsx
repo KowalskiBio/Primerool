@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import type { SequenceData } from '../api/sequence';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { genomicToSpliced } from '../utils/regionMapping';
 import { describeGenePosition, useBaseHover } from './BaseHoverTooltip';
 import { useMapPickMenu } from './useMapPickMenu';
+import { useMapDragSelect } from './useMapDragSelect';
 
 interface Span {
   start: number;
@@ -113,6 +114,8 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
   }, [data]);
 
   const pickMenu = useMapPickMenu({ data, selections, onSelect, pickKinds: EXON_MAP_PICKS });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragSelect = useMapDragSelect({ containerRef });
 
   const { handlers: hoverHandlers, tooltip } = useBaseHover(({ pos, base }) => {
     const transcriptLine = `transcript position ${(pos + 1).toLocaleString('en-US')}`;
@@ -124,7 +127,7 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
       offset -= e - s;
     }
     return null;
-  }, !pickMenu.busy);
+  }, !pickMenu.busy && !dragSelect.active);
 
   return (
     <div>
@@ -132,8 +135,15 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
       <div className="mb-3 rounded-md border border-line bg-surface-2 p-2 text-sm text-ink-muted">
         Junction positions in the sequence map refer to these sequences. Horizontal bars indicate exon boundaries.
       </div>
-      <div className="sequence-viewer max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base p-4 text-sm" {...hoverHandlers} onContextMenu={pickMenu.onContextMenu}>
+      <div
+        ref={containerRef}
+        className="sequence-viewer max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base p-4 text-sm"
+        {...hoverHandlers}
+        onMouseDown={dragSelect.onMouseDown}
+        onContextMenu={pickMenu.onContextMenu}
+      >
         {tooltip}
+        {dragSelect.overlay}
         {pieces.map((p, i) =>
           p.kind === 'label' ? (
             <span key={i} className="exon-label">

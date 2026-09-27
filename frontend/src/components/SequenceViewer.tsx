@@ -337,7 +337,10 @@ const DEFAULT_LINE_WIDTH = 60;
  * whatever the container actually measures, however small, is what keeps
  * every character of every row on-screen. */
 const MIN_LINE_WIDTH = 1;
-const MAX_LINE_WIDTH = 140;
+// A safety ceiling only, far above any real screen: rows should fill
+// whatever width the map actually has - a lower cap (it was 140) left an
+// empty band on the right once the page itself got wider.
+const MAX_LINE_WIDTH = 400;
 
 /** One contiguous run of same-styled text (or a single interactive
  * character) queued for row-chunking - a resolved, render-ready form of

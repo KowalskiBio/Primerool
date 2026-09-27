@@ -95,9 +95,26 @@ pub struct TranscriptSummary {
     pub is_canonical: bool,
 }
 
+/// How a gene search query resolved to the returned gene. Anything other
+/// than `Symbol` means the gene's official symbol is *not* what the user
+/// typed - e.g. "CSN2" on NCBI is both the official symbol of beta-casein
+/// and an alias of COPS2 - so the UI must say so rather than present the
+/// hit as a plain match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GeneMatch {
+    /// The query is the gene's official symbol (case-insensitive).
+    Symbol,
+    /// The query is one of the gene's alternative symbols/synonyms.
+    Alias,
+    /// Matched by name/description text (e.g. "casein" -> CSN2).
+    Name,
+}
+
 #[derive(Debug, Clone)]
 pub struct GeneSearchResult {
     pub gene_name: String,
+    pub matched_by: GeneMatch,
     pub gene_id: String,
     pub chrom: String,
     pub strand: Strand,

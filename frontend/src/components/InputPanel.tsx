@@ -29,6 +29,9 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
   const [fastaInput, setFastaInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  /** Shown instead of `success` when a search resolved to a gene whose
+   * official symbol isn't what was typed (see `SearchGeneResponse.matched_by`). */
+  const [warning, setWarning] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [blastRunning, setBlastRunning] = useState(false);
   const [blastProgress, setBlastProgress] = useState(0);
@@ -52,10 +55,20 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
 
   async function runSearchGene(geneName: string, species: string, source: 'ensembl' | 'ncbi') {
     setError(null);
+    setWarning(null);
     setSearching(true);
     try {
       const data = await searchGene({ gene_name: geneName, species, api_source: source });
-      setSuccess(`Gene ${data.gene_name} found with ${data.transcripts.length} transcript(s).`);
+      const found = `${data.transcripts.length} transcript(s)`;
+      if (data.matched_by === 'symbol') {
+        setSuccess(`Gene ${data.gene_name} found with ${found}.`);
+      } else {
+        setSuccess(null);
+        const how = data.matched_by === 'alias' ? `is only an alias (alternative symbol) of ${data.gene_name}` : `only matched ${data.gene_name} by its name/description`;
+        setWarning(
+          `No gene has the official symbol '${data.query}' in this organism - '${data.query}' ${how}. Loaded ${data.gene_name} (${found}); make sure this is the gene you meant, or search by its official symbol.`,
+        );
+      }
       onGeneFound(data.gene_name, species, source, data.transcripts);
     } catch (e) {
       setSuccess(null);
@@ -89,6 +102,7 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
     if (!input) return;
     setError(null);
     setSuccess(null);
+    setWarning(null);
 
     if (isAccessionId(input)) {
       setSuccess(`Input '${input}' looks like an Accession ID. Resolving…`);
@@ -102,6 +116,7 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
     const raw = fastaInput.trim();
     setError(null);
     setSuccess(null);
+    setWarning(null);
     setBlastHits(null);
 
     const seqLen = raw.replace(/^>.*$/gm, '').replace(/\s/g, '').length;
@@ -183,6 +198,7 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
       include_introns: false,
       include_utr: false,
     };
+    setWarning(null);
     setSuccess(`Custom sequence loaded (${sequence.length} bp). Scroll down to view the sequence and design primers.`);
     onCustomSequence(data);
   }
@@ -336,6 +352,7 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
       )}
 
       {error && <div role="alert" className="mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{error}</div>}
+      {warning && <div role="alert" className="mt-4 mb-2 rounded-md border border-warning/25 bg-warning-subtle px-3 py-2.5 text-sm font-medium text-warning">{warning}</div>}
       {success && <div role="status" className="mt-4 mb-2 rounded-md border border-success/25 bg-success-subtle px-3 py-2.5 text-sm font-medium text-success">{success}</div>}
     </div>
   );

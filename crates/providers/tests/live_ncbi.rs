@@ -11,7 +11,7 @@
 //! real parity validation against the existing Flask app's actual output,
 //! not just "does it not crash."
 
-use providers::{Feature, SequenceProvider, Strand};
+use providers::{Feature, GeneMatch, SequenceProvider, Strand};
 
 #[tokio::test]
 #[ignore = "hits live NCBI E-utilities; run explicitly"]
@@ -65,4 +65,20 @@ async fn malat1_noncoding_transcript_has_no_cds() {
         let tinfo = provider.get_transcript_details(&t.id).await.unwrap().unwrap();
         assert!(tinfo.cds.is_empty(), "{} should have no CDS (MALAT1 is non-coding)", t.id);
     }
+}
+
+#[tokio::test]
+#[ignore = "hits live NCBI E-utilities; run explicitly"]
+async fn symbol_search_prefers_official_symbol_over_alias() {
+    let provider = providers::ncbi::NcbiProvider::new();
+
+    // `CSN2[sym]` also hits COPS2 (alias CSN2), and NCBI lists it first.
+    let gene = provider.search_gene("csn2", "homo_sapiens").await.unwrap().expect("CSN2 should resolve on NCBI");
+    assert_eq!(gene.gene_name, "CSN2");
+    assert_eq!(gene.matched_by, GeneMatch::Symbol);
+
+    // An alias-only query still resolves, but says it did so via an alias.
+    let gene = provider.search_gene("SGN2", "homo_sapiens").await.unwrap().expect("SGN2 is an alias of COPS2");
+    assert_eq!(gene.gene_name, "COPS2");
+    assert_eq!(gene.matched_by, GeneMatch::Alias);
 }

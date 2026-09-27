@@ -18,7 +18,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::{
-    revcomp, Feature, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo,
+    revcomp, Feature, GeneMatch, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo,
     TranscriptSummary, VariantHit,
 };
 
@@ -271,8 +271,20 @@ impl EnsemblProvider {
             })
             .unwrap_or_default();
 
+        // `/lookup/symbol` also resolves synonyms, answering with a gene whose
+        // own symbol (`display_name`) differs from the query - report that
+        // gene's real symbol and flag the alias match instead of echoing
+        // the query back as if it were the gene's name.
+        let display_name = data.get("display_name").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let matched_by = match display_name {
+            Some(d) if !d.eq_ignore_ascii_case(gene_name) => GeneMatch::Alias,
+            _ => GeneMatch::Symbol,
+        };
+        let gene_name = display_name.unwrap_or(gene_name).to_string();
+
         Some(GeneSearchResult {
-            gene_name: gene_name.to_string(),
+            gene_name,
+            matched_by,
             gene_id: data.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
             chrom: data.get("seq_region_name").map(value_to_display_string).unwrap_or_default(),
             strand: Strand::from_ensembl_i8(data.get("strand").and_then(|v| v.as_i64()).unwrap_or(1)),
@@ -601,6 +613,17 @@ mod tests {
     fn parse_gene_search_rejects_non_gene_object_type() {
         let data = serde_json::json!({"object_type": "Transcript"});
         assert!(EnsemblProvider::parse_gene_search("X", &data).is_none());
+    }
+
+    #[test]
+    fn parse_gene_search_flags_synonym_hits() {
+        let exact = serde_json::json!({"object_type": "Gene", "id": "ENSG1", "display_name": "CSN2"});
+        let r = EnsemblProvider::parse_gene_search("csn2", &exact).unwrap();
+        assert_eq!((r.gene_name.as_str(), r.matched_by), ("CSN2", GeneMatch::Symbol));
+
+        let synonym = serde_json::json!({"object_type": "Gene", "id": "ENSG2", "display_name": "COPS2"});
+        let r = EnsemblProvider::parse_gene_search("SGN2", &synonym).unwrap();
+        assert_eq!((r.gene_name.as_str(), r.matched_by), ("COPS2", GeneMatch::Alias));
     }
 
     #[test]

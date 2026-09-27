@@ -4,6 +4,8 @@ use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
+use providers::GeneMatch;
+
 use crate::error::AppError;
 use crate::routes::DEFAULT_SPECIES;
 use crate::state::AppState;
@@ -34,6 +36,10 @@ pub struct TranscriptJson {
 #[derive(Debug, Serialize)]
 pub struct SearchGeneResponse {
     pub gene_name: String,
+    /// What the user actually typed, so the UI can say e.g. "'csn2' is an
+    /// alias of COPS2" when `matched_by` isn't `symbol`.
+    pub query: String,
+    pub matched_by: GeneMatch,
     pub transcripts: Vec<TranscriptJson>,
 }
 
@@ -70,6 +76,8 @@ pub async fn search_gene(State(state): State<AppState>, Json(req): Json<SearchGe
 
     Ok(Json(SearchGeneResponse {
         gene_name: result.gene_name,
+        query: gene_name_raw,
+        matched_by: result.matched_by,
         transcripts: result
             .transcripts
             .into_iter()

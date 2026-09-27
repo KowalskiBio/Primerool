@@ -22,7 +22,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::species_map::ensembl_to_binomial_or_guess;
-use crate::{revcomp, Feature, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo, TranscriptSummary, VariantHit};
+use crate::{revcomp, Feature, GeneMatch, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo, TranscriptSummary, VariantHit};
 
 const EUTILS: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const MIN_INTERVAL: Duration = Duration::from_millis(340); // ~3 req/s, no API key
@@ -206,7 +206,11 @@ impl NcbiProvider {
     /// Rank: exact symbol > description starts-with > exact alias >
     /// description contains. Ties keep esearch relevance order
     /// (`min_by_key`/`min` both return the first of equal minima).
-    async fn rank_name_candidates(&self, query: &str, ids: &[String]) -> Result<Option<String>, ProviderError> {
+    /// Also returns *how* the winner matched, so a non-symbol hit is
+    /// reported as such instead of passed off as the gene asked for, and
+    /// the winner's own esummary record, so `search_gene` needn't fetch it
+    /// a second time (NCBI allows only ~3 req/s without an API key).
+    async fn rank_name_candidates(&self, query: &str, ids: &[String]) -> Result<Option<(String, GeneMatch, Value)>, ProviderError> {
         if ids.is_empty() {
             return Ok(None);
         }
@@ -234,8 +238,16 @@ impl NcbiProvider {
         };
 
         match ids.iter().min_by_key(|gid| score(gid)) {
-            Some(best) if score(best) < 99 => Ok(Some(best.clone())),
-            _ => Ok(None),
+            Some(best) => {
+                let kind = match score(best) {
+                    0 => GeneMatch::Symbol,
+                    2 => GeneMatch::Alias,
+                    99 => return Ok(None),
+                    _ => GeneMatch::Name,
+                };
+                Ok(Some((best.clone(), kind, result[best.as_str()].clone())))
+            }
+            None => Ok(None),
         }
     }
 
@@ -373,25 +385,29 @@ impl SequenceProvider for NcbiProvider {
 
         // Step 1: esearch -> gene ID
         // 1a: exact symbol match (fast path, e.g. MTHFR)
+        // `[sym]` matches aliases too, in no useful order - "CSN2" returns
+        // COPS2 (alias CSN2) ahead of CSN2 itself - so rank the hits rather
+        // than taking the first.
         let term = format!("{gene_name}[sym] AND {organism}[orgn]");
         let ids = self.esearch_ids("gene", &term, 20).await?;
-        let gene_id = match ids.first() {
-            Some(id) => id.clone(),
+        let ranked = self.rank_name_candidates(gene_name, &ids).await?;
+        let (gene_id, matched_by, summary) = match ranked {
+            Some(hit) => hit,
             None => {
                 // 1b: name/protein-family fallback (e.g. "casein" -> CSN2),
                 // ranked strictly so summary-text mentions never win
                 let term2 = format!("{gene_name} AND {organism}[orgn]");
                 let candidates = self.esearch_ids("gene", &term2, 50).await?;
                 match self.rank_name_candidates(gene_name, &candidates).await? {
-                    Some(id) => id,
+                    Some(hit) => hit,
                     None => return Ok(None),
                 }
             }
         };
 
-        // Step 2: esummary -> gene info
-        let esummary = self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "gene"), ("id", &gene_id), ("retmode", "json")]).await?;
-        let summary = &esummary["result"][&gene_id];
+        // Step 2: gene info - the winner's esummary record, already
+        // fetched by `rank_name_candidates` above.
+        let summary = &summary;
 
         // Official symbol (e.g. "casein" -> "CSN2", "mthfr" -> "MTHFR") —
         // what the frontend displays and downstream searches should use.
@@ -499,6 +515,7 @@ impl SequenceProvider for NcbiProvider {
 
         Ok(Some(GeneSearchResult {
             gene_name: official_name,
+            matched_by,
             gene_id,
             chrom,
             strand,

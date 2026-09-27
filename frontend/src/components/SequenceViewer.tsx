@@ -7,6 +7,10 @@ import { analyzePrimer } from '../api/design';
 import { lookupVariant, type VariantHit } from '../api/variants';
 import { localGenePos } from '../utils/variantMapping';
 import { describeGenePosition, useBaseHover } from './BaseHoverTooltip';
+import { resolveMapSelection, type MapSelection } from '../utils/mapSelection';
+import SequenceContextMenu, { type MapAction } from './SequenceContextMenu';
+import BlastModal from './BlastModal';
+import PrimerStructureModal from './PrimerStructureModal';
 
 interface Segment {
   text: string;
@@ -897,13 +901,64 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     const isReverseStrand = sel.primerSeq !== sel.bindingSeq;
     const primerSeq = isReverseStrand ? reverseComplement(bindingSeq) : bindingSeq;
 
-    const next: Selection = { ...sel, start, end, primerSeq, bindingSeq, source: 'manual', analysis: undefined };
-    onSelect(session.selKey, next);
+    commitSelection(session.selKey, { ...sel, start, end, primerSeq, bindingSeq, source: 'manual', analysis: undefined });
+  }
 
-    analyzePrimer({ sequence: primerSeq }).then(
-      (analysis) => onSelect(session.selKey, { ...next, analysis }),
-      () => onSelect(session.selKey, { ...next, analysis: null }),
+  /** Sets a primer/probe pick, then fills in its Strider analysis (Tm/GC/
+   * hairpin/self-dimer) with a second `onSelect` once it arrives - shared
+   * by drag-resize commits and the right-click menu's F/R/P picks. A
+   * parent reading `analysis === undefined` as "still computing" (e.g.
+   * `AmpliconDetailModal`) sees both calls. */
+  function commitSelection(key: keyof Selections, next: Selection) {
+    if (!onSelect) return;
+    onSelect(key, next);
+    analyzePrimer({ sequence: next.primerSeq, engine: 'strider' }).then(
+      (analysis) => onSelect(key, { ...next, analysis }),
+      () => onSelect(key, { ...next, analysis: null }),
     );
+  }
+
+  // Right-click menu over a text selection in the map (see
+  // `SequenceContextMenu`), plus the BLAST / structure popups it opens.
+  const [menu, setMenu] = useState<{ x: number; y: number; target: MapSelection | { error: string } } | null>(null);
+  const [blastSeq, setBlastSeq] = useState<string | null>(null);
+  const [structureSeq, setStructureSeq] = useState<string | null>(null);
+
+  function onMapContextMenu(e: React.MouseEvent<HTMLDivElement>) {
+    const target = resolveMapSelection(e.currentTarget);
+    if (!target) return; // nothing selected in the map - keep the browser's own menu
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, target });
+  }
+
+  /** 1-based position from the gene start (negative upstream, no 0) of a
+   * region-local index - same convention as the hover tooltip. */
+  function genePosLabel(region: MapSelection['region'], pos: number): string {
+    const local = region === 'up' ? pos - data.upstream_len : region === 'down' ? data.gene_len + pos : pos;
+    return (local >= 0 ? local + 1 : local).toLocaleString('en-US');
+  }
+
+  function runMapAction(action: MapAction) {
+    if (!menu || 'error' in menu.target) return;
+    const { region, start, end } = menu.target;
+    const slice = regionRawSeq(data, region).substring(start, end).toUpperCase();
+    setMenu(null);
+    window.getSelection()?.removeAllRanges();
+
+    if (action === 'B') {
+      setBlastSeq(slice);
+      return;
+    }
+    if (action === 'S') {
+      setStructureSeq(slice);
+      return;
+    }
+    // F/R/P: a flank pick is a WGA primer, a gene pick a gene primer/probe.
+    const inGene = region === 'gene';
+    const key: keyof Selections = action === 'P' ? 'geneProbe' : inGene ? (action === 'F' ? 'geneForward' : 'geneReverse') : action === 'F' ? 'wgaForward' : 'wgaReverse';
+    if (action === 'P' && !inGene) return;
+    const primerSeq = action === 'R' ? reverseComplement(slice) : slice;
+    commitSelection(key, { region, start, end, primerSeq, bindingSeq: slice, source: 'manual', analysis: undefined });
   }
 
   useEffect(() => {
@@ -948,7 +1003,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   const { handlers: hoverHandlers, tooltip } = useBaseHover(({ region, pos, base }) => {
     const local = region === 'up' ? pos - data.upstream_len : region === 'down' ? data.gene_len + pos : pos;
     return describeGenePosition(data, local, base);
-  }, dragSession === null);
+  }, dragSession === null && menu === null);
 
   const modeText = data.include_introns
     ? 'Genomic DNA (with introns; CDS bold, UTR highlighted)'
@@ -1073,6 +1128,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         ref={containerRef}
         className="sequence-viewer relative max-h-[520px] overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg border border-line bg-base p-4 text-sm"
         {...hoverHandlers}
+        onContextMenu={onMapContextMenu}
       >
         {tooltip}
         {/* Unrendered (out of flow, invisible) - measured only, to figure
@@ -1122,6 +1178,27 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
           </div>
         ))}
       </div>
+
+      {menu && (
+        <SequenceContextMenu
+          x={menu.x}
+          y={menu.y}
+          target={
+            'error' in menu.target
+              ? menu.target
+              : {
+                  length: menu.target.end - menu.target.start,
+                  heading: `${menu.target.end - menu.target.start} bp · ${genePosLabel(menu.target.region, menu.target.start)}–${genePosLabel(menu.target.region, menu.target.end - 1)}`,
+                  inGene: menu.target.region === 'gene',
+                }
+          }
+          canPick={interactive}
+          onAction={runMapAction}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      <BlastModal sequence={blastSeq} onClose={() => setBlastSeq(null)} />
+      <PrimerStructureModal pair={structureSeq ? { label: `${structureSeq.length} bp selection`, forward: structureSeq } : null} onClose={() => setStructureSeq(null)} />
     </div>
   );
 }

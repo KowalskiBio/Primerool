@@ -3,7 +3,9 @@ import Button from './ui/Button';
 
 interface Props {
   hits: BlastHit[];
-  onUse: (hit: BlastHit) => void;
+  /** Absent hides the "Action" column - e.g. BLASTing a stretch picked from
+   * the sequence map, where there's no gene to load from a hit. */
+  onUse?: (hit: BlastHit) => void;
 }
 
 export default function BlastResultsTable({ hits, onUse }: Props) {
@@ -22,7 +24,7 @@ export default function BlastResultsTable({ hits, onUse }: Props) {
             <th className="border-b border-line px-4 py-3 font-medium">Query Cover</th>
             <th className="border-b border-line px-4 py-3 font-medium">Identity</th>
             <th className="border-b border-line px-4 py-3 font-medium">E-value</th>
-            <th className="border-b border-line px-4 py-3 font-medium">Action</th>
+            {onUse && <th className="border-b border-line px-4 py-3 font-medium">Action</th>}
           </tr>
         </thead>
         <tbody>
@@ -48,11 +50,13 @@ export default function BlastResultsTable({ hits, onUse }: Props) {
               <td className="px-4 py-3 tabular-nums">{hit.query_cover ?? '-'}%</td>
               <td className="px-4 py-3 tabular-nums">{hit.identity_pct}%</td>
               <td className="px-4 py-3 tabular-nums">{hit.evalue !== null ? hit.evalue.toExponential(1) : '-'}</td>
-              <td className="px-4 py-3">
-                <Button size="sm" onClick={() => onUse(hit)}>
-                  Use
-                </Button>
-              </td>
+              {onUse && (
+                <td className="px-4 py-3">
+                  <Button size="sm" onClick={() => onUse(hit)}>
+                    Use
+                  </Button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

@@ -336,6 +336,9 @@ export function designArms(req: DesignArmsRequest): Promise<DesignArmsResponse> 
 
 export interface AnalyzePrimerRequest {
   sequence: string;
+  /** Thermo backend; the server treats an omitted field as `'primer3'`
+   * (this route's original behaviour), unlike the design routes. */
+  engine?: DesignEngine;
   mv_conc?: number;
   dv_conc?: number;
   dntp_conc?: number;

@@ -5,9 +5,11 @@ import DimerSvg from './DimerSvg';
 
 interface Props {
   /** The pair to analyze, or `null` to render nothing. Both sequences are
-   * always needed (not just whichever primer was clicked) since the
-   * heterodimer check is between them. */
-  pair: { forward: string; reverse: string } | null;
+   * needed for a pair (not just whichever primer was clicked) since the
+   * heterodimer check is between them. Without `reverse` it analyzes
+   * `forward` alone (hairpin + self-dimer, no heterodimer) - e.g. a
+   * stretch picked from the sequence map's right-click menu. */
+  pair: { forward: string; reverse?: string } | null;
 }
 
 function fmtDg(v: number): string {
@@ -81,12 +83,16 @@ export default function PrimerStructurePanel({ pair }: Props) {
   // to - see `SnpGeneMapModal.tsx`'s `resultFor` for the same pattern.
   const [resultFor, setResultFor] = useState<string | null>(null);
 
-  const pairKey = pair ? `${pair.forward}:${pair.reverse}` : null;
+  const pairKey = pair ? `${pair.forward}:${pair.reverse ?? ''}` : null;
 
   useEffect(() => {
     if (!pair) return;
     let cancelled = false;
-    Promise.all([analyzeStructure({ sequence: pair.forward, partner_sequence: pair.reverse }), analyzeStructure({ sequence: pair.reverse, partner_sequence: pair.forward })])
+    const reverse = pair.reverse;
+    Promise.all([
+      analyzeStructure({ sequence: pair.forward, partner_sequence: reverse }),
+      reverse ? analyzeStructure({ sequence: reverse, partner_sequence: pair.forward }) : Promise.resolve(null),
+    ])
       .then(([fwd, rev]) => {
         if (cancelled) return;
         setFwdAnalysis(fwd);
@@ -122,14 +128,15 @@ export default function PrimerStructurePanel({ pair }: Props) {
           {shownError}
         </div>
       )}
-      {shownFwd && shownRev && (
+      {shownFwd && (
         <div>
           {/* Forward, reverse, then the heterodimer, each at full width -
               side-by-side columns left each candidate grid too narrow and
-              forced horizontal scrolling. */}
-          <div className="mb-5 border-b border-line pb-5">
+              forced horizontal scrolling. A single sequence shows just its
+              own block. */}
+          <div className={pair.reverse ? 'mb-5 border-b border-line pb-5' : ''}>
             <p className="mb-2 break-all font-mono text-xs text-ink">
-              Forward: {pair.forward} <span className="text-ink-faint">({pair.forward.length} bp)</span>
+              {pair.reverse ? 'Forward' : 'Selection'}: {pair.forward} <span className="text-ink-faint">({pair.forward.length} bp)</span>
             </p>
             <CategorySection title="Hairpin (Strider MFE)">
               <CandidateStrip candidates={shownFwd.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.forward} structure={s} />} />
@@ -138,20 +145,24 @@ export default function PrimerStructurePanel({ pair }: Props) {
               <CandidateStrip candidates={shownFwd.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.forward} structure={s} />} wide />
             </CategorySection>
           </div>
-          <div className="mb-5 border-b border-line pb-5">
-            <p className="mb-2 break-all font-mono text-xs text-ink">
-              Reverse: {pair.reverse} <span className="text-ink-faint">({pair.reverse.length} bp)</span>
-            </p>
-            <CategorySection title="Hairpin (Strider MFE)">
-              <CandidateStrip candidates={shownRev.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.reverse} structure={s} />} />
-            </CategorySection>
-            <CategorySection title="Self-dimer (Strider MFE)">
-              <CandidateStrip candidates={shownRev.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.reverse} seq2={pair.reverse} structure={s} />} wide />
-            </CategorySection>
-          </div>
-          <CategorySection title="Heterodimer - forward × reverse (Strider MFE)">
-            <CandidateStrip candidates={shownFwd.heterodimer?.with_bulge.candidates ?? []} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.reverse} structure={s} />} wide />
-          </CategorySection>
+          {pair.reverse && shownRev && (
+            <>
+              <div className="mb-5 border-b border-line pb-5">
+                <p className="mb-2 break-all font-mono text-xs text-ink">
+                  Reverse: {pair.reverse} <span className="text-ink-faint">({pair.reverse.length} bp)</span>
+                </p>
+                <CategorySection title="Hairpin (Strider MFE)">
+                  <CandidateStrip candidates={shownRev.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.reverse!} structure={s} />} />
+                </CategorySection>
+                <CategorySection title="Self-dimer (Strider MFE)">
+                  <CandidateStrip candidates={shownRev.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.reverse!} seq2={pair.reverse!} structure={s} />} wide />
+                </CategorySection>
+              </div>
+              <CategorySection title="Heterodimer - forward × reverse (Strider MFE)">
+                <CandidateStrip candidates={shownFwd.heterodimer?.with_bulge.candidates ?? []} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.reverse!} structure={s} />} wide />
+              </CategorySection>
+            </>
+          )}
         </div>
       )}
     </div>

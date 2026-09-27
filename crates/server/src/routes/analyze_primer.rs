@@ -4,17 +4,20 @@
 //! frontend's interactive primer/probe editing (dragging a primer's ends or
 //! its whole span across the sequence view) produces an edited interval with
 //! no backend-computed analysis of its own, and this is what recomputes one.
-//! Reuses `engine::analyze::analyze_primer` exactly as `/idt/analyze` does —
-//! same `Primer3Backend` choice, same `ThermoParams` shape and defaults.
+//! Reuses `engine::analyze::analyze_primer` exactly as `/idt/analyze` does,
+//! with the same `ThermoParams` shape and defaults. `engine` picks the
+//! backend via `select_backend` (`"strider"` or `"primer3"`), but an
+//! omitted field means primer3 here, not Strider - this route predates the
+//! engine choice and its original callers expect primer3 numbers.
 
 use axum::Json;
 use serde::Deserialize;
 
 use engine::analyze::{analyze_primer, PrimerAnalysis};
 use engine::backend::ThermoParams;
-use engine::backend_primer3::Primer3Backend;
 
 use crate::error::AppError;
+use crate::routes::select_backend;
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -24,11 +27,12 @@ pub struct AnalyzePrimerRequest {
     pub dv_conc: f64,
     pub dntp_conc: f64,
     pub dna_conc: f64,
+    pub engine: String,
 }
 
 impl Default for AnalyzePrimerRequest {
     fn default() -> Self {
-        Self { sequence: String::new(), mv_conc: 50.0, dv_conc: 10.0, dntp_conc: 0.8, dna_conc: 250.0 }
+        Self { sequence: String::new(), mv_conc: 50.0, dv_conc: 10.0, dntp_conc: 0.8, dna_conc: 250.0, engine: "primer3".to_string() }
     }
 }
 
@@ -38,7 +42,7 @@ pub async fn analyze_primer_route(Json(req): Json<AnalyzePrimerRequest>) -> Resu
     }
 
     let params = ThermoParams { mv_conc: req.mv_conc, dv_conc: req.dv_conc, dntp_conc: req.dntp_conc, dna_conc: req.dna_conc };
-    let backend = Primer3Backend;
-    let analysis = analyze_primer(&backend, &req.sequence, params);
+    let backend = select_backend(&req.engine);
+    let analysis = analyze_primer(backend.as_ref(), &req.sequence, params);
     Ok(Json(analysis))
 }

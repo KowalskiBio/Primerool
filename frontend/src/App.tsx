@@ -149,6 +149,8 @@ function App() {
               onPrimerModeChange={setPrimerMode}
               onClearSelections={() => setSelections(EMPTY_SELECTIONS)}
               onSelect={handleSelect}
+              species={isCustomSequence ? undefined : species}
+              apiSource={isCustomSequence ? undefined : apiSource}
             />
           </Section>
         )}

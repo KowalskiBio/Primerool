@@ -4,6 +4,8 @@ import type { Selection, Selections } from '../utils/regionMapping';
 import { mapPrimerToGenomic } from '../utils/regionMapping';
 import { cleanDNA, reverseComplement } from '../utils/dna';
 import { analyzePrimer } from '../api/design';
+import { lookupVariant, type VariantHit } from '../api/variants';
+import { localGenePos } from '../utils/variantMapping';
 import { describeGenePosition, useBaseHover } from './BaseHoverTooltip';
 
 interface Segment {
@@ -699,9 +701,16 @@ interface Props {
   /** Read-only markers (e.g. a gene's known SNPs) decorated onto the gene
    * block - see `VariantMarker`. */
   variantMarkers?: VariantMarker[];
+  /** Species + source the loaded `data` was fetched from, when the caller
+   * knows them - what "Find in sequence" resolves an rsID query against
+   * (`/lookup_variant`), so the hit comes from the same catalog the
+   * sequence did. Absent (e.g. a custom pasted sequence) disables rsID
+   * lookup; plain sequence search still works either way. */
+  species?: string;
+  apiSource?: string;
 }
 
-export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, variantMarkers = [] }: Props) {
+export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, variantMarkers = [], species, apiSource }: Props) {
   const interactive = Boolean(onSelect);
   const [dragSession, setDragSession] = useState<DragSession | null>(null);
   const [deltaChars, setDeltaChars] = useState(0);
@@ -717,31 +726,9 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   const charProbeRef = useRef<HTMLSpanElement>(null);
   const lineWidth = useResponsiveLineWidth(containerRef, gutterProbeRef, charProbeRef);
 
-  const segments = useMemo(() => {
-    const up = flankSegments(data.upstream_seq || '', 'up', data, selections);
-    const gene = geneBlockSegments(data, selections, truncateIntrons, variantMarkers);
-    const down = flankSegments(data.downstream_seq || '', 'down', data, selections);
-    return [...up, ...gene, ...down];
-  }, [data, selections, truncateIntrons, variantMarkers]);
-
-  // A selection is only draggable when its highlighted primer/probe render
-  // is exactly one contiguous span - split across an exon/CDS/UTR boundary
-  // (or clamped away entirely), it falls back to plain read-only
-  // highlighting instead (see `sliceWithIntervals`'s and `geneBlockSegments`'
-  // docs for why crossing those boundaries isn't supported in v1).
-  const editableKeys = useMemo(() => {
-    if (!interactive) return new Set<keyof Selections>();
-    const counts = new Map<keyof Selections, number>();
-    for (const s of segments) {
-      if (s.key && !s.isBuffer) counts.set(s.key, (counts.get(s.key) ?? 0) + 1);
-    }
-    const keys = new Set<keyof Selections>();
-    for (const [k, c] of counts) if (c === 1) keys.add(k);
-    return keys;
-  }, [segments, interactive]);
-
   // "Find in sequence" - lets a reader locate a pasted primer/probe (or any
-  // sequence) within the map below, forward and/or reverse-complement.
+  // sequence) within the map below, forward and/or reverse-complement; an
+  // rsID-shaped query takes the variant-lookup path instead (see below).
   const [searchQuery, setSearchQuery] = useState('');
   const [includeRevComp, setIncludeRevComp] = useState(true);
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -763,7 +750,115 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     if (activeMatchIndex !== 0) setActiveMatchIndex(0);
   }
 
-  const searchMatches = useMemo(() => computeSearchMatches(data, searchQuery, includeRevComp), [data, searchQuery, includeRevComp]);
+  const literalMatches = useMemo(() => computeSearchMatches(data, searchQuery, includeRevComp), [data, searchQuery, includeRevComp]);
+
+  // --- rsID ("rs334") search ----------------------------------------------
+  // A query shaped like a bare rsID can never be a meaningful literal
+  // sequence search anyway (no ACGT characters survive `cleanDNA`), so
+  // it's routed to a variant-catalog lookup (`/lookup_variant`) instead:
+  // the hit is decorated onto the gene block like any `variantMarkers`
+  // entry, injected as the single search match (so it gets the active-hit
+  // styling and auto-scroll), and summarized in a panel under the search
+  // bar. Requires knowing which catalog to ask - see the `species`/
+  // `apiSource` props.
+
+  /** Full-string, case-insensitive "rs" + digits. */
+  const rsQuery = /^rs\d+$/i.test(searchQuery.trim()) ? searchQuery.trim().toLowerCase() : null;
+
+  type RsLookup =
+    | { query: string; status: 'loading' }
+    | { query: string; status: 'error'; message: string }
+    | { query: string; status: 'found'; variant: VariantHit };
+  const [rsLookup, setRsLookup] = useState<RsLookup | null>(null);
+
+  // Debounced so typing an rsID character-by-character doesn't fire one
+  // request per prefix (rs3, rs33, ...); only the query the user settles
+  // on is looked up. A stale result is never cleared from state here -
+  // `rsLookupCurrent` below ignores anything whose query doesn't match
+  // the current one (and a cleared query means `rsQuery` is null, so the
+  // panel simply stops rendering).
+  useEffect(() => {
+    if (!rsQuery || !species || !apiSource) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setRsLookup({ query: rsQuery, status: 'loading' });
+      try {
+        const res = await lookupVariant({ variant_id: rsQuery, species, api_source: apiSource });
+        if (!cancelled) setRsLookup({ query: rsQuery, status: 'found', variant: res.variant });
+      } catch (e) {
+        if (!cancelled) setRsLookup({ query: rsQuery, status: 'error', message: e instanceof Error ? e.message : String(e) });
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [rsQuery, species, apiSource]);
+
+  const rsLookupCurrent = rsQuery !== null && rsLookup?.query === rsQuery ? rsLookup : null;
+  const rsVariant = rsLookupCurrent?.status === 'found' ? rsLookupCurrent.variant : null;
+
+  /** Where the hit lands in `data.gene_seq` coordinates - `null` when it
+   * can't be placed (spliced view, other chromosome, outside this
+   * transcript's span), the same guards `ArmsDesignPanel.tsx`'s
+   * `localPosForHit`/`hitSelectDisabledReason` apply to a variant-search
+   * hit. `include_introns` is what makes the genomic-to-local mapping
+   * valid at all (see `localGenePos`), and doubles as the "not a custom
+   * pasted sequence" check - those have no genomic coordinates. */
+  const rsLocalPos = useMemo(() => {
+    if (!rsVariant || !data.include_introns) return null;
+    if (rsVariant.chrom && data.chrom && rsVariant.chrom !== data.chrom) return null;
+    return localGenePos(data, rsVariant.start);
+  }, [rsVariant, data]);
+
+  // Alleles re-oriented into `gene_seq`'s own strand sense (a minus-strand
+  // gene's sequence is reverse-complemented at fetch time, so showing the
+  // plus-strand alleles would look like a mismatch at that base) - the
+  // same rule `ArmsDesignPanel.tsx`'s `orientedAlleles` applies.
+  const rsOrientedAlleles = useMemo(
+    () => (rsVariant && data.strand === '-' ? rsVariant.alleles.map((a) => (a === '-' ? a : reverseComplement(a))) : rsVariant?.alleles ?? []),
+    [rsVariant, data.strand],
+  );
+
+  const rsMarker = useMemo<VariantMarker[]>(() => {
+    if (!rsVariant || rsLocalPos === null) return [];
+    return [{ rsid: rsVariant.id, start: rsLocalPos, end: rsLocalPos + 1, alleles: rsOrientedAlleles }];
+  }, [rsVariant, rsLocalPos, rsOrientedAlleles]);
+
+  /** The prop markers plus the looked-up SNP (deduped by rsid, so a batch
+   * modal already marking it doesn't render it twice). */
+  const allVariantMarkers = useMemo(() => {
+    if (rsMarker.length === 0) return variantMarkers;
+    return [...variantMarkers.filter((m) => m.rsid !== rsMarker[0].rsid), rsMarker[0]];
+  }, [variantMarkers, rsMarker]);
+
+  const segments = useMemo(() => {
+    const up = flankSegments(data.upstream_seq || '', 'up', data, selections);
+    const gene = geneBlockSegments(data, selections, truncateIntrons, allVariantMarkers);
+    const down = flankSegments(data.downstream_seq || '', 'down', data, selections);
+    return [...up, ...gene, ...down];
+  }, [data, selections, truncateIntrons, allVariantMarkers]);
+
+  // A selection is only draggable when its highlighted primer/probe render
+  // is exactly one contiguous span - split across an exon/CDS/UTR boundary
+  // (or clamped away entirely), it falls back to plain read-only
+  // highlighting instead (see `sliceWithIntervals`'s and `geneBlockSegments`'
+  // docs for why crossing those boundaries isn't supported in v1).
+  const editableKeys = useMemo(() => {
+    if (!interactive) return new Set<keyof Selections>();
+    const counts = new Map<keyof Selections, number>();
+    for (const s of segments) {
+      if (s.key && !s.isBuffer) counts.set(s.key, (counts.get(s.key) ?? 0) + 1);
+    }
+    const keys = new Set<keyof Selections>();
+    for (const [k, c] of counts) if (c === 1) keys.add(k);
+    return keys;
+  }, [segments, interactive]);
+
+  const searchMatches = useMemo<SearchMatch[]>(() => {
+    if (rsLocalPos === null) return literalMatches;
+    return [{ start: rsLocalPos, end: rsLocalPos + 1, region: 'gene', idx: 0 }];
+  }, [rsLocalPos, literalMatches]);
   const activeSearchIdx = searchMatches.length > 0 ? Math.min(activeMatchIndex, searchMatches.length - 1) : -1;
 
   // Scrolling the active match into view is a real effect: it reaches out
@@ -842,7 +937,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   }
 
   const rawCells = buildCells(segments, interactive, dragSession, deltaChars, editableKeys, data, selections, startDrag);
-  const variantCells = applyVariantHighlight(rawCells, variantMarkers);
+  const variantCells = applyVariantHighlight(rawCells, allVariantMarkers);
   const cells = applySearchHighlight(variantCells, searchMatches, activeSearchIdx);
   const rows = buildRows(cells, lineWidth);
 
@@ -893,7 +988,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
             if (e.shiftKey) gotoPrevMatch();
             else gotoNextMatch();
           }}
-          placeholder="Paste a primer or sequence to locate…"
+          placeholder="Paste a primer/sequence or an rsID (rs334) to locate…"
           className="h-8 min-w-[220px] flex-1 rounded-md border border-line-strong bg-surface px-3 font-mono text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
         />
         <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-xs text-ink-muted">
@@ -929,9 +1024,49 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
           Clear
         </button>
         <span className="text-xs text-ink-faint" aria-live="polite">
-          {searchQuery === '' ? '' : searchMatches.length === 0 ? 'No matches found' : `${activeSearchIdx + 1} of ${searchMatches.length} match${searchMatches.length === 1 ? '' : 'es'}`}
+          {searchQuery === '' || rsQuery
+            ? ''
+            : searchMatches.length === 0
+              ? 'No matches found'
+              : `${activeSearchIdx + 1} of ${searchMatches.length} match${searchMatches.length === 1 ? '' : 'es'}`}
         </span>
       </div>
+
+      {/* rsID-search result summary - a small panel under the search bar
+       * (see the `rsQuery` machinery above). Kept outside the search bar's
+       * flex row so a long consequence/clinical-significance list can wrap
+       * without stretching the input row. */}
+      {rsQuery && (!species || !apiSource) && <p className="-mt-2 mb-3 text-xs text-ink-faint">rsID lookup isn't available for this sequence (unknown species/source) - search a gene-loaded sequence instead.</p>}
+      {rsQuery && rsLookupCurrent?.status === 'loading' && <p className="-mt-2 mb-3 text-xs text-ink-muted">Looking up {rsQuery}…</p>}
+      {rsQuery && rsLookupCurrent?.status === 'error' && <p className="-mt-2 mb-3 text-xs text-ink-muted">{rsLookupCurrent.message}</p>}
+      {rsVariant && (
+        <div className="-mt-2 mb-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <span className="font-mono font-semibold text-ink">{rsVariant.id}</span>
+            <span className="font-mono">
+              chr{rsVariant.chrom}:{rsVariant.start.toLocaleString()}
+            </span>
+            {rsOrientedAlleles.length > 0 && <span className="font-mono">{rsOrientedAlleles.join('/')}</span>}
+            {rsVariant.consequence_type && <span>{rsVariant.consequence_type.replace(/_/g, ' ')}</span>}
+            {rsVariant.clinical_significance.length > 0 && <span className="font-medium text-warning">{rsVariant.clinical_significance.join(', ')}</span>}
+            {rsVariant.minor_allele_freq !== null && (
+              <span>
+                MAF {rsVariant.minor_allele ? `${rsVariant.minor_allele}: ` : ''}
+                {(rsVariant.minor_allele_freq * 100).toFixed(2)}%
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-ink-faint">
+            {!data.include_introns
+              ? "This is a spliced view - an rsID can only be located on the intron-inclusive genomic map (tick 'Include introns' in step 2 and reload the sequence)."
+              : rsVariant.chrom && data.chrom && rsVariant.chrom !== data.chrom
+                ? `This SNP is on chromosome ${rsVariant.chrom}, but the loaded sequence is chromosome ${data.chrom}.`
+                : rsLocalPos === null
+                  ? `Outside ${data.transcript_name}'s span (${data.chrom}:${data.gene_start_genomic.toLocaleString()}-${data.gene_end_genomic.toLocaleString()}) - it may still be in the gene, under another transcript.`
+                  : 'Highlighted in the sequence below.'}
+          </p>
+        </div>
+      )}
 
       <div
         id="sequence-map"

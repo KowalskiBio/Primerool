@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { PlacedAmplicon } from './SnpAmpliconMap';
 import type { SequenceData } from '../api/sequence';
 import { EMPTY_SELECTIONS, type Selection, type Selections } from '../utils/regionMapping';
-import { localGenePos } from '../utils/variantMapping';
+import { localGenePos, SNP_WORKFLOW_SPECIES } from '../utils/variantMapping';
 import { useGeneSequence } from '../utils/useGeneSequence';
 import Modal from './ui/Modal';
 import Checkbox from './ui/Checkbox';
@@ -94,7 +94,7 @@ export default function AmpliconDetailModal({ amplicon, onPrimerEdit, onClose }:
     setRequiredPositionsFor(openKey);
   }
 
-  const { data, error, transcripts, switching, switchTranscript, loading } = useGeneSequence(amplicon?.gene ?? null, requiredPositions);
+  const { data, error, transcripts, apiSourceUsed, switching, switchTranscript, loading } = useGeneSequence(amplicon?.gene ?? null, requiredPositions);
 
   const fwdSel = data && amplicon ? buildPrimerSelection(data, amplicon.ampStart, amplicon.ampStart + amplicon.fwd.sequence.length - 1, amplicon.fwd.sequence) : null;
   const revSel = data && amplicon ? buildPrimerSelection(data, amplicon.ampEnd - amplicon.rev.sequence.length + 1, amplicon.ampEnd, amplicon.rev.sequence) : null;
@@ -188,7 +188,15 @@ export default function AmpliconDetailModal({ amplicon, onPrimerEdit, onClose }:
             </div>
           </div>
 
-          <SequenceViewer data={data} selections={liveSelections} truncateIntrons={truncateIntrons} onSelect={handleSelect} variantMarkers={variantMarkers} />
+          <SequenceViewer
+            data={data}
+            selections={liveSelections}
+            truncateIntrons={truncateIntrons}
+            onSelect={handleSelect}
+            variantMarkers={variantMarkers}
+            species={SNP_WORKFLOW_SPECIES}
+            apiSource={apiSourceUsed ?? undefined}
+          />
 
           <div className="mt-5 grid grid-cols-1 gap-3 border-t border-line pt-4 sm:grid-cols-3">
             <div className="rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">

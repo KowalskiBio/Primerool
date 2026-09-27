@@ -232,7 +232,7 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
               {offMapCount > 0 && ` (${offMapCount} outside ${shownData.transcript_name}'s span - try another transcript above)`}
             </div>
           </div>
-          <SequenceViewer data={shownData} selections={EMPTY_SELECTIONS} truncateIntrons={truncateIntrons} variantMarkers={markers} />
+          <SequenceViewer data={shownData} selections={EMPTY_SELECTIONS} truncateIntrons={truncateIntrons} variantMarkers={markers} species={SNP_WORKFLOW_SPECIES} apiSource={apiSourceUsed ?? undefined} />
         </div>
       )}
     </Modal>

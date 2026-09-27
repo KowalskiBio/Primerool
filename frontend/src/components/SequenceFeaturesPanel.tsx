@@ -18,9 +18,14 @@ interface Props {
   /** Interactive drag/resize edits from `SequenceViewer` flow back up
    * through this - same callback shape as the design panels' `onSelect`. */
   onSelect?: (key: keyof Selections, value: Selection) => void;
+  /** Forwarded to `SequenceViewer` so its "Find in sequence" can resolve
+   * rsID queries against the catalog `data` was fetched from - pass
+   * nothing for a custom pasted sequence (nothing to resolve against). */
+  species?: string;
+  apiSource?: string;
 }
 
-export default function SequenceFeaturesPanel({ data, selections, truncateIntrons, primerMode, onPrimerModeChange, onClearSelections, onSelect }: Props) {
+export default function SequenceFeaturesPanel({ data, selections, truncateIntrons, primerMode, onPrimerModeChange, onClearSelections, onSelect, species, apiSource }: Props) {
   const [showFeatureMap, setShowFeatureMap] = useState(false);
   const [showSplicedMap, setShowSplicedMap] = useState(false);
 
@@ -77,7 +82,7 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
         </>
       )}
 
-      <SequenceViewer data={data} selections={selections} truncateIntrons={truncateIntrons} onSelect={onSelect} />
+      <SequenceViewer data={data} selections={selections} truncateIntrons={truncateIntrons} onSelect={onSelect} species={species} apiSource={apiSource} />
 
       {primerMode === 'junction' && showSplicedMap && (
         <div className="mt-6">

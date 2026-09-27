@@ -346,56 +346,60 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
       <div className="mt-4 space-y-6">
         {fromSeqResult && (
           <>
-            {fromSeqResult.forward.length > 0 && (
-              <div>
-                <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4 ml-1">Forward Primers (from forward region)</h4>
-                <div className="space-y-2">
-                  {fromSeqResult.forward.map((p, i) => (
-                    <PrimerCard
-                      key={`fp-${i}-${p.sequence}`}
-                      index={i}
-                      primer={p}
-                      idtCredentials={idtCredentials}
-                      selected={usedFwdSeq === p.sequence}
-                      onUse={() => {
-                        setUsedFwdSeq(p.sequence);
-                        if (p.coords) {
-                          const [s, e] = rawTupleToInterval(p.coords, false);
-                          selectManualGene('forward', [s + fromSeqResult.offset, e + fromSeqResult.offset], p.sequence, 'manual');
-                        } else {
-                          findAndUsePrimer(p.sequence, 'forward', fromSeqResult.offset);
-                        }
-                      }}
-                    />
-                  ))}
+            {/* Forward and reverse side by side (Oligool's layout); stacked
+                on narrow screens. */}
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              {fromSeqResult.forward.length > 0 && (
+                <div className="min-w-0">
+                  <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4 ml-1">Forward Primers (from forward region)</h4>
+                  <div className="space-y-2">
+                    {fromSeqResult.forward.map((p, i) => (
+                      <PrimerCard
+                        key={`fp-${i}-${p.sequence}`}
+                        index={i}
+                        primer={p}
+                        idtCredentials={idtCredentials}
+                        selected={usedFwdSeq === p.sequence}
+                        onUse={() => {
+                          setUsedFwdSeq(p.sequence);
+                          if (p.coords) {
+                            const [s, e] = rawTupleToInterval(p.coords, false);
+                            selectManualGene('forward', [s + fromSeqResult.offset, e + fromSeqResult.offset], p.sequence, 'manual');
+                          } else {
+                            findAndUsePrimer(p.sequence, 'forward', fromSeqResult.offset);
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-            {fromSeqResult.reverse.length > 0 && (
-              <div>
-                <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4 ml-1">Reverse Primers (from reverse region)</h4>
-                <div className="space-y-2">
-                  {fromSeqResult.reverse.map((p, i) => (
-                    <PrimerCard
-                      key={`rp-${i}-${p.sequence}`}
-                      index={i}
-                      primer={p}
-                      idtCredentials={idtCredentials}
-                      selected={usedRevSeq === p.sequence}
-                      onUse={() => {
-                        setUsedRevSeq(p.sequence);
-                        if (p.coords) {
-                          const [s, e] = rawTupleToInterval(p.coords, true);
-                          selectManualGene('reverse', [s + fromSeqResult.offset, e + fromSeqResult.offset], p.sequence, 'manual');
-                        } else {
-                          findAndUsePrimer(p.sequence, 'reverse', fromSeqResult.offset);
-                        }
-                      }}
-                    />
-                  ))}
+              )}
+              {fromSeqResult.reverse.length > 0 && (
+                <div className="min-w-0">
+                  <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4 ml-1">Reverse Primers (from reverse region)</h4>
+                  <div className="space-y-2">
+                    {fromSeqResult.reverse.map((p, i) => (
+                      <PrimerCard
+                        key={`rp-${i}-${p.sequence}`}
+                        index={i}
+                        primer={p}
+                        idtCredentials={idtCredentials}
+                        selected={usedRevSeq === p.sequence}
+                        onUse={() => {
+                          setUsedRevSeq(p.sequence);
+                          if (p.coords) {
+                            const [s, e] = rawTupleToInterval(p.coords, true);
+                            selectManualGene('reverse', [s + fromSeqResult.offset, e + fromSeqResult.offset], p.sequence, 'manual');
+                          } else {
+                            findAndUsePrimer(p.sequence, 'reverse', fromSeqResult.offset);
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
             {fromSeqResult.bestPairs.length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 mt-4 ml-1">Best Pair Combinations</h4>

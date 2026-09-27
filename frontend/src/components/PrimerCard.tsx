@@ -177,7 +177,11 @@ export default function PrimerCard({ index, primer, name, positionLabel, selecte
         </div>
       </div>
 
-      <div className="grid grid-cols-5 gap-1 text-[13px] text-ink-muted">
+      {/* Last column sized to its content, like Oligool's card: the
+          self-dimer "… kcal/mol" value is the widest, and a fixed fifth of
+          a half-width card (forward/reverse columns side by side) is too
+          narrow for it. */}
+      <div className="grid grid-cols-[repeat(4,minmax(0,1fr))_max-content] gap-x-3 gap-y-1 text-[13px] text-ink-muted">
         <div>
           <span>Len</span>
           <br />

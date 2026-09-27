@@ -261,48 +261,55 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
             Reverse (RIGHT) primers: the red highlight shows the <strong className="font-medium text-ink">binding site on the downstream template</strong>. The primer sequence is expected to be the reverse-complement of that binding site.
           </div>
 
-          <h4 className="mb-2 ml-1 mt-4 text-sm font-semibold text-ink">Forward primers (upstream flank)</h4>
-          <div className="space-y-2">
-            {flankingResult.forward.map((p, i) => (
-              <PrimerCard
-                key={`f-${i}-${p.sequence}`}
-                index={i}
-                primer={p}
-                idtCredentials={idtCredentials}
-                selected={usedWgaFwdSeq === p.sequence}
-                onUse={() => {
-                  setUsedWgaFwdSeq(p.sequence);
-                  selectWGA('forward', 'up', p.interval, p.sequence);
-                }}
-                extra={
-                  <div className="mt-2 break-words border-t border-line pt-2 font-mono text-[13px] text-ink-muted">
-                    Binding site: {data.upstream_seq.substring(p.interval[0], p.interval[1])}
-                  </div>
-                }
-              />
-            ))}
-          </div>
-
-          <h4 className="mb-2 ml-1 mt-4 text-sm font-semibold text-ink">Reverse primers (downstream flank)</h4>
-          <div className="space-y-2">
-            {flankingResult.reverse.map((p, i) => (
-              <PrimerCard
-                key={`r-${i}-${p.sequence}`}
-                index={i}
-                primer={p}
-                idtCredentials={idtCredentials}
-                selected={usedWgaRevSeq === p.sequence}
-                onUse={() => {
-                  setUsedWgaRevSeq(p.sequence);
-                  selectWGA('reverse', 'down', p.interval, p.sequence);
-                }}
-                extra={
-                  <div className="mt-2 break-words border-t border-line pt-2 font-mono text-[13px] text-ink-muted">
-                    Binding site: {(data.downstream_seq || '').substring(p.interval[0], p.interval[1])}
-                  </div>
-                }
-              />
-            ))}
+          {/* Forward and reverse side by side (Oligool's layout), so a pair
+              can be compared at a glance; stacked on narrow screens. */}
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            <div className="min-w-0">
+              <h4 className="mb-2 ml-1 text-sm font-semibold text-ink">Forward primers (upstream flank)</h4>
+              <div className="space-y-2">
+                {flankingResult.forward.map((p, i) => (
+                  <PrimerCard
+                    key={`f-${i}-${p.sequence}`}
+                    index={i}
+                    primer={p}
+                    idtCredentials={idtCredentials}
+                    selected={usedWgaFwdSeq === p.sequence}
+                    onUse={() => {
+                      setUsedWgaFwdSeq(p.sequence);
+                      selectWGA('forward', 'up', p.interval, p.sequence);
+                    }}
+                    extra={
+                      <div className="mt-2 break-words border-t border-line pt-2 font-mono text-[13px] text-ink-muted">
+                        Binding site: {data.upstream_seq.substring(p.interval[0], p.interval[1])}
+                      </div>
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="min-w-0">
+              <h4 className="mb-2 ml-1 text-sm font-semibold text-ink">Reverse primers (downstream flank)</h4>
+              <div className="space-y-2">
+                {flankingResult.reverse.map((p, i) => (
+                  <PrimerCard
+                    key={`r-${i}-${p.sequence}`}
+                    index={i}
+                    primer={p}
+                    idtCredentials={idtCredentials}
+                    selected={usedWgaRevSeq === p.sequence}
+                    onUse={() => {
+                      setUsedWgaRevSeq(p.sequence);
+                      selectWGA('reverse', 'down', p.interval, p.sequence);
+                    }}
+                    extra={
+                      <div className="mt-2 break-words border-t border-line pt-2 font-mono text-[13px] text-ink-muted">
+                        Binding site: {(data.downstream_seq || '').substring(p.interval[0], p.interval[1])}
+                      </div>
+                    }
+                  />
+                ))}
+              </div>
+            </div>
           </div>
 
           {flankingResult.pairDg !== null && (

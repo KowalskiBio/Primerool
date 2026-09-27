@@ -30,6 +30,19 @@ function roleLabel(key: Key, sel: Selection): string {
   return dir;
 }
 
+/** Product length of the General pair: from the forward primer's 5' end
+ * to the reverse primer's 5' end, in gene coordinates - so on a genomic
+ * (intron-inclusive) view it counts any introns in between. A message
+ * instead when the two don't face each other with the forward upstream. */
+function generalAmplicon(selections: Selections, data: SequenceData): string | null {
+  const f = selections.geneForward;
+  const r = selections.geneReverse;
+  if (!f || !r) return null;
+  const size = r.end - f.start;
+  if (size <= 0 || f.start >= r.start) return 'primers not in amplifying orientation';
+  return `${size.toLocaleString('en-US')} bp amplicon${data.include_introns ? ' (genomic)' : ''}`;
+}
+
 function fmt(v: number | null | undefined, unit: string) {
   return v == null ? '–' : `${v}${unit}`;
 }
@@ -128,13 +141,17 @@ export default function PrimerSetsPanel({ data, selections, onSelect }: Props) {
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
           {groups.map((g) => {
             const twins = selections.armsRefPrimer;
+            const amplicon = g.id === 'general' ? generalAmplicon(selections, data) : null;
             const title = g.id === 'arms' && twins ? `ARMS (${selectionStrand(twins) === 'F' ? '2 F + 1 R' : '1 F + 2 R'})` : g.title;
             const fwd = g.rows.find((r) => selectionStrand(r.sel) === 'F' && r.key !== 'armsAltPrimer')?.sel;
             const rev = g.rows.find((r) => selectionStrand(r.sel) === 'R' && r.key !== 'armsAltPrimer')?.sel;
             return (
               <section key={g.id} className="min-w-0 rounded-md border border-line bg-surface p-3" aria-label={title}>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-[13px] font-semibold text-ink">{title}</span>
+                  <span className="text-[13px] font-semibold text-ink">
+                    {title}
+                    {amplicon && <span className="ml-2 font-normal text-ink-muted">· {amplicon}</span>}
+                  </span>
                   <div className="flex gap-1.5">
                     <Button size="sm" onClick={() => showInMap(g.rows[0].sel, data)}>
                       Show

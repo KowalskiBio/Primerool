@@ -122,7 +122,12 @@ export default function PrimerStructurePanel({ pair }: Props) {
       {shownFwd && shownRev && (
         <div>
           <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
+            {/* `min-w-0` on both columns: a grid item's default `min-width:
+                auto` is its content's min-content width - the whole
+                unscrolled candidate strip - so without it each column
+                overflows its half and the two collide instead of their
+                strips scrolling. */}
+            <div className="min-w-0">
               <p className="mb-2 break-all font-mono text-xs text-ink">
                 Forward: {pair.forward} <span className="text-ink-faint">({pair.forward.length} bp)</span>
               </p>
@@ -133,7 +138,7 @@ export default function PrimerStructurePanel({ pair }: Props) {
                 <CandidateStrip candidates={shownFwd.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.forward} structure={s} />} />
               </CategorySection>
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="mb-2 break-all font-mono text-xs text-ink">
                 Reverse: {pair.reverse} <span className="text-ink-faint">({pair.reverse.length} bp)</span>
               </p>

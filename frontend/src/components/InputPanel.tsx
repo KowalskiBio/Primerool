@@ -220,9 +220,28 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
 
       {inputMode === 'gene' && (
         <>
-          {/* One wrapping row: source, organism, gene - fits on one line on
+          {/* One wrapping row: gene, source, organism - fits on one line on
               a wide screen, wraps field-by-field on a narrow one. */}
           <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            <Field label="Gene Name or Accession ID" htmlFor="gene-input" className="min-w-[16rem] flex-1">
+              <div className="flex gap-3">
+                <input
+                  id="gene-input"
+                  type="text"
+                  value={geneInput}
+                  onChange={(e) => setGeneInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleGeneSearch();
+                  }}
+                  placeholder="e.g. CHAT or NR_132312.2…"
+                  className="h-9 flex-1 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+                />
+                <Button variant="primary" disabled={searching} onClick={() => void handleGeneSearch()}>
+                  {searching ? 'Searching…' : 'Search'}
+                </Button>
+              </div>
+            </Field>
+
             <Field label="Data Source" className="shrink-0">
               {/* Same height as the selects/input beside it, so every label
                   in the row lines up. */}
@@ -268,24 +287,6 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
               </Select>
             </Field>
 
-            <Field label="Gene Name or Accession ID" htmlFor="gene-input" className="min-w-[16rem] flex-1">
-              <div className="flex gap-3">
-                <input
-                  id="gene-input"
-                  type="text"
-                  value={geneInput}
-                  onChange={(e) => setGeneInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handleGeneSearch();
-                  }}
-                  placeholder="e.g. CHAT or NR_132312.2…"
-                  className="h-9 flex-1 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
-                />
-                <Button variant="primary" disabled={searching} onClick={() => void handleGeneSearch()}>
-                  {searching ? 'Searching…' : 'Search'}
-                </Button>
-              </div>
-            </Field>
           </div>
 
           {speciesValue === '__custom__' && (

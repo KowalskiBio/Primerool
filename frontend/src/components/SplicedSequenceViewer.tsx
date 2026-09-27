@@ -3,6 +3,7 @@ import type { SequenceData } from '../api/sequence';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { genomicToSpliced } from '../utils/regionMapping';
 import { describeGenePosition, useBaseHover } from './BaseHoverTooltip';
+import { useMapPickMenu } from './useMapPickMenu';
 
 interface Span {
   start: number;
@@ -61,9 +62,15 @@ function sliceWithHighlights(spliced: string, a: number, b: number, spans: Span[
 interface Props {
   data: SequenceData;
   selections: Selections;
+  /** Enables junction-primer picks from the right-click menu. */
+  onSelect?: (key: keyof Selections, value: Selection | null) => void;
 }
 
-export default function SplicedSequenceViewer({ data, selections }: Props) {
+/** Here exons are already joined, so the only pick that fits is a junction
+ * primer (general/ARMS/probe picks belong on the genomic map). */
+const EXON_MAP_PICKS = ['junction'] as const;
+
+export default function SplicedSequenceViewer({ data, selections, onSelect }: Props) {
   const pieces = useMemo(() => {
     const spliced = data.spliced_exons_seq || '';
     const spans = collectSplicedSpans(data, selections);
@@ -105,6 +112,8 @@ export default function SplicedSequenceViewer({ data, selections }: Props) {
     return total === (data.spliced_exons_seq || '').length ? exons : null;
   }, [data]);
 
+  const pickMenu = useMapPickMenu({ data, selections, onSelect, pickKinds: EXON_MAP_PICKS });
+
   const { handlers: hoverHandlers, tooltip } = useBaseHover(({ pos, base }) => {
     const transcriptLine = `transcript position ${(pos + 1).toLocaleString('en-US')}`;
     if (!exonSpans) return [`${base.toUpperCase()} · ${transcriptLine}`];
@@ -115,7 +124,7 @@ export default function SplicedSequenceViewer({ data, selections }: Props) {
       offset -= e - s;
     }
     return null;
-  });
+  }, !pickMenu.busy);
 
   return (
     <div>
@@ -123,7 +132,7 @@ export default function SplicedSequenceViewer({ data, selections }: Props) {
       <div className="mb-3 rounded-md border border-line bg-surface-2 p-2 text-sm text-ink-muted">
         Junction positions in the sequence map refer to these sequences. Horizontal bars indicate exon boundaries.
       </div>
-      <div className="sequence-viewer max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base p-4 text-sm" {...hoverHandlers}>
+      <div className="sequence-viewer max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base p-4 text-sm" {...hoverHandlers} onContextMenu={pickMenu.onContextMenu}>
         {tooltip}
         {pieces.map((p, i) =>
           p.kind === 'label' ? (
@@ -137,6 +146,7 @@ export default function SplicedSequenceViewer({ data, selections }: Props) {
           ),
         )}
       </div>
+      {pickMenu.overlay}
     </div>
   );
 }

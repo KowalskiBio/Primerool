@@ -19,6 +19,22 @@ export interface Selection {
    * `source: 'recommended'` picks, which already carry their own
    * backend-computed values elsewhere). */
   analysis?: PrimerAnalysis | null;
+  /** User-facing label (e.g. "A1"), editable in the primer list. */
+  name?: string;
+  /** Which way the primer reads. Absent on older picks, where it's
+   * inferred (`primerSeq !== bindingSeq` means reverse) - that inference
+   * breaks for an ARMS mutant twin, whose 3' base deliberately differs
+   * from the template, so every new pick sets it. */
+  strand?: 'F' | 'R';
+  /** Set on both ARMS allele-specific twins: the SNP their 3' end sits on
+   * (gene coordinates), the wild-type (template) base and the mutant base
+   * the second twin carries instead. The 3' end is locked on `snpPos`. */
+  arms?: { snpPos: number; wtBase: string; mutBase: string };
+}
+
+/** A selection's reading direction - `strand` when set, else inferred. */
+export function selectionStrand(p: Selection): 'F' | 'R' {
+  return p.strand ?? (p.primerSeq !== p.bindingSeq ? 'R' : 'F');
 }
 
 export interface Range {

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Transcript } from './api/gene';
 import type { SequenceData } from './api/sequence';
 import { EMPTY_SELECTIONS, type Selection, type Selections } from './utils/regionMapping';
+import { loadPrimerSets, primerSetKey, savePrimerSets } from './utils/primerSetStore';
 import Section from './components/ui/Section';
 import InputPanel from './components/InputPanel';
 import TranscriptPanel from './components/TranscriptPanel';
@@ -58,6 +59,20 @@ function App() {
   const [sequenceData, setSequenceData] = useState<SequenceData | null>(null);
   const [truncateIntrons, setTruncateIntrons] = useState(false);
   const [selections, setSelections] = useState<Selections>(EMPTY_SELECTIONS);
+  // Primer sets are remembered per loaded sequence (gene, transcript and
+  // view settings - see `primerSetKey`): loading a sequence restores the
+  // sets made on it, and every change is saved back. Switched at render
+  // time, not in an effect, so the save below can never write one
+  // sequence's sets under another's key.
+  const setKey = primerSetKey(sequenceData);
+  const [loadedSetKey, setLoadedSetKey] = useState<string | null>(null);
+  if (setKey !== loadedSetKey) {
+    setLoadedSetKey(setKey);
+    setSelections(loadPrimerSets(setKey));
+  }
+  useEffect(() => {
+    if (setKey === loadedSetKey) savePrimerSets(setKey, selections);
+  }, [setKey, loadedSetKey, selections]);
   const [primerMode, setPrimerMode] = useState<'flanking' | 'junction' | 'general' | 'arms'>('flanking');
   const [ampTarget, setAmpTarget] = useState(150);
   const [ampDev, setAmpDev] = useState(50);
@@ -107,7 +122,8 @@ function App() {
     setSequenceData(data);
   }
 
-  function handleSelect(key: keyof Selections, value: Selection) {
+  /** `null` clears that slot (e.g. removing a set from the primer list). */
+  function handleSelect(key: keyof Selections, value: Selection | null) {
     setSelections((prev) => ({ ...prev, [key]: value }));
   }
 

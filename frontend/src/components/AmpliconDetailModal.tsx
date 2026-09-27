@@ -128,9 +128,9 @@ export default function AmpliconDetailModal({ amplicon, onPrimerEdit, selectedSp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.transcript_id, amplicon?.rsid]);
 
-  function handleSelect(key: keyof Selections, value: Selection) {
+  function handleSelect(key: keyof Selections, value: Selection | null) {
     setLiveSelections((prev) => ({ ...prev, [key]: value }));
-    if (!amplicon || !data || value.analysis === undefined) return; // still awaiting SequenceViewer's own recompute
+    if (!value || !amplicon || !data || value.analysis === undefined) return; // still awaiting SequenceViewer's own recompute
     const groupRsids = amplicon.variants.map((v) => v.rsid);
     // Both endpoints go through `genomicFromLocal` and are then min/max'd,
     // not assumed start<end, because local order runs opposite to genomic
@@ -196,6 +196,9 @@ export default function AmpliconDetailModal({ amplicon, onPrimerEdit, selectedSp
             selections={liveSelections}
             truncateIntrons={truncateIntrons}
             onSelect={handleSelect}
+            // Only forward/reverse gene primers mean anything here - they
+            // replace this amplicon's primers.
+            pickKinds={['general']}
             variantMarkers={variantMarkers}
             species={SNP_WORKFLOW_SPECIES}
             apiSource={apiSourceUsed ?? undefined}

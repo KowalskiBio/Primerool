@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SequenceData } from '../api/sequence';
 import type { Selection, Selections } from '../utils/regionMapping';
-import { mapPrimerToGenomic } from '../utils/regionMapping';
+import { mapPrimerToGenomic, selectionStrand } from '../utils/regionMapping';
 import { cleanDNA, reverseComplement } from '../utils/dna';
-import { analyzePrimer } from '../api/design';
 import { lookupVariant, type VariantHit } from '../api/variants';
 import { localGenePos } from '../utils/variantMapping';
 import { describeGenePosition, useBaseHover } from './BaseHoverTooltip';
-import { resolveMapSelection, type MapSelection } from '../utils/mapSelection';
-import SequenceContextMenu, { type MapAction } from './SequenceContextMenu';
-import BlastModal from './BlastModal';
-import PrimerStructureModal from './PrimerStructureModal';
+import { ALL_PICK_KINDS, armsMutantTwin, type PickKind } from '../utils/mapPickMenu';
+import { useMapPickMenu } from './useMapPickMenu';
 
 interface Segment {
   text: string;
@@ -427,6 +424,13 @@ function buildCells(
         // Handles sit on the selection's own first/last base, not this
         // piece's - a primer split across chunks has several pieces.
         const type: 'move' | 'left' | 'right' = pos === sel.start ? 'left' : pos === sel.end - 1 ? 'right' : 'move';
+        // An ARMS twin's 3' end is locked on its SNP: only the 5' end (the
+        // first base for a forward twin, the last for a reverse one) drags.
+        const locked = sel.arms ? (selectionStrand(sel) === 'F' ? type !== 'left' : type !== 'right') : false;
+        if (locked) {
+          cells.push({ text: ch, className, startPos: pos, region: s.region });
+          return;
+        }
         const isEdge = type !== 'move';
         cells.push({ text: ch, className, startPos: pos, cursorClass: isEdge ? 'cursor-ew-resize' : 'cursor-grab', onMouseDown: (e) => startDrag(e, s.key!, type, sel), region: s.region });
       });
@@ -702,7 +706,10 @@ interface Props {
   /** Called when an interactive drag/resize commits a new primer/probe
    * span. Absent (not just a no-op) disables interactive editing entirely
    * - primers render read-only, exactly as before. */
-  onSelect?: (key: keyof Selections, value: Selection) => void;
+  onSelect?: (key: keyof Selections, value: Selection | null) => void;
+  /** Which primer picks the right-click menu offers (default: all). Only
+   * meaningful with `onSelect`. */
+  pickKinds?: readonly PickKind[];
   /** Read-only markers (e.g. a gene's known SNPs) decorated onto the gene
    * block - see `VariantMarker`. */
   variantMarkers?: VariantMarker[];
@@ -721,7 +728,7 @@ interface Props {
   selectedSpecies?: string;
 }
 
-export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, variantMarkers = [], species, apiSource, selectedSpecies }: Props) {
+export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, pickKinds = ALL_PICK_KINDS, variantMarkers = [], species, apiSource, selectedSpecies }: Props) {
   const interactive = Boolean(onSelect);
   const [dragSession, setDragSession] = useState<DragSession | null>(null);
   const [deltaChars, setDeltaChars] = useState(0);
@@ -944,65 +951,19 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     const isReverseStrand = sel.primerSeq !== sel.bindingSeq;
     const primerSeq = isReverseStrand ? reverseComplement(bindingSeq) : bindingSeq;
 
-    commitSelection(session.selKey, { ...sel, start, end, primerSeq, bindingSeq, source: 'manual', analysis: undefined });
-  }
-
-  /** Sets a primer/probe pick, then fills in its Strider analysis (Tm/GC/
-   * hairpin/self-dimer) with a second `onSelect` once it arrives - shared
-   * by drag-resize commits and the right-click menu's F/R/P picks. A
-   * parent reading `analysis === undefined` as "still computing" (e.g.
-   * `AmpliconDetailModal`) sees both calls. */
-  function commitSelection(key: keyof Selections, next: Selection) {
-    if (!onSelect) return;
-    onSelect(key, next);
-    analyzePrimer({ sequence: next.primerSeq, engine: 'strider' }).then(
-      (analysis) => onSelect(key, { ...next, analysis }),
-      () => onSelect(key, { ...next, analysis: null }),
-    );
-  }
-
-  // Right-click menu over a text selection in the map (see
-  // `SequenceContextMenu`), plus the BLAST / structure popups it opens.
-  const [menu, setMenu] = useState<{ x: number; y: number; target: MapSelection | { error: string } } | null>(null);
-  const [blastSeq, setBlastSeq] = useState<string | null>(null);
-  const [structureSeq, setStructureSeq] = useState<string | null>(null);
-
-  function onMapContextMenu(e: React.MouseEvent<HTMLDivElement>) {
-    const target = resolveMapSelection(e.currentTarget);
-    if (!target) return; // nothing selected in the map - keep the browser's own menu
-    e.preventDefault();
-    setMenu({ x: e.clientX, y: e.clientY, target });
-  }
-
-  /** 1-based position from the gene start (negative upstream, no 0) of a
-   * region-local index - same convention as the hover tooltip. */
-  function genePosLabel(region: MapSelection['region'], pos: number): string {
-    const local = region === 'up' ? pos - data.upstream_len : region === 'down' ? data.gene_len + pos : pos;
-    return (local >= 0 ? local + 1 : local).toLocaleString('en-US');
-  }
-
-  function runMapAction(action: MapAction) {
-    if (!menu || 'error' in menu.target) return;
-    const { region, start, end } = menu.target;
-    const slice = regionRawSeq(data, region).substring(start, end).toUpperCase();
-    setMenu(null);
-    window.getSelection()?.removeAllRanges();
-
-    if (action === 'B') {
-      setBlastSeq(slice);
-      return;
+    const next: Selection = { ...sel, start, end, primerSeq, bindingSeq, source: 'manual', analysis: undefined };
+    commitSelection(session.selKey, next);
+    // The mutant twin is the same primer but for its 3' base, so it
+    // follows the wild-type twin's new 5' end.
+    if (session.selKey === 'armsRefPrimer' && next.arms && selections.armsAltPrimer) {
+      commitSelection('armsAltPrimer', armsMutantTwin(next, selections.armsAltPrimer.name));
     }
-    if (action === 'S') {
-      setStructureSeq(slice);
-      return;
-    }
-    // F/R/P: a flank pick is a WGA primer, a gene pick a gene primer/probe.
-    const inGene = region === 'gene';
-    const key: keyof Selections = action === 'P' ? 'geneProbe' : inGene ? (action === 'F' ? 'geneForward' : 'geneReverse') : action === 'F' ? 'wgaForward' : 'wgaReverse';
-    if (action === 'P' && !inGene) return;
-    const primerSeq = action === 'R' ? reverseComplement(slice) : slice;
-    commitSelection(key, { region, start, end, primerSeq, bindingSeq: slice, source: 'manual', analysis: undefined });
   }
+
+  // Right-click menu over a selected stretch (primer/probe picks, BLAST,
+  // structures) and the set-then-analyze step drag commits share with it.
+  const pickMenu = useMapPickMenu({ data, selections, onSelect, pickKinds });
+  const commitSelection = pickMenu.commitSelection;
 
   useEffect(() => {
     if (!dragSession) return;
@@ -1053,7 +1014,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     const local = region === 'up' ? pos - data.upstream_len : region === 'down' ? data.gene_len + pos : pos;
     const m = variantRsid !== undefined ? variantByRsid.get(variantRsid) : undefined;
     return describeGenePosition(data, local, base, m ? `${m.rsid}${m.alleles?.length ? ` (${m.alleles.join('/')})` : ''}` : undefined);
-  }, dragSession === null && menu === null);
+  }, dragSession === null && !pickMenu.busy);
 
   const modeText = data.include_introns
     ? 'Genomic DNA (with introns; CDS bold, UTR highlighted)'
@@ -1180,7 +1141,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         ref={containerRef}
         className="sequence-viewer relative max-h-[520px] overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg border border-line bg-base p-4 text-sm"
         {...hoverHandlers}
-        onContextMenu={onMapContextMenu}
+        onContextMenu={pickMenu.onContextMenu}
       >
         {tooltip}
         {/* Unrendered (out of flow, invisible) - measured only, to figure
@@ -1230,26 +1191,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         ))}
       </div>
 
-      {menu && (
-        <SequenceContextMenu
-          x={menu.x}
-          y={menu.y}
-          target={
-            'error' in menu.target
-              ? menu.target
-              : {
-                  length: menu.target.end - menu.target.start,
-                  heading: `${menu.target.end - menu.target.start} bp · ${genePosLabel(menu.target.region, menu.target.start)}–${genePosLabel(menu.target.region, menu.target.end - 1)}`,
-                  inGene: menu.target.region === 'gene',
-                }
-          }
-          canPick={interactive}
-          onAction={runMapAction}
-          onClose={() => setMenu(null)}
-        />
-      )}
-      <BlastModal sequence={blastSeq} onClose={() => setBlastSeq(null)} />
-      <PrimerStructureModal pair={structureSeq ? { label: `${structureSeq.length} bp selection`, forward: structureSeq } : null} onClose={() => setStructureSeq(null)} />
+      {pickMenu.overlay}
     </div>
   );
 }

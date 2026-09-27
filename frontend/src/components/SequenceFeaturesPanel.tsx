@@ -4,6 +4,7 @@ import type { Selection, Selections } from '../utils/regionMapping';
 import SequenceViewer from './SequenceViewer';
 import SplicedSequenceViewer from './SplicedSequenceViewer';
 import FeatureMap from './FeatureMap';
+import PrimerSetsPanel from './PrimerSetsPanel';
 import Button from './ui/Button';
 
 type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
@@ -17,7 +18,7 @@ interface Props {
   onClearSelections: () => void;
   /** Interactive drag/resize edits from `SequenceViewer` flow back up
    * through this - same callback shape as the design panels' `onSelect`. */
-  onSelect?: (key: keyof Selections, value: Selection) => void;
+  onSelect?: (key: keyof Selections, value: Selection | null) => void;
   /** Forwarded to `SequenceViewer` so its "Find in sequence" can resolve
    * rsID queries against the catalog `data` was fetched from - pass
    * nothing for a custom pasted sequence (nothing to resolve against). */
@@ -89,9 +90,11 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
 
       {primerMode === 'junction' && showSplicedMap && (
         <div className="mt-6">
-          <SplicedSequenceViewer data={data} selections={selections} />
+          <SplicedSequenceViewer data={data} selections={selections} onSelect={onSelect} />
         </div>
       )}
+
+      {onSelect && <PrimerSetsPanel data={data} selections={selections} onSelect={onSelect} />}
 
       <div className="mt-4 flex justify-end">
         <Button variant="ghost" size="sm" onClick={onClearSelections}>

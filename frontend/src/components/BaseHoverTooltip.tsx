@@ -4,11 +4,15 @@ import type { SequenceData } from '../api/sequence';
 /** Where a hovered base sits: the region its `data-pos` is local to, and
  * that 0-based local index. `region` is whatever the rendering component
  * wrote into `data-region` - `'up'`/`'gene'`/`'down'` for `SequenceViewer`,
- * `'spliced'` for `SplicedSequenceViewer`. */
+ * `'spliced'` for `SplicedSequenceViewer`. `variantRsid` is the hovered
+ * span's `data-variant-rsid`, when the rendering component marks SNP
+ * bases that way (`SequenceViewer` does) - lets the tooltip's `describe`
+ * name the variant under the pointer. */
 export interface HoveredBase {
   region: string;
   pos: number;
   base: string;
+  variantRsid?: string;
 }
 
 interface Tip {
@@ -49,7 +53,8 @@ function baseAtPoint(x: number, y: number): HoveredBase | null {
     range.setEnd(caret.node, i + 1);
     const r = range.getBoundingClientRect();
     if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) {
-      return { region, pos: Number(posAttr) + i, base: text[i] };
+      const rsid = span.dataset.variantRsid;
+      return { region, pos: Number(posAttr) + i, base: text[i], variantRsid: rsid || undefined };
     }
   }
   return null;

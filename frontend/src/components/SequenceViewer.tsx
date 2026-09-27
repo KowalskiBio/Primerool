@@ -374,11 +374,12 @@ interface Cell {
   /** Set by `applyVariantHighlight` for a cell/sub-cell landing on a
    * `VariantMarker`'s position. */
   isVariant?: boolean;
-  variantLabel?: string;
-  /** The bare rsID (unlike `variantLabel`, which may have alleles appended
-   * for the tooltip) - rendered as a `data-variant-rsid` attribute so an
+  /** The bare rsID - rendered as a `data-variant-rsid` attribute so an
    * outside "jump to this SNP" control can find and scroll to it without
-   * `SequenceViewer` needing to expose an imperative API. */
+   * `SequenceViewer` needing to expose an imperative API, and read back by
+   * the hover tooltip to name the SNP under the pointer (see
+   * `baseAtPoint`'s `variantRsid`). The alleles themselves are looked up
+   * from the marker at hover time rather than duplicated onto every cell. */
   variantRsid?: string;
 }
 
@@ -496,7 +497,6 @@ function applyVariantHighlight(cells: Cell[], markers: VariantMarker[]): Cell[] 
         text: cell.text.slice(s - cellStart, e - cellStart),
         startPos: s,
         isVariant: true,
-        variantLabel: m.alleles?.length ? `${m.rsid} (${m.alleles.join('/')})` : m.rsid,
         variantRsid: m.rsid,
       });
       cur = e;
@@ -636,7 +636,6 @@ function buildRows(cells: Cell[], lineWidth: number): Row[] {
         isActiveSearchHit: cell.isActiveSearchHit,
         searchIdx: cell.searchIdx,
         isVariant: cell.isVariant,
-        variantLabel: cell.variantLabel,
         variantRsid: cell.variantRsid,
       });
       firstPiece = false;
@@ -1043,10 +1042,17 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   // Hovering a base shows its position from the start of the gene (and
   // its genomic coordinate when there is one). Flank-local positions are
   // shifted into gene coordinates: negative upstream, past gene_len
-  // downstream.
-  const { handlers: hoverHandlers, tooltip } = useBaseHover(({ region, pos, base }) => {
+  // downstream. A base carrying `data-variant-rsid` (a marked SNP - the
+  // batch markers and an rsID "Find in sequence" hit, see
+  // `applyVariantHighlight`) also names that SNP and its alleles in the
+  // same tooltip, via `describeGenePosition`'s `extra` line, instead of
+  // the old native `title` on the marker span (which stacked a second,
+  // OS-styled tooltip on top of this one).
+  const variantByRsid = useMemo(() => new Map(allVariantMarkers.map((m) => [m.rsid, m])), [allVariantMarkers]);
+  const { handlers: hoverHandlers, tooltip } = useBaseHover(({ region, pos, base, variantRsid }) => {
     const local = region === 'up' ? pos - data.upstream_len : region === 'down' ? data.gene_len + pos : pos;
-    return describeGenePosition(data, local, base);
+    const m = variantRsid !== undefined ? variantByRsid.get(variantRsid) : undefined;
+    return describeGenePosition(data, local, base, m ? `${m.rsid}${m.alleles?.length ? ` (${m.alleles.join('/')})` : ''}` : undefined);
   }, dragSession === null && menu === null);
 
   const modeText = data.include_introns
@@ -1214,7 +1220,6 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
                   data-variant-rsid={p.variantRsid}
                   data-region={p.region}
                   data-pos={p.region ? p.startPos : undefined}
-                  title={p.variantLabel}
                   onMouseDown={p.onMouseDown}
                 >
                   {p.text}

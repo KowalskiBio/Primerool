@@ -23,9 +23,12 @@ interface Props {
    * nothing for a custom pasted sequence (nothing to resolve against). */
   species?: string;
   apiSource?: string;
+  /** The organism currently selected in the input panel's toggle -
+   * forwarded to `SequenceViewer` as an rsID-lookup fallback. */
+  selectedSpecies?: string;
 }
 
-export default function SequenceFeaturesPanel({ data, selections, truncateIntrons, primerMode, onPrimerModeChange, onClearSelections, onSelect, species, apiSource }: Props) {
+export default function SequenceFeaturesPanel({ data, selections, truncateIntrons, primerMode, onPrimerModeChange, onClearSelections, onSelect, species, apiSource, selectedSpecies }: Props) {
   const [showFeatureMap, setShowFeatureMap] = useState(false);
   const [showSplicedMap, setShowSplicedMap] = useState(false);
 
@@ -82,7 +85,7 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
         </>
       )}
 
-      <SequenceViewer data={data} selections={selections} truncateIntrons={truncateIntrons} onSelect={onSelect} species={species} apiSource={apiSource} />
+      <SequenceViewer data={data} selections={selections} truncateIntrons={truncateIntrons} onSelect={onSelect} species={species} apiSource={apiSource} selectedSpecies={selectedSpecies} />
 
       {primerMode === 'junction' && showSplicedMap && (
         <div className="mt-6">

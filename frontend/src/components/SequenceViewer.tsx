@@ -707,14 +707,20 @@ interface Props {
   variantMarkers?: VariantMarker[];
   /** Species + source the loaded `data` was fetched from, when the caller
    * knows them - what "Find in sequence" resolves an rsID query against
-   * (`/lookup_variant`), so the hit comes from the same catalog the
-   * sequence did. Absent (e.g. a custom pasted sequence) disables rsID
-   * lookup; plain sequence search still works either way. */
+   * first (a hit in this species can be placed on the map below). Absent
+   * (e.g. a custom pasted sequence) just means no hit can be placed, not
+   * that lookup is disabled. */
   species?: string;
   apiSource?: string;
+  /** The organism currently selected in the input panel's toggle, when
+   * the caller knows it - tried as a lookup fallback after `species` (the
+   * loaded sequence's own), since an rsID may exist only in the organism
+   * the user is analyzing while the loaded sequence is from another (or
+   * is a custom paste). Human is always tried last as the common case. */
+  selectedSpecies?: string;
 }
 
-export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, variantMarkers = [], species, apiSource }: Props) {
+export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, variantMarkers = [], species, apiSource, selectedSpecies }: Props) {
   const interactive = Boolean(onSelect);
   const [dragSession, setDragSession] = useState<DragSession | null>(null);
   const [deltaChars, setDeltaChars] = useState(0);
@@ -772,56 +778,94 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   type RsLookup =
     | { query: string; status: 'loading' }
     | { query: string; status: 'error'; message: string }
-    | { query: string; status: 'found'; variant: VariantHit };
+    | { query: string; status: 'found'; variant: VariantHit; foundIn: { species: string; source: string } };
   const [rsLookup, setRsLookup] = useState<RsLookup | null>(null);
+
+  /** Species to try, in order: the loaded sequence's own (only a hit
+   * there can be placed on the map below), then the organism selected in
+   * the input panel's toggle (`selectedSpecies` - the user's current
+   * analysis context), then human (the common case). Deduplicated;
+   * empty-string entries (e.g. a blank custom-species field) dropped. */
+  const rsSpeciesChain = useMemo(() => {
+    const chain = [species, selectedSpecies, 'homo_sapiens'].filter((s): s is string => Boolean(s));
+    return [...new Set(chain)];
+  }, [species, selectedSpecies]);
+
+  /** Both sources get a chance per species: neither catalog is a superset
+   * of the other (EVA-imported variants, for instance, exist only in
+   * Ensembl - dbSNP/NCBI has never heard of them). The loaded sequence's
+   * own source goes first; Ensembl leads when the source is unknown. */
+  const rsSourceChain = useMemo(() => {
+    if (apiSource === 'ncbi') return ['ncbi', 'ensembl'] as const;
+    return ['ensembl', 'ncbi'] as const;
+  }, [apiSource]);
 
   // Debounced so typing an rsID character-by-character doesn't fire one
   // request per prefix (rs3, rs33, ...); only the query the user settles
-  // on is looked up. A stale result is never cleared from state here -
+  // on is looked up. Every candidate runs to completion - a miss on one
+  // species/source just advances to the next - so the result is always
+  // either a hit (with where it was found) or "not found anywhere
+  // tried". A stale result is never cleared from state here -
   // `rsLookupCurrent` below ignores anything whose query doesn't match
-  // the current one (and a cleared query means `rsQuery` is null, so the
-  // panel simply stops rendering).
+  // the current one (and a cleared query means `rsQuery` is null, so
+  // the panel simply stops rendering).
   useEffect(() => {
-    if (!rsQuery || !species || !apiSource) return;
+    if (!rsQuery) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
       setRsLookup({ query: rsQuery, status: 'loading' });
-      try {
-        const res = await lookupVariant({ variant_id: rsQuery, species, api_source: apiSource });
-        if (!cancelled) setRsLookup({ query: rsQuery, status: 'found', variant: res.variant });
-      } catch (e) {
-        if (!cancelled) setRsLookup({ query: rsQuery, status: 'error', message: e instanceof Error ? e.message : String(e) });
+      for (const sp of rsSpeciesChain) {
+        for (const src of rsSourceChain) {
+          try {
+            const res = await lookupVariant({ variant_id: rsQuery, species: sp, api_source: src });
+            if (!cancelled) setRsLookup({ query: rsQuery, status: 'found', variant: res.variant, foundIn: { species: sp, source: src } });
+            return;
+          } catch {
+            // Not found in this species/source - try the next candidate.
+          }
+        }
       }
+      if (!cancelled) setRsLookup({ query: rsQuery, status: 'error', message: `Variant ${rsQuery} not found in any of: ${rsSpeciesChain.join(', ')} (tried both NCBI and Ensembl).` });
     }, 300);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [rsQuery, species, apiSource]);
+  }, [rsQuery, rsSpeciesChain, rsSourceChain]);
 
   const rsLookupCurrent = rsQuery !== null && rsLookup?.query === rsQuery ? rsLookup : null;
-  const rsVariant = rsLookupCurrent?.status === 'found' ? rsLookupCurrent.variant : null;
+  const rsFound = rsLookupCurrent?.status === 'found' ? rsLookupCurrent : null;
+  const rsVariant = rsFound?.variant ?? null;
+  const rsFoundInSpecies = rsFound?.foundIn.species ?? null;
 
   /** Where the hit lands in `data.gene_seq` coordinates - `null` when it
-   * can't be placed (spliced view, other chromosome, outside this
-   * transcript's span), the same guards `ArmsDesignPanel.tsx`'s
-   * `localPosForHit`/`hitSelectDisabledReason` apply to a variant-search
-   * hit. `include_introns` is what makes the genomic-to-local mapping
-   * valid at all (see `localGenePos`), and doubles as the "not a custom
-   * pasted sequence" check - those have no genomic coordinates. */
+   * can't be placed (hit from another species, spliced view, other
+   * chromosome, outside this transcript's span), the same guards
+   * `ArmsDesignPanel.tsx`'s `localPosForHit`/`hitSelectDisabledReason`
+   * apply to a variant-search hit. The species check is not just about
+   * correctness of the note: a hit from a different organism could
+   * coincidentally land inside this sequence's genomic span (chromosome
+   * numbers and positions overlap across organisms), so it must never be
+   * allowed to place a false highlight. `include_introns` is what makes
+   * the genomic-to-local mapping valid at all (see `localGenePos`), and
+   * doubles as the "not a custom pasted sequence" check - those have no
+   * genomic coordinates. */
   const rsLocalPos = useMemo(() => {
-    if (!rsVariant || !data.include_introns) return null;
+    if (!rsVariant || rsFoundInSpecies === null || rsFoundInSpecies !== species) return null;
+    if (!data.include_introns) return null;
     if (rsVariant.chrom && data.chrom && rsVariant.chrom !== data.chrom) return null;
     return localGenePos(data, rsVariant.start);
-  }, [rsVariant, data]);
+  }, [rsVariant, rsFoundInSpecies, species, data]);
 
   // Alleles re-oriented into `gene_seq`'s own strand sense (a minus-strand
   // gene's sequence is reverse-complemented at fetch time, so showing the
   // plus-strand alleles would look like a mismatch at that base) - the
-  // same rule `ArmsDesignPanel.tsx`'s `orientedAlleles` applies.
+  // same rule `ArmsDesignPanel.tsx`'s `orientedAlleles` applies. Only
+  // meaningful for a hit from the loaded sequence's own species; one
+  // found in another organism keeps its catalog (plus-strand) alleles.
   const rsOrientedAlleles = useMemo(
-    () => (rsVariant && data.strand === '-' ? rsVariant.alleles.map((a) => (a === '-' ? a : reverseComplement(a))) : rsVariant?.alleles ?? []),
-    [rsVariant, data.strand],
+    () => (rsVariant && rsFoundInSpecies !== null && rsFoundInSpecies === species && data.strand === '-' ? rsVariant.alleles.map((a) => (a === '-' ? a : reverseComplement(a))) : rsVariant?.alleles ?? []),
+    [rsVariant, rsFoundInSpecies, species, data.strand],
   );
 
   const rsMarker = useMemo<VariantMarker[]>(() => {
@@ -1091,10 +1135,9 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
        * (see the `rsQuery` machinery above). Kept outside the search bar's
        * flex row so a long consequence/clinical-significance list can wrap
        * without stretching the input row. */}
-      {rsQuery && (!species || !apiSource) && <p className="-mt-2 mb-3 text-xs text-ink-faint">rsID lookup isn't available for this sequence (unknown species/source) - search a gene-loaded sequence instead.</p>}
       {rsQuery && rsLookupCurrent?.status === 'loading' && <p className="-mt-2 mb-3 text-xs text-ink-muted">Looking up {rsQuery}…</p>}
       {rsQuery && rsLookupCurrent?.status === 'error' && <p className="-mt-2 mb-3 text-xs text-ink-muted">{rsLookupCurrent.message}</p>}
-      {rsVariant && (
+      {rsVariant && rsFound && (
         <div className="-mt-2 mb-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="font-mono font-semibold text-ink">{rsVariant.id}</span>
@@ -1112,13 +1155,16 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
             )}
           </div>
           <p className="mt-1 text-ink-faint">
-            {!data.include_introns
-              ? "This is a spliced view - an rsID can only be located on the intron-inclusive genomic map (tick 'Include introns' in step 2 and reload the sequence)."
-              : rsVariant.chrom && data.chrom && rsVariant.chrom !== data.chrom
-                ? `This SNP is on chromosome ${rsVariant.chrom}, but the loaded sequence is chromosome ${data.chrom}.`
-                : rsLocalPos === null
-                  ? `Outside ${data.transcript_name}'s span (${data.chrom}:${data.gene_start_genomic.toLocaleString()}-${data.gene_end_genomic.toLocaleString()}) - it may still be in the gene, under another transcript.`
-                  : 'Highlighted in the sequence below.'}
+            Found in {rsFound.foundIn.species} ({rsFound.foundIn.source}).{' '}
+            {rsFoundInSpecies !== species
+              ? `The loaded sequence is from ${species ?? 'a custom paste'} - there's nothing to highlight here.`
+              : !data.include_introns
+                ? "This is a spliced view - an rsID can only be located on the intron-inclusive genomic map (tick 'Include introns' in step 2 and reload the sequence)."
+                : rsVariant.chrom && data.chrom && rsVariant.chrom !== data.chrom
+                  ? `This SNP is on chromosome ${rsVariant.chrom}, but the loaded sequence is chromosome ${data.chrom}.`
+                  : rsLocalPos === null
+                    ? `Outside ${data.transcript_name}'s span (${data.chrom}:${data.gene_start_genomic.toLocaleString()}-${data.gene_end_genomic.toLocaleString()}) - it may still be in the gene, under another transcript.`
+                    : 'Highlighted in the sequence below.'}
           </p>
         </div>
       )}

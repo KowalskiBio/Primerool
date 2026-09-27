@@ -230,7 +230,15 @@ function toCsvField(v: string | number | boolean): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export default function SnpBatchPanel() {
+interface Props {
+  /** The organism currently selected in the input panel's toggle - forwarded
+   * to the sequence-map modals so their "Find in sequence" can resolve
+   * rsIDs from the organism the user is analyzing, not just this
+   * workflow's own human-GRCh38 data. */
+  selectedSpecies?: string;
+}
+
+export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [blocks, setBlocks] = useState<SnpBlock[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -968,9 +976,9 @@ export default function SnpBatchPanel() {
         </Section>
       )}
 
-      <SnpGeneMapModal gene={openGene} blocks={openGeneBlocks} onClose={() => setOpenGene(null)} />
+      <SnpGeneMapModal gene={openGene} blocks={openGeneBlocks} selectedSpecies={selectedSpecies} onClose={() => setOpenGene(null)} />
       <PrimerStructureModal pair={openPrimer} onClose={() => setOpenPrimer(null)} />
-      <AmpliconDetailModal amplicon={openAmpliconData} onPrimerEdit={handleAmpliconDetailEdit} onClose={() => setOpenAmpliconKey(null)} />
+      <AmpliconDetailModal amplicon={openAmpliconData} selectedSpecies={selectedSpecies} onPrimerEdit={handleAmpliconDetailEdit} onClose={() => setOpenAmpliconKey(null)} />
     </>
   );
 }

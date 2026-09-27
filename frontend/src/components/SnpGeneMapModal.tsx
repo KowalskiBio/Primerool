@@ -16,6 +16,9 @@ interface Props {
   /** Every block from the current batch belonging to `gene` - each becomes
    * one marker on the map (see `SequenceViewer`'s `variantMarkers`). */
   blocks: SnpBlock[];
+  /** The organism selected in the input panel's toggle - forwarded to
+   * `SequenceViewer`'s "Find in sequence" as a lookup fallback. */
+  selectedSpecies?: string;
   onClose: () => void;
 }
 
@@ -33,7 +36,7 @@ function markersFor(data: SequenceData, blocks: SnpBlock[]): VariantMarker[] {
  * uses (`SequenceViewer`), loaded fresh for one gene from a clicked SNP
  * batch result row - with every SNP the batch found for that gene (not
  * just the clicked one) marked on it. */
-export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
+export default function SnpGeneMapModal({ gene, blocks, selectedSpecies, onClose }: Props) {
   const [data, setData] = useState<SequenceData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
@@ -232,7 +235,7 @@ export default function SnpGeneMapModal({ gene, blocks, onClose }: Props) {
               {offMapCount > 0 && ` (${offMapCount} outside ${shownData.transcript_name}'s span - try another transcript above)`}
             </div>
           </div>
-          <SequenceViewer data={shownData} selections={EMPTY_SELECTIONS} truncateIntrons={truncateIntrons} variantMarkers={markers} species={SNP_WORKFLOW_SPECIES} apiSource={apiSourceUsed ?? undefined} />
+          <SequenceViewer data={shownData} selections={EMPTY_SELECTIONS} truncateIntrons={truncateIntrons} variantMarkers={markers} species={SNP_WORKFLOW_SPECIES} apiSource={apiSourceUsed ?? undefined} selectedSpecies={selectedSpecies} />
         </div>
       )}
     </Modal>

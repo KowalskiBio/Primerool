@@ -47,6 +47,12 @@ function App() {
 
   const [geneName, setGeneName] = useState('');
   const [species, setSpecies] = useState('homo_sapiens');
+  // The organism currently picked in the input panel's toggle (updated
+  // live, unlike `species` which only moves when a gene is actually
+  // searched) - forwarded to the sequence map's "Find in sequence" as an
+  // rsID-lookup fallback, so a variant that exists only in the organism
+  // the user is analyzing can still be found.
+  const [selectedSpecies, setSelectedSpecies] = useState('homo_sapiens');
   const [apiSource, setApiSource] = useState<'ensembl' | 'ncbi'>('ncbi');
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [sequenceData, setSequenceData] = useState<SequenceData | null>(null);
@@ -121,7 +127,7 @@ function App() {
 
       <main className="mx-auto max-w-[110rem] px-4 py-6 sm:px-6 lg:px-8">
         <Section step={1} title="Input Sequence">
-          <InputPanel onGeneFound={handleGeneFound} onCustomSequence={handleCustomSequence} />
+          <InputPanel onGeneFound={handleGeneFound} onCustomSequence={handleCustomSequence} onSpeciesSelectionChange={setSelectedSpecies} />
         </Section>
 
         {transcripts.length > 0 && (
@@ -151,6 +157,7 @@ function App() {
               onSelect={handleSelect}
               species={isCustomSequence ? undefined : species}
               apiSource={isCustomSequence ? undefined : apiSource}
+              selectedSpecies={selectedSpecies}
             />
           </Section>
         )}

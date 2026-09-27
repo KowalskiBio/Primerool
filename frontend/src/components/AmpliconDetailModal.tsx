@@ -24,6 +24,9 @@ interface Props {
    * edge, `'end'` the reverse's, matching `SnpAmpliconMap`'s own
    * `onEdgeDrag` convention. */
   onPrimerEdit: (groupRsids: string[], side: 'start' | 'end', newAmpEdge: number, sequence: string, tm: number | null) => void;
+  /** The organism selected in the input panel's toggle - forwarded to
+   * `SequenceViewer`'s "Find in sequence" as a lookup fallback. */
+  selectedSpecies?: string;
   onClose: () => void;
 }
 
@@ -73,7 +76,7 @@ function genomicFromLocal(data: SequenceData, local: number): number {
  * both primers' sequence/Tm/length, amplicon length, and their secondary
  * structures (`PrimerStructurePanel` - the same breakdown a primer-segment
  * click opens standalone). */
-export default function AmpliconDetailModal({ amplicon, onPrimerEdit, onClose }: Props) {
+export default function AmpliconDetailModal({ amplicon, onPrimerEdit, selectedSpecies, onClose }: Props) {
   const [truncateIntrons, setTruncateIntrons] = useState(true);
   const [liveSelections, setLiveSelections] = useState<Selections>(EMPTY_SELECTIONS);
   const [liveFor, setLiveFor] = useState<string | null>(null);
@@ -196,6 +199,7 @@ export default function AmpliconDetailModal({ amplicon, onPrimerEdit, onClose }:
             variantMarkers={variantMarkers}
             species={SNP_WORKFLOW_SPECIES}
             apiSource={apiSourceUsed ?? undefined}
+            selectedSpecies={selectedSpecies}
           />
 
           <div className="mt-5 grid grid-cols-1 gap-3 border-t border-line pt-4 sm:grid-cols-3">

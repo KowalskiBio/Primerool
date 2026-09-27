@@ -17,9 +17,14 @@ import { controlClasses } from './ui/TextInput';
 interface Props {
   onGeneFound: (geneName: string, species: string, apiSource: 'ensembl' | 'ncbi', transcripts: Transcript[]) => void;
   onCustomSequence: (data: SequenceData) => void;
+  /** Fired whenever the organism toggle's effective species changes
+   * (kingdom/species pick, custom-species text, or a BLAST-driven
+   * `syncDropdownsToSpecies`) - lets App track "the organism the user is
+   * analyzing" live, not just whenever the next gene search happens. */
+  onSpeciesSelectionChange?: (species: string) => void;
 }
 
-export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
+export default function InputPanel({ onGeneFound, onCustomSequence, onSpeciesSelectionChange }: Props) {
   const [inputMode, setInputMode] = useState<'gene' | 'fasta'>('gene');
   const [apiSource, setApiSource] = useState<'ensembl' | 'ncbi'>('ncbi');
   const [kingdom, setKingdom] = useState<Kingdom>('animals');
@@ -51,6 +56,7 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
       setSpeciesValue('__custom__');
       setCustomSpecies(species);
     }
+    onSpeciesSelectionChange?.(species);
   }
 
   async function runSearchGene(geneName: string, species: string, source: 'ensembl' | 'ncbi') {
@@ -265,8 +271,10 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
                 value={kingdom}
                 onChange={(e) => {
                   const k = e.target.value as Kingdom;
+                  const first = SPECIES_BY_KINGDOM[k][0]?.value || '';
                   setKingdom(k);
-                  setSpeciesValue(SPECIES_BY_KINGDOM[k][0]?.value || '');
+                  setSpeciesValue(first);
+                  onSpeciesSelectionChange?.(first);
                 }}
               >
                 {(Object.keys(KINGDOM_LABELS) as Kingdom[]).map((k) => (
@@ -278,7 +286,15 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
             </Field>
 
             <Field label="Organism" className="w-full sm:w-72">
-              <Select aria-label="Species" value={speciesValue} onChange={(e) => setSpeciesValue(e.target.value)}>
+              <Select
+                aria-label="Species"
+                value={speciesValue}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSpeciesValue(v);
+                  onSpeciesSelectionChange?.(v === '__custom__' ? customSpecies.trim() : v);
+                }}
+              >
                 {speciesOptions.map((s) => (
                   <option key={s.value} value={s.value}>
                     {s.label}
@@ -296,7 +312,10 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
                 spellCheck={false}
                 aria-label="Custom species"
                 value={customSpecies}
-                onChange={(e) => setCustomSpecies(e.target.value)}
+                onChange={(e) => {
+                  setCustomSpecies(e.target.value);
+                  onSpeciesSelectionChange?.(e.target.value.trim());
+                }}
                 placeholder="e.g. escherichia_coli_str_k_12_substr_mg1655…"
               />
               <p className="mt-1 text-xs text-ink-faint">
@@ -337,7 +356,11 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
 
           {showSnpBatch && (
             <div className="mt-4">
-              <SnpBatchPanel />
+              {/* The toggle's current organism (even though this workflow's
+                  own sequence fetching is human-GRCh38 by design) - forwarded
+                  so the modals' "Find in sequence" can resolve an rsID from
+                  the organism the user is actually analyzing. */}
+              <SnpBatchPanel selectedSpecies={effectiveSpecies || undefined} />
             </div>
           )}
 

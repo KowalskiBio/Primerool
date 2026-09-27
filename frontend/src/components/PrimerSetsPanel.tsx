@@ -30,17 +30,29 @@ function roleLabel(key: Key, sel: Selection): string {
   return dir;
 }
 
-/** Product length of the General pair: from the forward primer's 5' end
- * to the reverse primer's 5' end, in gene coordinates - so on a genomic
- * (intron-inclusive) view it counts any introns in between. A message
- * instead when the two don't face each other with the forward upstream. */
-function generalAmplicon(selections: Selections, data: SequenceData): string | null {
-  const f = selections.geneForward;
-  const r = selections.geneReverse;
-  if (!f || !r) return null;
+/** A selection's span in one continuous coordinate space: gene-local for
+ * flank/gene picks (upstream negative, downstream past `gene_len`), or the
+ * spliced transcript for junction picks. */
+function span(sel: Selection, data: SequenceData): { space: 'genomic' | 'spliced'; start: number; end: number } {
+  if (sel.region === 'spliced') return { space: 'spliced', start: sel.start, end: sel.end };
+  const shift = sel.region === 'up' ? -data.upstream_len : sel.region === 'down' ? data.gene_len : 0;
+  return { space: 'genomic', start: sel.start + shift, end: sel.end + shift };
+}
+
+/** Product length of a primer set: from the forward primer's 5' end to
+ * the reverse primer's 5' end. Genomic picks count any introns in between
+ * on an intron-inclusive view (marked "genomic"); junction picks measure
+ * the spliced product ("cDNA"). A note instead when the primers don't
+ * face each other, or can't be compared (one spliced, one genomic). */
+function ampliconLabel(fwd: Selection | undefined, rev: Selection | undefined, data: SequenceData): string | null {
+  if (!fwd || !rev) return null;
+  const f = span(fwd, data);
+  const r = span(rev, data);
+  if (f.space !== r.space) return null;
   const size = r.end - f.start;
   if (size <= 0 || f.start >= r.start) return 'primers not in amplifying orientation';
-  return `${size.toLocaleString('en-US')} bp amplicon${data.include_introns ? ' (genomic)' : ''}`;
+  const kind = f.space === 'spliced' ? ' (cDNA)' : data.include_introns ? ' (genomic)' : '';
+  return `${size.toLocaleString('en-US')} bp amplicon${kind}`;
 }
 
 function fmt(v: number | null | undefined, unit: string) {
@@ -141,10 +153,13 @@ export default function PrimerSetsPanel({ data, selections, onSelect }: Props) {
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
           {groups.map((g) => {
             const twins = selections.armsRefPrimer;
-            const amplicon = g.id === 'general' ? generalAmplicon(selections, data) : null;
             const title = g.id === 'arms' && twins ? `ARMS (${selectionStrand(twins) === 'F' ? '2 F + 1 R' : '1 F + 2 R'})` : g.title;
+            // The ARMS mutant twin sits exactly where the wild-type twin
+            // does, so one twin + the common primer gives the trio's
+            // amplicon (identical for both alleles).
             const fwd = g.rows.find((r) => selectionStrand(r.sel) === 'F' && r.key !== 'armsAltPrimer')?.sel;
             const rev = g.rows.find((r) => selectionStrand(r.sel) === 'R' && r.key !== 'armsAltPrimer')?.sel;
+            const amplicon = g.id === 'probe' ? null : ampliconLabel(fwd, rev, data);
             return (
               <section key={g.id} className="min-w-0 rounded-md border border-line bg-surface p-3" aria-label={title}>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

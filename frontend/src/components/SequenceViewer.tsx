@@ -4,6 +4,7 @@ import type { Selection, Selections } from '../utils/regionMapping';
 import { mapPrimerToGenomic } from '../utils/regionMapping';
 import { cleanDNA, reverseComplement } from '../utils/dna';
 import { analyzePrimer } from '../api/design';
+import { describeGenePosition, useBaseHover } from './BaseHoverTooltip';
 
 interface Segment {
   text: string;
@@ -617,6 +618,7 @@ function buildRows(cells: Cell[], lineWidth: number): Row[] {
         className: cell.className,
         id: firstPiece ? cell.id : undefined,
         startPos: cell.startPos + consumed,
+        region: cell.region,
         cursorClass: cell.cursorClass,
         onMouseDown: cell.onMouseDown,
         isSearchHit: cell.isSearchHit,
@@ -841,6 +843,15 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   const cells = applySearchHighlight(variantCells, searchMatches, activeSearchIdx);
   const rows = buildRows(cells, lineWidth);
 
+  // Hovering a base shows its position from the start of the gene (and
+  // its genomic coordinate when there is one). Flank-local positions are
+  // shifted into gene coordinates: negative upstream, past gene_len
+  // downstream.
+  const { handlers: hoverHandlers, tooltip } = useBaseHover(({ region, pos, base }) => {
+    const local = region === 'up' ? pos - data.upstream_len : region === 'down' ? data.gene_len + pos : pos;
+    return describeGenePosition(data, local, base);
+  }, dragSession === null);
+
   const modeText = data.include_introns
     ? 'Genomic DNA (with introns; CDS bold, UTR highlighted)'
     : data.include_utr
@@ -860,7 +871,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
           <strong className="font-medium text-ink">Flanking:</strong> {data.upstream_len} bp upstream, {data.downstream_len} bp downstream
         </p>
         <p className="mt-1 text-xs text-ink-faint">
-          Numbers on the left mark each row's first position: 0-based from the start of its own region (upstream flank, gene, or downstream flank).
+          Numbers on the left mark each row's first position: 0-based from the start of its own region (upstream flank, gene, or downstream flank). Hover a base to see its position from the gene start.
         </p>
       </div>
 
@@ -923,7 +934,9 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         id="sequence-map"
         ref={containerRef}
         className="sequence-viewer relative max-h-[520px] overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg border border-line bg-base p-4 text-sm"
+        {...hoverHandlers}
       >
+        {tooltip}
         {/* Unrendered (out of flow, invisible) - measured only, to figure
          * out how many characters actually fit in one row of this
          * container at its current width/font, so rows can fill the
@@ -959,6 +972,8 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
                   id={p.id}
                   data-search-idx={p.searchIdx}
                   data-variant-rsid={p.variantRsid}
+                  data-region={p.region}
+                  data-pos={p.region ? p.startPos : undefined}
                   title={p.variantLabel}
                   onMouseDown={p.onMouseDown}
                 >

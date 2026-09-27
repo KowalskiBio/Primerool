@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { SequenceData } from '../api/sequence';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { genomicToSpliced } from '../utils/regionMapping';
+import { describeGenePosition, useBaseHover } from './BaseHoverTooltip';
 
 interface Span {
   start: number;
@@ -13,6 +14,8 @@ interface Piece {
   kind: 'label' | 'text';
   text: string;
   className?: string;
+  /** Index into `spliced_exons_seq` of a text piece's first character. */
+  start?: number;
 }
 
 function collectSplicedSpans(data: SequenceData, sel: Selections): Span[] {
@@ -45,13 +48,13 @@ function sliceWithHighlights(spliced: string, a: number, b: number, spans: Span[
   for (const sp of relevant) {
     const s = Math.max(a, sp.start);
     const e = Math.min(b, sp.end);
-    if (s > cur) pieces.push({ kind: 'text', text: spliced.substring(cur, s) });
+    if (s > cur) pieces.push({ kind: 'text', text: spliced.substring(cur, s), start: cur });
     if (e > s) {
-      pieces.push({ kind: 'text', text: spliced.substring(s, e), className: sp.className });
+      pieces.push({ kind: 'text', text: spliced.substring(s, e), className: sp.className, start: s });
       cur = e;
     }
   }
-  if (cur < b) pieces.push({ kind: 'text', text: spliced.substring(cur, b) });
+  if (cur < b) pieces.push({ kind: 'text', text: spliced.substring(cur, b), start: cur });
   return pieces;
 }
 
@@ -87,20 +90,48 @@ export default function SplicedSequenceViewer({ data, selections }: Props) {
     return out;
   }, [data, selections]);
 
+  // Exon spans in `gene_seq` coordinates, in transcript order, so a hovered
+  // spliced index can be traced back to its gene position. Only when
+  // `gene_seq` includes the introns (the exon annotations are then in its
+  // coordinates) and the exons add up to exactly the spliced sequence -
+  // otherwise just the transcript position is shown.
+  const exonSpans = useMemo(() => {
+    if (!data.include_introns) return null;
+    const exons = (data.annotations || [])
+      .filter((a) => a.type === 'exon')
+      .map((a) => [a.start, a.end] as const)
+      .sort((x, y) => x[0] - y[0]);
+    const total = exons.reduce((n, [s, e]) => n + (e - s), 0);
+    return total === (data.spliced_exons_seq || '').length ? exons : null;
+  }, [data]);
+
+  const { handlers: hoverHandlers, tooltip } = useBaseHover(({ pos, base }) => {
+    const transcriptLine = `transcript position ${(pos + 1).toLocaleString('en-US')}`;
+    if (!exonSpans) return [`${base.toUpperCase()} · ${transcriptLine}`];
+    let offset = pos;
+    for (let k = 0; k < exonSpans.length; k++) {
+      const [s, e] = exonSpans[k];
+      if (offset < e - s) return describeGenePosition(data, s + offset, base, `exon ${k + 1} · ${transcriptLine}`);
+      offset -= e - s;
+    }
+    return null;
+  });
+
   return (
     <div>
       <h3 className="mb-2 text-sm font-semibold text-ink">Spliced exon-only map (for exon-exon junction primers)</h3>
       <div className="mb-3 rounded-md border border-line bg-surface-2 p-2 text-sm text-ink-muted">
         Junction positions in the sequence map refer to these sequences. Horizontal bars indicate exon boundaries.
       </div>
-      <div className="sequence-viewer max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base p-4 text-sm">
+      <div className="sequence-viewer max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base p-4 text-sm" {...hoverHandlers}>
+        {tooltip}
         {pieces.map((p, i) =>
           p.kind === 'label' ? (
             <span key={i} className="exon-label">
               {p.text}
             </span>
           ) : (
-            <span key={i} className={p.className}>
+            <span key={i} className={p.className} data-region="spliced" data-pos={p.start}>
               {p.text}
             </span>
           ),

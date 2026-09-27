@@ -163,9 +163,11 @@ export default function HairpinSvg({ sequence: seq, structure: dotBracket, light
     const stemGroups = valid ? splitStemGroups(seq, dotBracket) : null;
     if (stemGroups && stemGroups.length > 1 && stemGroups.every((g) => g.dotBracket.length < dotBracket.length)) {
       return (
-        <div className="flex gap-1 items-end justify-center overflow-x-auto">
+        <div className="flex gap-1 items-end justify-center">
           {stemGroups.map((g, i) => (
-            <HairpinSvg key={i} sequence={g.seq} structure={g.dotBracket} light={light} />
+            <div key={i} className="min-w-0 flex-1">
+              <HairpinSvg sequence={g.seq} structure={g.dotBracket} light={light} />
+            </div>
           ))}
         </div>
       );

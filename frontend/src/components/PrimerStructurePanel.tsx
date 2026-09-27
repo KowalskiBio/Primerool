@@ -25,17 +25,20 @@ function dgColor(dg: number): string {
   return 'text-success';
 }
 
-/** One horizontally-scrollable strip of up to 5 subopt candidates for one
- * category (a primer's hairpin, its self-dimer, or the pair's
- * heterodimer) - `diagram` draws whichever kind this category is. */
-function CandidateStrip({ candidates, diagram }: { candidates: StructureCandidate[]; diagram: (structure: string) => ReactNode }) {
+/** A wrapping grid of up to 5 subopt candidates for one category (a
+ * primer's hairpin, its self-dimer, or the pair's heterodimer) - `diagram`
+ * draws whichever kind this category is. Wraps onto new rows rather than
+ * scrolling sideways, so every candidate is visible at once. */
+function CandidateStrip({ candidates, diagram, wide = false }: { candidates: StructureCandidate[]; diagram: (structure: string) => ReactNode; wide?: boolean }) {
   if (candidates.length === 0) {
     return <div className="text-[13px] italic text-ink-faint">No structure found</div>;
   }
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1">
+    // Dimers (`wide`) are long two-strand diagrams that shrink unreadably in
+    // a hairpin-sized card, so they get roughly two per row instead of three.
+    <div className={`grid gap-3 ${wide ? 'grid-cols-[repeat(auto-fill,minmax(min(30rem,100%),1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(min(20rem,100%),1fr))]'}`}>
       {candidates.map((c, i) => (
-        <div key={i} className="w-60 shrink-0 rounded-md border border-line bg-base p-2">
+        <div key={i} className="min-w-0 rounded-md border border-line bg-base p-3">
           <div className="mb-1.5 flex items-center justify-between text-[11px] text-ink-muted">
             <span className="font-medium text-ink">#{i + 1}</span>
             <span className="text-accent" title="Boltzmann share within this model's own top-5 subopt ensemble">
@@ -121,37 +124,33 @@ export default function PrimerStructurePanel({ pair }: Props) {
       )}
       {shownFwd && shownRev && (
         <div>
-          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-            {/* `min-w-0` on both columns: a grid item's default `min-width:
-                auto` is its content's min-content width - the whole
-                unscrolled candidate strip - so without it each column
-                overflows its half and the two collide instead of their
-                strips scrolling. */}
-            <div className="min-w-0">
-              <p className="mb-2 break-all font-mono text-xs text-ink">
-                Forward: {pair.forward} <span className="text-ink-faint">({pair.forward.length} bp)</span>
-              </p>
-              <CategorySection title="Hairpin (Strider MFE)">
-                <CandidateStrip candidates={shownFwd.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.forward} structure={s} />} />
-              </CategorySection>
-              <CategorySection title="Self-dimer (Strider MFE)">
-                <CandidateStrip candidates={shownFwd.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.forward} structure={s} />} />
-              </CategorySection>
-            </div>
-            <div className="min-w-0">
-              <p className="mb-2 break-all font-mono text-xs text-ink">
-                Reverse: {pair.reverse} <span className="text-ink-faint">({pair.reverse.length} bp)</span>
-              </p>
-              <CategorySection title="Hairpin (Strider MFE)">
-                <CandidateStrip candidates={shownRev.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.reverse} structure={s} />} />
-              </CategorySection>
-              <CategorySection title="Self-dimer (Strider MFE)">
-                <CandidateStrip candidates={shownRev.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.reverse} seq2={pair.reverse} structure={s} />} />
-              </CategorySection>
-            </div>
+          {/* Forward, reverse, then the heterodimer, each at full width -
+              side-by-side columns left each candidate grid too narrow and
+              forced horizontal scrolling. */}
+          <div className="mb-5 border-b border-line pb-5">
+            <p className="mb-2 break-all font-mono text-xs text-ink">
+              Forward: {pair.forward} <span className="text-ink-faint">({pair.forward.length} bp)</span>
+            </p>
+            <CategorySection title="Hairpin (Strider MFE)">
+              <CandidateStrip candidates={shownFwd.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.forward} structure={s} />} />
+            </CategorySection>
+            <CategorySection title="Self-dimer (Strider MFE)">
+              <CandidateStrip candidates={shownFwd.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.forward} structure={s} />} wide />
+            </CategorySection>
+          </div>
+          <div className="mb-5 border-b border-line pb-5">
+            <p className="mb-2 break-all font-mono text-xs text-ink">
+              Reverse: {pair.reverse} <span className="text-ink-faint">({pair.reverse.length} bp)</span>
+            </p>
+            <CategorySection title="Hairpin (Strider MFE)">
+              <CandidateStrip candidates={shownRev.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.reverse} structure={s} />} />
+            </CategorySection>
+            <CategorySection title="Self-dimer (Strider MFE)">
+              <CandidateStrip candidates={shownRev.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.reverse} seq2={pair.reverse} structure={s} />} wide />
+            </CategorySection>
           </div>
           <CategorySection title="Heterodimer - forward × reverse (Strider MFE)">
-            <CandidateStrip candidates={shownFwd.heterodimer?.with_bulge.candidates ?? []} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.reverse} structure={s} />} />
+            <CandidateStrip candidates={shownFwd.heterodimer?.with_bulge.candidates ?? []} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.reverse} structure={s} />} wide />
           </CategorySection>
         </div>
       )}

@@ -27,14 +27,19 @@ function roleLabel(key: Key, sel: Selection): string {
   if (key === 'armsAltPrimer') return `${dir} twin · mutant${sel.arms ? ` (${sel.arms.mutBase})` : ''}`;
   if (key === 'armsCommon') return `${dir} common`;
   if (key === 'geneProbe') return 'Probe';
+  if ((key === 'juncLeft' || key === 'juncRight') && sel.region !== 'spliced') return `${dir} · in the gene (partner crosses the junction)`;
   return dir;
 }
 
 /** A selection's span in one continuous coordinate space: gene-local for
  * flank/gene picks (upstream negative, downstream past `gene_len`), or the
  * spliced transcript for junction picks. */
-function span(sel: Selection, data: SequenceData): { space: 'genomic' | 'spliced'; start: number; end: number } {
-  if (sel.region === 'spliced') return { space: 'spliced', start: sel.start, end: sel.end };
+function span(sel: Selection, data: SequenceData, forceGenomic = false): { space: 'genomic' | 'spliced'; start: number; end: number } {
+  if (sel.region === 'spliced') {
+    if (!forceGenomic) return { space: 'spliced', start: sel.start, end: sel.end };
+    const r = mapPrimerToGenomic(sel, data);
+    return { space: 'genomic', start: Math.min(...r.map((x) => x.start)), end: Math.max(...r.map((x) => x.end)) };
+  }
   const shift = sel.region === 'up' ? -data.upstream_len : sel.region === 'down' ? data.gene_len : 0;
   return { space: 'genomic', start: sel.start + shift, end: sel.end + shift };
 }
@@ -46,12 +51,16 @@ function span(sel: Selection, data: SequenceData): { space: 'genomic' | 'spliced
  * face each other, or can't be compared (one spliced, one genomic). */
 function ampliconLabel(fwd: Selection | undefined, rev: Selection | undefined, data: SequenceData): string | null {
   if (!fwd || !rev) return null;
-  const f = span(fwd, data);
-  const r = span(rev, data);
-  if (f.space !== r.space) return null;
+  // One junction primer on the spliced transcript and its partner in the
+  // gene (an intron): only an unspliced template carries both, so measure
+  // the pair there.
+  const mixed = (fwd.region === 'spliced') !== (rev.region === 'spliced');
+  const f = span(fwd, data, mixed);
+  const r = span(rev, data, mixed);
+  if (!Number.isFinite(f.start) || !Number.isFinite(r.end)) return null;
   const size = r.end - f.start;
   if (size <= 0 || f.start >= r.start) return 'primers not in amplifying orientation';
-  const kind = f.space === 'spliced' ? ' (cDNA)' : data.include_introns ? ' (genomic)' : '';
+  const kind = mixed ? ' (unspliced template)' : f.space === 'spliced' ? ' (cDNA)' : data.include_introns ? ' (genomic)' : '';
   return `${size.toLocaleString('en-US')} bp amplicon${kind}`;
 }
 

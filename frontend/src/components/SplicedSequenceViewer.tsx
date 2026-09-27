@@ -27,6 +27,12 @@ function collectSplicedSpans(data: SequenceData, sel: Selections): Span[] {
   };
   addDirect(sel.juncLeft, 'seq-primer');
   addDirect(sel.juncRight, 'seq-primer');
+  // A junction pair's second primer may sit in the gene instead (e.g. in an
+  // intron - see `mapPickMenu`'s junction rule); show whatever part of it
+  // lies on exons.
+  for (const p of [sel.juncLeft, sel.juncRight]) {
+    if (p && p.region !== 'spliced') for (const r of genomicToSpliced(p, data)) spans.push({ ...r, className: 'seq-primer' });
+  }
 
   const addMapped = (p: Selection | null, className: string) => {
     for (const r of genomicToSpliced(p, data)) spans.push({ ...r, className });
@@ -115,7 +121,7 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
 
   const pickMenu = useMapPickMenu({ data, selections, onSelect, pickKinds: EXON_MAP_PICKS });
   const containerRef = useRef<HTMLDivElement>(null);
-  const dragSelect = useMapDragSelect({ containerRef });
+  const dragSelect = useMapDragSelect({ containerRef, onPlainContextMenu: pickMenu.onContextMenu });
 
   const { handlers: hoverHandlers, tooltip } = useBaseHover(({ pos, base }) => {
     const transcriptLine = `transcript position ${(pos + 1).toLocaleString('en-US')}`;
@@ -140,7 +146,7 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
         className="sequence-viewer max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base p-4 text-sm"
         {...hoverHandlers}
         onMouseDown={dragSelect.onMouseDown}
-        onContextMenu={pickMenu.onContextMenu}
+        onContextMenu={dragSelect.onContextMenu}
       >
         {tooltip}
         {dragSelect.overlay}

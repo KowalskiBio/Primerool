@@ -1015,7 +1015,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   // the old native `title` on the marker span (which stacked a second,
   // OS-styled tooltip on top of this one).
   const variantByRsid = useMemo(() => new Map(allVariantMarkers.map((m) => [m.rsid, m])), [allVariantMarkers]);
-  const dragSelect = useMapDragSelect({ containerRef });
+  const dragSelect = useMapDragSelect({ containerRef, onPlainContextMenu: pickMenu.onContextMenu });
   const { handlers: hoverHandlers, tooltip } = useBaseHover(({ region, pos, base, variantRsid }) => {
     const local = region === 'up' ? pos - data.upstream_len : region === 'down' ? data.gene_len + pos : pos;
     const m = variantRsid !== undefined ? variantByRsid.get(variantRsid) : undefined;
@@ -1148,7 +1148,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         className="sequence-viewer relative max-h-[520px] overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg border border-line bg-base p-4 text-sm"
         {...hoverHandlers}
         onMouseDown={dragSelect.onMouseDown}
-        onContextMenu={pickMenu.onContextMenu}
+        onContextMenu={dragSelect.onContextMenu}
       >
         {tooltip}
         {dragSelect.overlay}

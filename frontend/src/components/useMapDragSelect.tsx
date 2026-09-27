@@ -25,8 +25,12 @@ const ARM_PX = 3;
 
 interface Options {
   /** The map's scroll container - the same element the hover handlers
-   * and `useMapPickMenu`'s `onContextMenu` live on. */
+   * and the container-level mousedown live on. */
   containerRef: React.RefObject<HTMLElement | null>;
+  /** The map's normal right-click handler (`useMapPickMenu`'s
+   * `onContextMenu`) - invoked for every contextmenu that is not part
+   * of a right-drag gesture. */
+  onPlainContextMenu: (e: React.MouseEvent<HTMLElement>) => void;
 }
 
 /** Right-button drag-select for a sequence map: pressing the right
@@ -35,29 +39,60 @@ interface Options {
  * (`setBaseAndExtent`/`extend`) from that anchor to the pointer, with a
  * live "N bp" badge at the cursor. The gesture never swallows a plain
  * right-click - without movement past `ARM_PX` nothing changes, so
- * right-clicking an existing selection still opens its action menu
- * untouched. On release the selection stays put, and the `contextmenu`
- * event (which the browser fires right after the mouseup) opens the
- * map's action menu on it, its heading repeating the length.
+ * right-clicking an existing selection still gets its action menu.
  *
- * Spread `onMouseDown` onto the map's scroll container, render
- * `overlay`, and fold `active` into whatever the map disables while the
- * user is mid-gesture (e.g. the hover tooltip) - shared by
+ * Firefox and Safari fire `contextmenu` on the right *press* (Chrome
+ * waits until release), which would pop the browser's native menu the
+ * moment a drag starts - so this hook also fronts the container's
+ * `onContextMenu`: while a right-press gesture is in flight the event is
+ * swallowed (and remembered), and on release it is re-synthesized at the
+ * release point, handing the map's normal handler whatever selection
+ * the gesture produced (the drag's, or whatever was selected before a
+ * plain click). In Chrome the real event simply arrives after the
+ * mouseup and flows through untouched - nothing is synthesized there.
+ *
+ * Spread `onMouseDown`/`onContextMenu` onto the map's scroll container,
+ * render `overlay`, and fold `active` into whatever the map disables
+ * while the user is mid-gesture (e.g. the hover tooltip) - shared by
  * `SequenceViewer` and `SplicedSequenceViewer`, mirroring
  * `useMapPickMenu`. */
-export function useMapDragSelect({ containerRef }: Options) {
+export function useMapDragSelect({ containerRef, onPlainContextMenu }: Options) {
   const [drag, setDrag] = useState<{ x: number; y: number; anchor: { node: Node; offset: number } } | null>(null);
   const [badge, setBadge] = useState<{ x: number; y: number; text: string } | null>(null);
   // Whether the pointer has moved past `ARM_PX` since the press. A ref,
   // not state: only the live window-level mousemove handlers read it.
   const armedRef = useRef(false);
+  // Whether a right-press gesture is in flight - set synchronously on
+  // mousedown (before any re-render), so the contextmenu guard below
+  // can check it even in browsers that fire contextmenu immediately
+  // after mousedown.
+  const inGestureRef = useRef(false);
+  // Whether this gesture's contextmenu was already fired and swallowed
+  // (Firefox/Safari) - tells the release handler to synthesize one, so
+  // the action menu opens there like it does in Chrome.
+  const swallowedContextMenuRef = useRef(false);
 
   function onMouseDown(e: React.MouseEvent<HTMLElement>) {
     if (e.button !== 2) return;
     const caret = baseCaretAt(e.clientX, e.clientY);
     if (!caret) return; // not over a base - leave the browser's own behavior alone
     armedRef.current = false;
+    inGestureRef.current = true;
+    swallowedContextMenuRef.current = false;
     setDrag({ x: e.clientX, y: e.clientY, anchor: caret });
+  }
+
+  function onContextMenu(e: React.MouseEvent<HTMLElement>) {
+    if (!inGestureRef.current) {
+      onPlainContextMenu(e);
+      return;
+    }
+    // A right-press is in flight: swallow the browser's own menu for
+    // the gesture. If it turns out to be a drag, that's the point; if
+    // it ends up a plain click, the release handler below re-fires the
+    // event so the normal menu logic still runs.
+    e.preventDefault();
+    swallowedContextMenuRef.current = true;
   }
 
   useEffect(() => {
@@ -88,9 +123,16 @@ export function useMapDragSelect({ containerRef }: Options) {
       );
     }
 
-    function onUp() {
+    function onUp(e: MouseEvent) {
       setDrag(null);
       setBadge(null);
+      inGestureRef.current = false;
+      // Only browsers whose contextmenu was swallowed at the press need
+      // the menu re-fired here - Chrome's own event follows this mouseup
+      // and synthesizing one too would open the menu twice.
+      if (swallowedContextMenuRef.current && containerRef.current) {
+        containerRef.current.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY }));
+      }
     }
 
     window.addEventListener('mousemove', onMove);
@@ -112,5 +154,5 @@ export function useMapDragSelect({ containerRef }: Options) {
     </div>
   ) : null;
 
-  return { onMouseDown, overlay, active: drag !== null };
+  return { onMouseDown, onContextMenu, overlay, active: drag !== null };
 }

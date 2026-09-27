@@ -67,24 +67,30 @@ function junctionPositions(data: SequenceData): number[] {
   return out;
 }
 
-/** A junction primer's footprint on the spliced transcript, or why the
- * pick can't be one: it must lie only on exon bases (no intron at all)
- * and cross at least one exon-exon junction. */
-export function junctionFromPick(data: SequenceData, pick: MapPick): { start: number; end: number; seq: string } | { reason: string } {
+/** Whether a spliced span has bases on both sides of an exon-exon
+ * junction. */
+export function crossesJunction(data: SequenceData, start: number, end: number): boolean {
+  return junctionPositions(data).some((p) => start < p && p < end);
+}
+
+/** A pick's footprint on the spliced transcript when it lies on exon bases
+ * only (across collapsed introns allowed), plus whether it crosses an
+ * exon-exon junction - or why it isn't exon-only. */
+export function junctionFromPick(data: SequenceData, pick: MapPick): { start: number; end: number; seq: string; crosses: boolean } | { reason: string } {
   let start: number;
   let end: number;
   if (pick.kind === 'contiguous' && pick.region === 'spliced') {
     start = pick.start;
     end = pick.end;
   } else if (pick.kind === 'contiguous' && pick.region !== 'gene') {
-    return { reason: 'Junction primers lie within exons, not in a flank' };
+    return { reason: 'Junction primers lie within the gene, not in a flank' };
   } else {
     const pieces = pick.kind === 'gapped' ? pick.pieces : [{ start: pick.start, end: pick.end }];
     const mapped: { start: number; end: number }[] = [];
     for (const piece of pieces) {
       const spans = genomicToSpliced({ region: 'gene', start: piece.start, end: piece.end, primerSeq: '', bindingSeq: '', source: 'manual' }, data);
       const len = spans.reduce((n, r) => n + (r.end - r.start), 0);
-      if (len !== piece.end - piece.start) return { reason: 'Contains intron bases - a junction primer must lie on exons only' };
+      if (len !== piece.end - piece.start) return { reason: 'Contains intron bases' };
       mapped.push(...spans);
     }
     if (mapped.length === 0) return { reason: 'No exon structure available for this sequence' };
@@ -94,10 +100,7 @@ export function junctionFromPick(data: SequenceData, pick: MapPick): { start: nu
     start = mapped[0].start;
     end = mapped[mapped.length - 1].end;
   }
-  if (!junctionPositions(data).some((p) => start < p && p < end)) {
-    return { reason: 'Does not cross an exon-exon junction' };
-  }
-  return { start, end, seq: (data.spliced_exons_seq || '').substring(start, end).toUpperCase() };
+  return { start, end, seq: (data.spliced_exons_seq || '').substring(start, end).toUpperCase(), crosses: crossesJunction(data, start, end) };
 }
 
 function rawSeq(data: SequenceData, region: 'up' | 'gene' | 'down' | 'spliced'): string {
@@ -147,10 +150,13 @@ export function buildPickMenu(ctx: PickMenuContext): { heading: string; entries:
   const contiguous = pick.kind === 'contiguous' ? pick : null;
   const junction = junctionFromPick(data, pick);
   const junctionOk = 'seq' in junction;
+  // Only an exon-only pick crossing a junction stands in for joined exon
+  // bases (BLAST/structures across a collapsed intron).
+  const junctionSeq = junctionOk && pick.kind === 'gapped' ? junction.seq : null;
 
   // The sequence BLAST/structures act on: the selected bases, or for a
   // selection across a collapsed intron, the joined exon bases.
-  const seq = contiguous ? rawSeq(data, contiguous.region).substring(contiguous.start, contiguous.end).toUpperCase() : junctionOk ? junction.seq : null;
+  const seq = contiguous ? rawSeq(data, contiguous.region).substring(contiguous.start, contiguous.end).toUpperCase() : junctionSeq;
   const len = seq?.length ?? 0;
 
   let heading: string;
@@ -189,6 +195,38 @@ export function buildPickMenu(ctx: PickMenuContext): { heading: string; entries:
     const twins = selections.armsRefPrimer;
     const common = selections.armsCommon;
 
+    /** A junction pair needs one primer crossing an exon-exon junction;
+     * once one does, its partner may lie anywhere in the gene - a plain
+     * exon (kept on the spliced transcript) or an intron (kept in gene
+     * coordinates, since it has no spliced position). */
+    function junctionEntry(): MenuEntry {
+      const partner = selections[fwd ? 'juncRight' : 'juncLeft'];
+      const partnerCrosses = !!partner && partner.region === 'spliced' && crossesJunction(data, partner.start, partner.end);
+      const name = fwd ? 'J-F' : 'J-R';
+      const base = { shortcut: 'J', label: 'Junction (exon-exon)' };
+      if (!kinds.has('junction')) return { ...base, disabledReason: notHere };
+      if (junctionOk) {
+        const ok = junction.crosses || partnerCrosses;
+        return {
+          ...base,
+          disabledReason: ok ? lengthReason(junction.end - junction.start, LIMITS.primer) : `Does not cross an exon-exon junction - the first junction primer must (its partner may then lie anywhere in the gene)`,
+          hint: [replaces(juncKey), !junction.crosses && partnerCrosses && `${partner!.name ?? 'partner'} crosses the junction`].filter(Boolean).join(' · ') || undefined,
+          onRun: () => ctx.commit(juncKey, make('spliced', junction.start, junction.end, junction.seq, name)),
+        };
+      }
+      // Not exon-only: fine as the partner of a crossing primer, if it's one
+      // continuous stretch of the gene (e.g. in an intron).
+      if (partnerCrosses && inGene && contiguous) {
+        return {
+          ...base,
+          disabledReason: primerLen,
+          hint: [replaces(juncKey), `${partner!.name ?? 'partner'} crosses the junction`].filter(Boolean).join(' · '),
+          onRun: () => ctx.commit(juncKey, make('gene', contiguous.start, contiguous.end, seq!, name)),
+        };
+      }
+      return { ...base, disabledReason: partnerCrosses ? junction.reason : `${junction.reason} - the first junction primer must lie on exons and cross a junction` };
+    }
+
     return [
       {
         shortcut: 'W',
@@ -204,13 +242,7 @@ export function buildPickMenu(ctx: PickMenuContext): { heading: string; entries:
         hint: replaces(genKey),
         onRun: () => contiguous && ctx.commit(genKey, make('gene', contiguous.start, contiguous.end, seq!, fwd ? 'F' : 'R')),
       },
-      {
-        shortcut: 'J',
-        label: 'Junction (exon-exon)',
-        disabledReason: !kinds.has('junction') ? notHere : !junctionOk ? junction.reason : lengthReason(len, LIMITS.primer),
-        hint: replaces(juncKey),
-        onRun: () => junctionOk && ctx.commit(juncKey, make('spliced', junction.start, junction.end, junction.seq, fwd ? 'J-F' : 'J-R')),
-      },
+      junctionEntry(),
       {
         shortcut: 'T',
         label: 'ARMS allele-specific twins',

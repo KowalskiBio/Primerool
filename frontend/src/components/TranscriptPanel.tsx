@@ -58,35 +58,21 @@ export default function TranscriptPanel({ geneName, species, apiSource, transcri
 
   return (
     <div>
-      <Field label="Transcript" htmlFor="transcript-select">
-        <Select
-          id="transcript-select"
-          value={transcriptId}
-          onChange={(e) => setTranscriptId(e.target.value)}
-          className="mb-6"
-        >
-          <option value="">Select a transcript…</option>
-          {transcripts.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-              {t.is_canonical ? ' (Canonical)' : ''} ({t.exon_count} exons, strand {t.strand})
-            </option>
-          ))}
-        </Select>
-      </Field>
-
-      <h3 className="mb-3 border-t border-line pt-4 text-sm font-semibold text-ink">Sequence Options</h3>
-
-      {/* A column, not `space-y-*`: `Checkbox` is inline-flex, so in a plain
-          block the options flow onto one line and run into each other. */}
-      <div className="mb-6 flex flex-col items-start gap-3">
-        <Checkbox label="Include Introns (genomic DNA with introns/exons)" checked={includeIntrons} onChange={(e) => setIncludeIntrons(e.target.checked)} />
-        <Checkbox label="Truncate Introns (show length only, for easier exon copying)" checked={truncateIntrons} onChange={(e) => onTruncateIntronsChange(e.target.checked)} />
-        <Checkbox label="Include UTRs (untranslated regions)" checked={includeUTR} onChange={(e) => setIncludeUTR(e.target.checked)} />
-      </div>
-
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Upstream Flank (bp)">
+      {/* One wrapping row: transcript and flank sizes - fits on one line on
+          a wide screen, wraps on a narrow one. */}
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+        <Field label="Transcript" htmlFor="transcript-select" className="min-w-[18rem] flex-1">
+          <Select id="transcript-select" value={transcriptId} onChange={(e) => setTranscriptId(e.target.value)}>
+            <option value="">Select a transcript…</option>
+            {transcripts.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+                {t.is_canonical ? ' (Canonical)' : ''} ({t.exon_count} exons, strand {t.strand})
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Upstream Flank (bp)" className="w-36">
           <TextInput
             type="number"
             min={0}
@@ -96,7 +82,7 @@ export default function TranscriptPanel({ geneName, species, apiSource, transcri
             className="tabular-nums"
           />
         </Field>
-        <Field label="Downstream Flank (bp)">
+        <Field label="Downstream Flank (bp)" className="w-36">
           <TextInput
             type="number"
             min={0}
@@ -108,9 +94,19 @@ export default function TranscriptPanel({ geneName, species, apiSource, transcri
         </Field>
       </div>
 
-      <Button variant="primary" disabled={loading} onClick={() => void showSequence()}>
-        {loading ? 'Loading…' : 'Show Sequence'}
-      </Button>
+      <h3 className="mb-3 mt-5 border-t border-line pt-4 text-sm font-semibold text-ink">Sequence Options</h3>
+
+      {/* One wrapping row with real gaps (`Checkbox` is inline-flex, so
+          without an explicit flex gap the labels run into each other), the
+          action at its end. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <Checkbox label="Include Introns (genomic DNA with introns/exons)" checked={includeIntrons} onChange={(e) => setIncludeIntrons(e.target.checked)} />
+        <Checkbox label="Truncate Introns (show length only, for easier exon copying)" checked={truncateIntrons} onChange={(e) => onTruncateIntronsChange(e.target.checked)} />
+        <Checkbox label="Include UTRs (untranslated regions)" checked={includeUTR} onChange={(e) => setIncludeUTR(e.target.checked)} />
+        <Button variant="primary" className="ml-auto" disabled={loading} onClick={() => void showSequence()}>
+          {loading ? 'Loading…' : 'Show Sequence'}
+        </Button>
+      </div>
 
       {error && <div role="alert" className="mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{error}</div>}
     </div>

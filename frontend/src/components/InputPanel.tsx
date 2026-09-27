@@ -220,22 +220,27 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
 
       {inputMode === 'gene' && (
         <>
-          <Field label="Data Source" className="mb-4">
-            <SegmentedControl
-              size="sm"
-              ariaLabel="Data source"
-              value={apiSource}
-              onChange={setApiSource}
-              options={[
-                { value: 'ensembl', label: 'Ensembl' },
-                { value: 'ncbi', label: 'NCBI' },
-              ]}
-            />
-          </Field>
+          {/* One wrapping row: source, organism, gene - fits on one line on
+              a wide screen, wraps field-by-field on a narrow one. */}
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            <Field label="Data Source" className="shrink-0">
+              {/* Same height as the selects/input beside it, so every label
+                  in the row lines up. */}
+              <div className="flex h-9 items-center">
+                <SegmentedControl
+                  size="sm"
+                  ariaLabel="Data source"
+                  value={apiSource}
+                  onChange={setApiSource}
+                  options={[
+                    { value: 'ensembl', label: 'Ensembl' },
+                    { value: 'ncbi', label: 'NCBI' },
+                  ]}
+                />
+              </div>
+            </Field>
 
-          <div className="mb-4">
-            <label className="mb-1.5 block text-xs font-medium text-ink-muted">Organism</label>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Kingdom" className="w-full sm:w-56">
               <Select
                 aria-label="Kingdom"
                 value={kingdom}
@@ -251,6 +256,9 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
                   </option>
                 ))}
               </Select>
+            </Field>
+
+            <Field label="Organism" className="w-full sm:w-72">
               <Select aria-label="Species" value={speciesValue} onChange={(e) => setSpeciesValue(e.target.value)}>
                 {speciesOptions.map((s) => (
                   <option key={s.value} value={s.value}>
@@ -258,44 +266,46 @@ export default function InputPanel({ onGeneFound, onCustomSequence }: Props) {
                   </option>
                 ))}
               </Select>
-            </div>
-            {speciesValue === '__custom__' && (
-              <div className="mt-2">
-                <TextInput
+            </Field>
+
+            <Field label="Gene Name or Accession ID" htmlFor="gene-input" className="min-w-[16rem] flex-1">
+              <div className="flex gap-3">
+                <input
+                  id="gene-input"
                   type="text"
-                  spellCheck={false}
-                  value={customSpecies}
-                  onChange={(e) => setCustomSpecies(e.target.value)}
-                  placeholder="e.g. escherichia_coli_str_k_12_substr_mg1655…"
+                  value={geneInput}
+                  onChange={(e) => setGeneInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleGeneSearch();
+                  }}
+                  placeholder="e.g. CHAT or NR_132312.2…"
+                  className="h-9 flex-1 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
                 />
-                <p className="mt-1 text-xs text-ink-faint">
-                  Enter the Ensembl species name (lowercase, underscores).{' '}
-                  <a href="https://rest.ensembl.org/info/species?content-type=application/json" target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                    Browse all species
-                  </a>
-                </p>
+                <Button variant="primary" disabled={searching} onClick={() => void handleGeneSearch()}>
+                  {searching ? 'Searching…' : 'Search'}
+                </Button>
               </div>
-            )}
+            </Field>
           </div>
 
-          <Field label="Gene Name or Accession ID" htmlFor="gene-input">
-            <div className="flex gap-3">
-              <input
-                id="gene-input"
+          {speciesValue === '__custom__' && (
+            <div className="mt-3 max-w-xl">
+              <TextInput
                 type="text"
-                value={geneInput}
-                onChange={(e) => setGeneInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void handleGeneSearch();
-                }}
-                placeholder="e.g. CHAT or NR_132312.2…"
-                className="h-9 flex-1 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+                spellCheck={false}
+                aria-label="Custom species"
+                value={customSpecies}
+                onChange={(e) => setCustomSpecies(e.target.value)}
+                placeholder="e.g. escherichia_coli_str_k_12_substr_mg1655…"
               />
-              <Button variant="primary" disabled={searching} onClick={() => void handleGeneSearch()}>
-                {searching ? 'Searching…' : 'Search'}
-              </Button>
+              <p className="mt-1 text-xs text-ink-faint">
+                Enter the Ensembl species name (lowercase, underscores).{' '}
+                <a href="https://rest.ensembl.org/info/species?content-type=application/json" target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                  Browse all species
+                </a>
+              </p>
             </div>
-          </Field>
+          )}
         </>
       )}
 

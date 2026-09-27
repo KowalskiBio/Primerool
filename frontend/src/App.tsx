@@ -110,7 +110,7 @@ function App() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b border-line bg-base">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-[110rem] items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-baseline gap-2.5">
             <span className="text-[15px] font-semibold tracking-tight text-ink">Primerool</span>
             <span className="hidden text-xs text-ink-faint sm:inline">Primer design for any organism</span>
@@ -119,7 +119,7 @@ function App() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+      <main className="mx-auto max-w-[110rem] px-4 py-6 sm:px-6 lg:px-8">
         <Section step={1} title="Input Sequence">
           <InputPanel onGeneFound={handleGeneFound} onCustomSequence={handleCustomSequence} />
         </Section>

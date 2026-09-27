@@ -77,7 +77,9 @@ export default function TranscriptPanel({ geneName, species, apiSource, transcri
 
       <h3 className="mb-3 border-t border-line pt-4 text-sm font-semibold text-ink">Sequence Options</h3>
 
-      <div className="mb-6 space-y-3">
+      {/* A column, not `space-y-*`: `Checkbox` is inline-flex, so in a plain
+          block the options flow onto one line and run into each other. */}
+      <div className="mb-6 flex flex-col items-start gap-3">
         <Checkbox label="Include Introns (genomic DNA with introns/exons)" checked={includeIntrons} onChange={(e) => setIncludeIntrons(e.target.checked)} />
         <Checkbox label="Truncate Introns (show length only, for easier exon copying)" checked={truncateIntrons} onChange={(e) => onTruncateIntronsChange(e.target.checked)} />
         <Checkbox label="Include UTRs (untranslated regions)" checked={includeUTR} onChange={(e) => setIncludeUTR(e.target.checked)} />

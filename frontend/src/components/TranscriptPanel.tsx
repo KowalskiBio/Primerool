@@ -23,7 +23,7 @@ export default function TranscriptPanel({ geneName, species, apiSource, transcri
   // tied to the gene/species/source) whenever a new `transcripts` list
   // arrives, so there's no need to react to prop changes after mount.
   const [transcriptId, setTranscriptId] = useState(() => transcripts.find((t) => t.is_canonical)?.id || transcripts[0]?.id || '');
-  const [includeIntrons, setIncludeIntrons] = useState(false);
+  const [includeIntrons, setIncludeIntrons] = useState(true);
   const [includeUTR, setIncludeUTR] = useState(false);
   const [upFlank, setUpFlank] = useState(200);
   const [downFlank, setDownFlank] = useState(200);

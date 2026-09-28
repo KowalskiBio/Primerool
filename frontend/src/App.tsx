@@ -57,7 +57,7 @@ function App() {
   const [apiSource, setApiSource] = useState<'ensembl' | 'ncbi'>('ncbi');
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [sequenceData, setSequenceData] = useState<SequenceData | null>(null);
-  const [truncateIntrons, setTruncateIntrons] = useState(false);
+  const [truncateIntrons, setTruncateIntrons] = useState(true);
   const [selections, setSelections] = useState<Selections>(EMPTY_SELECTIONS);
   // Primer sets are remembered per loaded sequence (gene, transcript and
   // view settings - see `primerSetKey`): loading a sequence restores the

@@ -11,6 +11,9 @@ export interface GetSequenceRequest {
   downstream_bp: number;
   include_introns: boolean;
   include_utr: boolean;
+  /** Ask the backend for every sequence/annotation on the genomic plus
+   * strand, even for a minus-strand transcript. */
+  orient_plus?: boolean;
 }
 
 export interface Annotation {
@@ -54,6 +57,10 @@ export interface SequenceData {
   annotations: Annotation[];
   include_introns: boolean;
   include_utr: boolean;
+  /** Present (and true) iff `gene_seq`/flanks/annotations are on the
+   * genomic plus strand — see `utils/orientation.ts`. Absent on older
+   * responses and on locally-built custom-sequence data. */
+  plus_oriented?: boolean;
 }
 
 export function getSequence(req: GetSequenceRequest): Promise<SequenceData> {

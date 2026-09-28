@@ -591,7 +591,7 @@ impl SequenceProvider for NcbiProvider {
         self.fetch_region_sequence(&tinfo.chrom, &tinfo.chr_accession, start, end).await
     }
 
-    async fn build_spliced_sequence(&self, tinfo: &TranscriptInfo, feature: Feature, _species: &str) -> Result<Option<String>, ProviderError> {
+    async fn build_spliced_sequence(&self, tinfo: &TranscriptInfo, feature: Feature, _species: &str, orient_plus: bool) -> Result<Option<String>, ProviderError> {
         let intervals: &[Interval] = match feature {
             Feature::Exons => &tinfo.exons,
             Feature::Cds => &tinfo.cds,
@@ -603,18 +603,32 @@ impl SequenceProvider for NcbiProvider {
         if !tinfo.transcript_id.is_empty() && feature == Feature::Exons {
             // Fetch full mRNA by accession (already IS the spliced transcript for RefSeq).
             if let Some(seq) = self.get_sequence_by_id(&tinfo.transcript_id, SeqType::Cdna).await? {
+                // Fetched by accession, this is the transcript in its own
+                // (gene-sense) orientation - flip it back when the caller
+                // asked for the genomic plus strand.
+                if orient_plus && tinfo.strand == Strand::Minus {
+                    return Ok(Some(revcomp(&seq).to_uppercase()));
+                }
                 return Ok(Some(seq.to_uppercase()));
             }
         }
 
         if !tinfo.transcript_id.is_empty() && feature == Feature::Cds {
             if let Some(mrna) = self.get_sequence_by_id(&tinfo.transcript_id, SeqType::Genomic).await? {
+                // Slice the CDS out of the accession-fetched mRNA (always
+                // gene-sense) - in plus orientation the same transcript
+                // interval holds the plus-strand CDS, reverse-complemented.
                 let cds_ann = crate::coords::cds_annotations_in_transcript_coords(tinfo);
                 if let (Some(first), Some(last)) = (cds_ann.first(), cds_ann.last()) {
                     let cds_start = first.0 as usize;
                     let cds_end = last.1 as usize;
                     if cds_start <= mrna.len() && cds_end <= mrna.len() && cds_start <= cds_end {
-                        return Ok(Some(mrna[cds_start..cds_end].to_uppercase()));
+                        let slice = &mrna[cds_start..cds_end];
+                        return Ok(Some(if orient_plus && tinfo.strand == Strand::Minus {
+                            revcomp(slice).to_uppercase()
+                        } else {
+                            slice.to_uppercase()
+                        }));
                     }
                 }
             }
@@ -631,13 +645,13 @@ impl SequenceProvider for NcbiProvider {
             }
         }
         let mut full = parts.concat();
-        if tinfo.strand == Strand::Minus {
+        if tinfo.strand == Strand::Minus && !orient_plus {
             full = revcomp(&full);
         }
         Ok(Some(full.to_uppercase()))
     }
 
-    async fn build_genomic_sequence(&self, tinfo: &TranscriptInfo, _species: &str) -> Result<Option<String>, ProviderError> {
+    async fn build_genomic_sequence(&self, tinfo: &TranscriptInfo, _species: &str, orient_plus: bool) -> Result<Option<String>, ProviderError> {
         if tinfo.exons.is_empty() {
             return Ok(None);
         }
@@ -648,7 +662,7 @@ impl SequenceProvider for NcbiProvider {
             Some(seq) => seq,
             None => return Ok(None),
         };
-        let seq = if tinfo.strand == Strand::Minus { revcomp(&seq) } else { seq };
+        let seq = if tinfo.strand == Strand::Minus && !orient_plus { revcomp(&seq) } else { seq };
         Ok(Some(seq.to_uppercase()))
     }
 
@@ -659,6 +673,7 @@ impl SequenceProvider for NcbiProvider {
         downstream_bp: u64,
         use_cds_anchor: bool,
         _species: &str,
+        orient_plus: bool,
     ) -> Result<(String, String), ProviderError> {
         if tinfo.exons.is_empty() {
             return Ok((String::new(), String::new()));
@@ -670,7 +685,7 @@ impl SequenceProvider for NcbiProvider {
             (tinfo.exons.iter().map(|(s, _)| *s).min().unwrap(), tinfo.exons.iter().map(|(_, e)| *e).max().unwrap())
         };
 
-        if tinfo.strand == Strand::Plus {
+        if tinfo.strand == Strand::Plus || orient_plus {
             let upstream_seq = if upstream_bp > 0 {
                 let us = anchor_start.saturating_sub(upstream_bp).max(1);
                 let ue = anchor_start.saturating_sub(1);

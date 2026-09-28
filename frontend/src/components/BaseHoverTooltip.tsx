@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { SequenceData } from '../api/sequence';
+import { isPlusOriented } from '../utils/orientation';
 
 /** Where a hovered base sits: the region its `data-pos` is local to, and
  * that 0-based local index. `region` is whatever the rendering component
@@ -111,7 +112,7 @@ const fmt = (n: number) => n.toLocaleString('en-US');
  * coordinates). */
 export function genomicPosition(data: SequenceData, local: number): number | null {
   if (!data.include_introns || !data.gene_start_genomic || !data.chrom) return null;
-  return data.strand === '-' ? data.gene_end_genomic - local : data.gene_start_genomic + local;
+  return isPlusOriented(data) ? data.gene_start_genomic + local : data.gene_end_genomic - local;
 }
 
 /** Tooltip lines for a base at `local` (0-based `gene_seq` coordinates,

@@ -7,6 +7,15 @@
 //!
 //! `cds_annotations_in_transcript_coords` is identical pure computation in
 //! both Python originals, so it lives once in `coords`, not per-provider.
+//!
+//! The sequence builders take an `orient_plus` flag: `false` keeps the
+//! historical transcript (gene-sense) orientation — minus-strand genes
+//! reverse-complemented so local order runs transcript-5'→3'; `true` skips
+//! every such revcomp/swap so the template is always the genomic plus
+//! strand regardless of the transcript's own strand. The SNP batch
+//! workflow and its amplicon detail use `true` everywhere (batch reports,
+//! dbSNP and designed primers are all plus-strand literals, so the map
+//! must be too); the default keeps golden fixtures byte-identical.
 
 pub mod coords;
 pub mod ensembl;
@@ -190,9 +199,10 @@ pub trait SequenceProvider: Send + Sync {
         tinfo: &TranscriptInfo,
         feature: Feature,
         species: &str,
+        orient_plus: bool,
     ) -> Result<Option<String>, ProviderError>;
 
-    async fn build_genomic_sequence(&self, tinfo: &TranscriptInfo, species: &str) -> Result<Option<String>, ProviderError>;
+    async fn build_genomic_sequence(&self, tinfo: &TranscriptInfo, species: &str, orient_plus: bool) -> Result<Option<String>, ProviderError>;
 
     async fn get_flanking_sequence(
         &self,
@@ -201,6 +211,7 @@ pub trait SequenceProvider: Send + Sync {
         downstream_bp: u64,
         use_cds_anchor: bool,
         species: &str,
+        orient_plus: bool,
     ) -> Result<(String, String), ProviderError>;
 }
 

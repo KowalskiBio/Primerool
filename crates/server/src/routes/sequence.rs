@@ -27,6 +27,13 @@ pub struct GetSequenceRequest {
     pub downstream_bp: i64,
     pub include_introns: bool,
     pub include_utr: bool,
+    /// When `true`, every returned sequence (`gene_seq`, flanks,
+    /// `spliced_*`) and the annotations/junctions are expressed on the
+    /// **genomic plus strand**, even for a minus-strand transcript (see
+    /// `providers`' module docs). The default `false` keeps the historical
+    /// transcript (gene-sense) orientation, which is what the golden
+    /// fixtures were captured with.
+    pub orient_plus: bool,
 }
 
 impl Default for GetSequenceRequest {
@@ -40,6 +47,7 @@ impl Default for GetSequenceRequest {
             downstream_bp: 0,
             include_introns: false,
             include_utr: false,
+            orient_plus: false,
         }
     }
 }
@@ -51,8 +59,10 @@ fn clean_dna(s: &str) -> String {
 }
 
 /// `main.py::_blocks_for_spliced_sequence` — sorted blocks, reversed on
-/// minus strand to give transcript-5'->3' order.
-fn blocks_for_spliced_sequence(tinfo: &TranscriptInfo, feature: Feature) -> Vec<Interval> {
+/// minus strand to give transcript-5'->3' order. `orient_plus` keeps the
+/// plain genomic (ascending) order instead, matching the plus-strand map
+/// the response's sequences are in.
+fn blocks_for_spliced_sequence(tinfo: &TranscriptInfo, feature: Feature, orient_plus: bool) -> Vec<Interval> {
     let mut blocks: Vec<Interval> = match feature {
         Feature::Exons => tinfo.exons.clone(),
         Feature::Cds => tinfo.cds.clone(),
@@ -61,7 +71,7 @@ fn blocks_for_spliced_sequence(tinfo: &TranscriptInfo, feature: Feature) -> Vec<
         return blocks;
     }
     blocks.sort();
-    if tinfo.strand == Strand::Minus {
+    if tinfo.strand == Strand::Minus && !orient_plus {
         blocks.reverse();
     }
     blocks
@@ -98,6 +108,7 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
     let downstream_bp = req.downstream_bp.max(0) as u64;
     let mut include_utr = req.include_utr;
     let include_introns = req.include_introns;
+    let orient_plus = req.orient_plus;
 
     let tinfo = provider.get_transcript_details(&transcript_id).await?.ok_or_else(|| AppError::not_found(format!("Transcript {transcript_id} not found in Ensembl")))?;
 
@@ -116,8 +127,8 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
     let gene_end_genomic = tinfo.exons.iter().map(|(_, e)| *e).max().unwrap();
 
     // ALWAYS compute exon-only spliced template for junction primers.
-    let spliced_exons_seq = provider.build_spliced_sequence(&tinfo, Feature::Exons, &species).await?.unwrap_or_default();
-    let exon_blocks = blocks_for_spliced_sequence(&tinfo, Feature::Exons);
+    let spliced_exons_seq = provider.build_spliced_sequence(&tinfo, Feature::Exons, &species, orient_plus).await?.unwrap_or_default();
+    let exon_blocks = blocks_for_spliced_sequence(&tinfo, Feature::Exons, orient_plus);
     let junctions = junctions_from_blocks(&exon_blocks);
 
     let mut annotations: Vec<Value> = Vec::new();
@@ -125,7 +136,7 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
     let spliced_seq: String;
 
     if include_introns {
-        gene_seq = clean_dna(&provider.build_genomic_sequence(&tinfo, &species).await?.unwrap_or_default());
+        gene_seq = clean_dna(&provider.build_genomic_sequence(&tinfo, &species, orient_plus).await?.unwrap_or_default());
         if gene_seq.is_empty() {
             return Err(AppError::server_error("Failed to fetch genomic sequence"));
         }
@@ -137,7 +148,7 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
         for &(exon_start, exon_end) in &tinfo.exons {
             let mut rel_start = exon_start - exon_span_start;
             let mut rel_end = (exon_end - exon_span_start) + 1;
-            if strand == Strand::Minus {
+            if strand == Strand::Minus && !orient_plus {
                 let (new_start, new_end) = (total_len - rel_end, total_len - rel_start);
                 rel_start = new_start;
                 rel_end = new_end;
@@ -153,7 +164,7 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
             let cds_end = cds_end.min(exon_span_end);
             let mut rel_start = cds_start - exon_span_start;
             let mut rel_end = (cds_end - exon_span_start) + 1;
-            if strand == Strand::Minus {
+            if strand == Strand::Minus && !orient_plus {
                 let (new_start, new_end) = (total_len - rel_end, total_len - rel_start);
                 rel_start = new_start;
                 rel_end = new_end;
@@ -170,21 +181,21 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
         });
 
         let mut feature_display = if include_utr { Feature::Exons } else { Feature::Cds };
-        let mut ss = provider.build_spliced_sequence(&tinfo, feature_display, &species).await?.unwrap_or_default();
+        let mut ss = provider.build_spliced_sequence(&tinfo, feature_display, &species, orient_plus).await?.unwrap_or_default();
         if matches!(feature_display, Feature::Cds) && ss.is_empty() {
             feature_display = Feature::Exons;
-            ss = provider.build_spliced_sequence(&tinfo, feature_display, &species).await?.unwrap_or_default();
+            ss = provider.build_spliced_sequence(&tinfo, feature_display, &species, orient_plus).await?.unwrap_or_default();
             include_utr = true;
         }
         spliced_seq = ss;
     } else {
         let mut feature_display = if include_utr { Feature::Exons } else { Feature::Cds };
-        let mut gs = provider.build_spliced_sequence(&tinfo, feature_display, &species).await?;
+        let mut gs = provider.build_spliced_sequence(&tinfo, feature_display, &species, orient_plus).await?;
 
         if gs.as_deref().map(str::is_empty).unwrap_or(true) {
             if matches!(feature_display, Feature::Cds) {
                 feature_display = Feature::Exons;
-                gs = provider.build_spliced_sequence(&tinfo, feature_display, &species).await?;
+                gs = provider.build_spliced_sequence(&tinfo, feature_display, &species, orient_plus).await?;
                 include_utr = true;
             }
             if gs.as_deref().map(str::is_empty).unwrap_or(true) {
@@ -195,11 +206,15 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
         spliced_seq = gene_seq.clone();
 
         if include_utr {
-            let cds_ann = providers::coords::cds_annotations_in_transcript_coords(&tinfo);
+            let cds_ann = if orient_plus {
+                providers::coords::cds_annotations_in_plus_coords(&tinfo)
+            } else {
+                providers::coords::cds_annotations_in_transcript_coords(&tinfo)
+            };
             annotations = cds_ann.iter().map(|(s, e)| json!({ "start": s, "end": e, "type": "cds" })).collect();
 
             let mut curr: u64 = 0;
-            for (start, end) in blocks_for_spliced_sequence(&tinfo, Feature::Exons) {
+            for (start, end) in blocks_for_spliced_sequence(&tinfo, Feature::Exons, orient_plus) {
                 let len = end - start + 1;
                 annotations.push(json!({ "start": curr, "end": curr + len, "type": "exon" }));
                 curr += len;
@@ -209,7 +224,7 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
             // structure as "exon" (for mapping/base color) and "cds" (for
             // color) annotations so junction visuals still work even
             // without a UTR — mirrors main.py's own reasoning comment.
-            let cds_blocks = blocks_for_spliced_sequence(&tinfo, Feature::Cds);
+            let cds_blocks = blocks_for_spliced_sequence(&tinfo, Feature::Cds, orient_plus);
             let mut curr: u64 = 0;
             for (start, end) in cds_blocks {
                 let len = end - start + 1;
@@ -227,13 +242,13 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
     // shown, a transcript with UTR exons got "flanks" cut from inside the
     // gene itself.)
     let cds_only = !include_introns && !include_utr;
-    let (upstream_seq, downstream_seq) = provider.get_flanking_sequence(&tinfo, upstream_bp, downstream_bp, cds_only, &species).await?;
+    let (upstream_seq, downstream_seq) = provider.get_flanking_sequence(&tinfo, upstream_bp, downstream_bp, cds_only, &species, orient_plus).await?;
     let upstream_seq = clean_dna(&upstream_seq);
     let downstream_seq = clean_dna(&downstream_seq);
 
     let utr5_len: u64 = tinfo.utr5.iter().map(|(s, e)| e - s + 1).sum();
 
-    Ok(Json(json!({
+    let mut response = json!({
         "gene_name": gene_name,
         "transcript_id": transcript_id,
         "transcript_name": if tinfo.transcript_name.is_empty() { transcript_id.clone() } else { tinfo.transcript_name.clone() },
@@ -258,5 +273,12 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
         "annotations": annotations,
         "include_introns": include_introns,
         "include_utr": include_utr,
-    })))
+    });
+    // Only present when true, so golden fixtures captured before the flag
+    // existed stay byte-identical.
+    if orient_plus {
+        response["plus_oriented"] = json!(true);
+    }
+
+    Ok(Json(response))
 }

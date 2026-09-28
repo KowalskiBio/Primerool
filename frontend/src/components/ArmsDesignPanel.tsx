@@ -8,6 +8,7 @@ import { ApiError } from '../api/client';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { normalizedTupleToInterval } from '../utils/coords';
 import { reverseComplement } from '../utils/dna';
+import { isPlusOriented } from '../utils/orientation';
 import ResultsTable, { type Column } from './ResultsTable';
 import PrimerCard from './PrimerCard';
 import Badge from './ui/Badge';
@@ -264,25 +265,26 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
   }
 
   /** Ensembl reports `alleles` relative to the reference genome's plus
-   * strand, regardless of which strand the loaded transcript is on - but
-   * `data.gene_seq` is the transcript's own sense-strand sequence (already
-   * reverse-complemented at fetch time for a minus-strand gene). Every
-   * allele shown to, or picked by, the user must be expressed in
-   * `gene_seq`'s orientation, or a correct SNP on a minus-strand gene looks
-   * like a mismatch (its plus-strand base is the complement of what's
-   * actually in `gene_seq`) and gets wrongly rejected by the backend's
+   * strand, and a plus-oriented `data.gene_seq` (the norm — every
+   * `/get_sequence` call this app makes asks for `orient_plus`) is already
+   * in that same orientation, so alleles pass through. Only a
+   * gene-sense-oriented map (`isPlusOriented` false, i.e. an older
+   * response or custom sequence) needs them flipped into `gene_seq`'s
+   * orientation, or a correct SNP on a minus-strand gene looks like a
+   * mismatch (its plus-strand base is the complement of what's actually in
+   * `gene_seq`) and gets wrongly rejected by the backend's
    * `RefAlleleMismatch` check. `-` (Ensembl's "no base here" placeholder
    * for the deleted/inserted side of an indel) is left as-is - it isn't a
    * sequence to reverse-complement. */
   function orientedAlleles(hit: VariantHit): string[] {
-    if (data.strand !== '-') return hit.alleles;
+    if (isPlusOriented(data)) return hit.alleles;
     return hit.alleles.map((a) => (a === '-' ? a : reverseComplement(a)));
   }
 
   function localPosForHit(hit: VariantHit): number | null {
     if (!canUseVariantSearch) return null;
     if (hit.chrom && data.chrom && hit.chrom !== data.chrom) return null;
-    const local = data.strand === '-' ? data.gene_end_genomic - hit.end : hit.start - data.gene_start_genomic;
+    const local = isPlusOriented(data) ? hit.start - data.gene_start_genomic : data.gene_end_genomic - hit.end;
     if (local < 0 || local >= data.gene_seq.length) return null;
     return local;
   }

@@ -28,7 +28,7 @@ async fn brca1_search_and_get_sequence() {
     // correctly returns None on that blanket HTTPError, matching Python's
     // `except requests.HTTPError: return None`. Don't hard-fail the test
     // on real upstream unavailability; only assert when data comes back.
-    match provider.build_spliced_sequence(&tinfo, Feature::Exons, "homo_sapiens").await.unwrap() {
+    match provider.build_spliced_sequence(&tinfo, Feature::Exons, "homo_sapiens", false).await.unwrap() {
         Some(spliced) => assert!(!spliced.is_empty()),
         None => eprintln!("NOTE: Ensembl /sequence/id returned no data (upstream degraded?) - skipping sequence assertions"),
     }

@@ -72,6 +72,7 @@ export default function SnpGeneMapModal({ gene, blocks, selectedSpecies, onClose
             downstream_bp: 200,
             include_introns: true,
             include_utr: false,
+            orient_plus: true,
           });
           if (cancelled) return;
 
@@ -101,6 +102,7 @@ export default function SnpGeneMapModal({ gene, blocks, selectedSpecies, onClose
                   downstream_bp: 200,
                   include_introns: true,
                   include_utr: false,
+                  orient_plus: true,
                 });
                 if (cancelled) return;
                 const coverage = markersFor(seq, blocks).length;
@@ -158,6 +160,7 @@ export default function SnpGeneMapModal({ gene, blocks, selectedSpecies, onClose
         downstream_bp: 200,
         include_introns: true,
         include_utr: false,
+        orient_plus: true,
       });
       setData(seq);
     } catch (e) {

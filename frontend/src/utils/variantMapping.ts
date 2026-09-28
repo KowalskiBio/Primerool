@@ -1,4 +1,5 @@
 import type { SequenceData } from '../api/sequence';
+import { isPlusOriented } from './orientation';
 
 /** The SNP-flanking-report workflow only ever deals in GRCh38 human
  * variants (see `SNP_flanking_sequences_GRCh38.docx`), so unlike the main
@@ -13,7 +14,7 @@ export const SNP_WORKFLOW_SPECIES = 'homo_sapiens';
  * `gene_end_genomic` describe). Same formula `ArmsDesignPanel.tsx` uses for
  * variant-search hits. */
 export function localGenePos(data: SequenceData, genomicPos: number): number | null {
-  const local = data.strand === '-' ? data.gene_end_genomic - genomicPos : genomicPos - data.gene_start_genomic;
+  const local = isPlusOriented(data) ? genomicPos - data.gene_start_genomic : data.gene_end_genomic - genomicPos;
   if (local < 0 || local >= data.gene_seq.length) return null;
   return local;
 }

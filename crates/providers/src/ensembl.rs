@@ -488,7 +488,7 @@ impl SequenceProvider for EnsemblProvider {
         self.fetch_region_sequence(&_tinfo.chrom, start, end, species).await
     }
 
-    async fn build_spliced_sequence(&self, tinfo: &TranscriptInfo, feature: Feature, species: &str) -> Result<Option<String>, ProviderError> {
+    async fn build_spliced_sequence(&self, tinfo: &TranscriptInfo, feature: Feature, species: &str, orient_plus: bool) -> Result<Option<String>, ProviderError> {
         let intervals: &[Interval] = match feature {
             Feature::Exons => &tinfo.exons,
             Feature::Cds => &tinfo.cds,
@@ -501,6 +501,12 @@ impl SequenceProvider for EnsemblProvider {
             let seq_type = if feature == Feature::Cds { SeqType::Cds } else { SeqType::Cdna };
             if let Some(seq) = self.fetch_sequence_by_id(&tinfo.transcript_id, seq_type).await? {
                 if !seq.is_empty() {
+                    // Fetched by accession, this is the transcript in its
+                    // own (gene-sense) orientation - flip it back when the
+                    // caller asked for the genomic plus strand.
+                    if orient_plus && tinfo.strand == Strand::Minus {
+                        return Ok(Some(revcomp(&seq).to_uppercase()));
+                    }
                     return Ok(Some(seq.to_uppercase()));
                 }
             }
@@ -518,13 +524,13 @@ impl SequenceProvider for EnsemblProvider {
         }
 
         let mut full = parts.concat();
-        if tinfo.strand == Strand::Minus {
+        if tinfo.strand == Strand::Minus && !orient_plus {
             full = revcomp(&full);
         }
         Ok(Some(full.to_uppercase()))
     }
 
-    async fn build_genomic_sequence(&self, tinfo: &TranscriptInfo, species: &str) -> Result<Option<String>, ProviderError> {
+    async fn build_genomic_sequence(&self, tinfo: &TranscriptInfo, species: &str, orient_plus: bool) -> Result<Option<String>, ProviderError> {
         if tinfo.exons.is_empty() {
             return Ok(None);
         }
@@ -536,7 +542,7 @@ impl SequenceProvider for EnsemblProvider {
             None => return Ok(None),
         };
 
-        let seq = if tinfo.strand == Strand::Minus { revcomp(&seq) } else { seq };
+        let seq = if tinfo.strand == Strand::Minus && !orient_plus { revcomp(&seq) } else { seq };
         Ok(Some(seq.to_uppercase()))
     }
 
@@ -547,6 +553,7 @@ impl SequenceProvider for EnsemblProvider {
         downstream_bp: u64,
         use_cds_anchor: bool,
         species: &str,
+        orient_plus: bool,
     ) -> Result<(String, String), ProviderError> {
         if tinfo.exons.is_empty() {
             return Ok((String::new(), String::new()));
@@ -564,7 +571,7 @@ impl SequenceProvider for EnsemblProvider {
             )
         };
 
-        if tinfo.strand == Strand::Plus {
+        if tinfo.strand == Strand::Plus || orient_plus {
             let upstream_seq = if upstream_bp > 0 {
                 let us = anchor_start.saturating_sub(upstream_bp).max(1);
                 let ue = anchor_start.saturating_sub(1);

@@ -48,6 +48,7 @@ export default function TranscriptPanel({ geneName, species, apiSource, transcri
         include_utr: includeUTR,
         species,
         api_source: apiSource,
+        orient_plus: true,
       });
       onSequenceLoaded(data);
     } catch (e) {

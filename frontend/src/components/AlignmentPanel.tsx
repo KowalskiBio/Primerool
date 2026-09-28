@@ -101,6 +101,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
               downstream_bp: geneContext!.downstreamBp,
               include_introns: geneContext!.includeIntrons,
               include_utr: geneContext!.includeUtr,
+              orient_plus: true,
               species: geneContext!.species,
               api_source: geneContext!.apiSource,
             }),

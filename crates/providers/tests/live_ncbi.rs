@@ -29,10 +29,10 @@ async fn tp53_search_and_get_sequence_matches_golden_fixture_shape() {
     assert!(!tinfo.exons.is_empty());
     assert!(!tinfo.cds.is_empty(), "TP53's canonical transcript is protein-coding");
 
-    let spliced = provider.build_spliced_sequence(&tinfo, Feature::Exons, "homo_sapiens").await.unwrap().expect("spliced sequence should be fetchable");
+    let spliced = provider.build_spliced_sequence(&tinfo, Feature::Exons, "homo_sapiens", false).await.unwrap().expect("spliced sequence should be fetchable");
     assert_eq!(spliced.len(), tinfo.exons.iter().map(|(s, e)| e - s + 1).sum::<u64>() as usize);
 
-    let (up, down) = provider.get_flanking_sequence(&tinfo, 200, 200, true, "homo_sapiens").await.unwrap();
+    let (up, down) = provider.get_flanking_sequence(&tinfo, 200, 200, true, "homo_sapiens", false).await.unwrap();
     assert_eq!(up.len(), 200);
     assert_eq!(down.len(), 200);
 }

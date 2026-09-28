@@ -305,6 +305,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
             downstream_bp: 200,
             include_introns: true,
             include_utr: false,
+            orient_plus: true,
           });
           break;
         } catch {

@@ -3,6 +3,7 @@ import type { PlacedAmplicon } from './SnpAmpliconMap';
 import type { SequenceData } from '../api/sequence';
 import { EMPTY_SELECTIONS, type Selection, type Selections } from '../utils/regionMapping';
 import { localGenePos, SNP_WORKFLOW_SPECIES } from '../utils/variantMapping';
+import { isPlusOriented } from '../utils/orientation';
 import { useGeneSequence } from '../utils/useGeneSequence';
 import Modal from './ui/Modal';
 import Checkbox from './ui/Checkbox';
@@ -60,7 +61,7 @@ function buildPrimerSelection(data: SequenceData, gStart: number, gEnd: number, 
  * window, so it can't be converted via `amplicon.intervalStart` the way
  * the old (pre-whole-gene) version of this modal did. */
 function genomicFromLocal(data: SequenceData, local: number): number {
-  return data.strand === '-' ? data.gene_end_genomic - local : data.gene_start_genomic + local;
+  return isPlusOriented(data) ? data.gene_start_genomic + local : data.gene_end_genomic - local;
 }
 
 /** Full per-amplicon detail view, opened by clicking (not dragging) an
@@ -207,14 +208,14 @@ export default function AmpliconDetailModal({ amplicon, onPrimerEdit, selectedSp
 
           <div className="mt-5 grid grid-cols-1 gap-3 border-t border-line pt-4 sm:grid-cols-3">
             <div className="rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
-              <div className="mb-1 font-medium uppercase tracking-wider text-ink-faint">Forward</div>
+              <div className="mb-1 font-medium uppercase tracking-wider text-ink-faint">Forward (genomic plus)</div>
               <div className="break-all font-mono text-ink">{amplicon.fwd.sequence}</div>
               <div className="mt-1">
                 {amplicon.fwd.sequence.length} bp &middot; {fmt(amplicon.fwd.tm)}&deg;C
               </div>
             </div>
             <div className="rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
-              <div className="mb-1 font-medium uppercase tracking-wider text-ink-faint">Reverse</div>
+              <div className="mb-1 font-medium uppercase tracking-wider text-ink-faint">Reverse (genomic plus)</div>
               <div className="break-all font-mono text-ink">{amplicon.rev.sequence}</div>
               <div className="mt-1">
                 {amplicon.rev.sequence.length} bp &middot; {fmt(amplicon.rev.tm)}&deg;C

@@ -65,6 +65,7 @@ export function useGeneSequence(gene: string | null, requiredPositions: number[]
             downstream_bp: 200,
             include_introns: true,
             include_utr: false,
+            orient_plus: true,
           });
           if (cancelled) return;
 
@@ -84,6 +85,7 @@ export function useGeneSequence(gene: string | null, requiredPositions: number[]
                   downstream_bp: 200,
                   include_introns: true,
                   include_utr: false,
+                  orient_plus: true,
                 });
                 if (cancelled) return;
                 const coverage = coverageCount(seq, positions);
@@ -142,6 +144,7 @@ export function useGeneSequence(gene: string | null, requiredPositions: number[]
         downstream_bp: 200,
         include_introns: true,
         include_utr: false,
+        orient_plus: true,
       });
       setData(seq);
     } catch (e) {

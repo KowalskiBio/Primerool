@@ -13,6 +13,17 @@
 use crate::{Interval, Strand, TranscriptInfo};
 
 pub fn cds_annotations_in_transcript_coords(tinfo: &TranscriptInfo) -> Vec<Interval> {
+    cds_annotations(tinfo, false)
+}
+
+/// `orient_plus: true` skips the minus-strand mirroring, so the intervals
+/// land on the exon-concatenated sequence in *genomic plus* order (see
+/// `lib.rs`'s module docs on `orient_plus`).
+pub fn cds_annotations_in_plus_coords(tinfo: &TranscriptInfo) -> Vec<Interval> {
+    cds_annotations(tinfo, true)
+}
+
+fn cds_annotations(tinfo: &TranscriptInfo, orient_plus: bool) -> Vec<Interval> {
     if tinfo.exons.is_empty() || tinfo.cds.is_empty() {
         return Vec::new();
     }
@@ -49,7 +60,7 @@ pub fn cds_annotations_in_transcript_coords(tinfo: &TranscriptInfo) -> Vec<Inter
         exon_offset += exon_len;
     }
 
-    if tinfo.strand == Strand::Minus {
+    if tinfo.strand == Strand::Minus && !orient_plus {
         let total_len: u64 = exons_sorted.iter().map(|(s, e)| e - s + 1).sum();
         ann = ann.into_iter().map(|(start, end)| (total_len - end, total_len - start)).collect();
         ann.sort();

@@ -14,6 +14,7 @@ import { useSessionState } from '../session/sessionContext';
 import { findBestAlignment, type AlignmentHit } from '../utils/localAlign';
 import { resolveSequenceIds, type SequenceIds } from '../utils/lookupIds';
 import { getNcbiApiKey } from '../api/ncbiApiKey';
+import OrientationNote from './OrientationNote';
 
 interface Segment {
   text: string;
@@ -1188,6 +1189,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         <p className="mt-1 text-xs text-ink-faint">
           Numbers on the left mark each row's first position: 0-based from the start of its own region (upstream flank, gene, or downstream flank). Hover a base to see its position from the gene start.
         </p>
+        <OrientationNote data={data} />
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-md border border-line bg-surface-2 p-3">

@@ -115,10 +115,6 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
     let gene_start_genomic = tinfo.exons.iter().map(|(s, _)| *s).min().unwrap();
     let gene_end_genomic = tinfo.exons.iter().map(|(_, e)| *e).max().unwrap();
 
-    let (upstream_seq, downstream_seq) = provider.get_flanking_sequence(&tinfo, upstream_bp, downstream_bp, !tinfo.cds.is_empty(), &species).await?;
-    let upstream_seq = clean_dna(&upstream_seq);
-    let downstream_seq = clean_dna(&downstream_seq);
-
     // ALWAYS compute exon-only spliced template for junction primers.
     let spliced_exons_seq = provider.build_spliced_sequence(&tinfo, Feature::Exons, &species).await?.unwrap_or_default();
     let exon_blocks = blocks_for_spliced_sequence(&tinfo, Feature::Exons);
@@ -223,6 +219,17 @@ pub async fn get_sequence(State(state): State<AppState>, Json(req): Json<GetSequ
             }
         }
     }
+
+    // Flanks must border whatever `gene_seq` spans, so `upstream_seq +
+    // gene_seq + downstream_seq` is contiguous: the CDS ends only in
+    // CDS-only mode, else the transcript's first/last exon. (`main.py`
+    // anchored on the CDS whenever there was one, so with introns or UTRs
+    // shown, a transcript with UTR exons got "flanks" cut from inside the
+    // gene itself.)
+    let cds_only = !include_introns && !include_utr;
+    let (upstream_seq, downstream_seq) = provider.get_flanking_sequence(&tinfo, upstream_bp, downstream_bp, cds_only, &species).await?;
+    let upstream_seq = clean_dna(&upstream_seq);
+    let downstream_seq = clean_dna(&downstream_seq);
 
     let utr5_len: u64 = tinfo.utr5.iter().map(|(s, e)| e - s + 1).sum();
 

@@ -60,7 +60,9 @@
       "transcript_name": "transcript variant 3",
       "upstream_len": 200,
       "upstream_seq": "CTCCGGGAAGGCGGCCAGGACCGGCTAGAGCCGGTTAGAACCAGTGGCGCCCGCCCACGAGCCAGCGCCTCACAAAGGGAGGGCGGCTCACGGCCCTCGCGTATCCCTGCGCGGCGCTCGCGAGCCGCCCCTCCCCCGGCGTTTGTCCCTGACGCAGCCCCACCGGTTGCGCAGTCCCTCCCCGCCCCCGCTCTCCCCTC",
-      "utr5_len": 0
+      "utr5_len": 0,
+      "gene_start_genomic": 65497738,
+      "gene_end_genomic": 65506516
     },
     "status": 200
   }

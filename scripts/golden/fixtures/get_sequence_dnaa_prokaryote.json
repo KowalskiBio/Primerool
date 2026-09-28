@@ -44,7 +44,9 @@
       "transcript_name": "dnaA (CDS)",
       "upstream_len": 100,
       "upstream_seq": "TTCGTGCGTCACCCTCAAGCAGGGTCTTTTCGACGTACGTCAACAATCATGAATGTTTCAGCCTTAGTCATTATCGACTTTTGTTCGAGTGGAGTCCGCC",
-      "utr5_len": 0
+      "utr5_len": 0,
+      "gene_start_genomic": 3882326,
+      "gene_end_genomic": 3883729
     },
     "status": 200
   }

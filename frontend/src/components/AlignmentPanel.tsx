@@ -119,7 +119,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
 
     const all = [...extraRecords, ...records];
     if (all.length < 2) {
-      setAlignError('Paste at least two FASTA sequences to align.');
+      setAlignError('Paste at least two sequences to align (FASTA, GenBank, or one bare sequence per line).');
       return;
     }
     setAligning(true);
@@ -174,7 +174,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     <div>
       <h3 className="mb-2 text-sm font-semibold text-ink">Multi-Sequence Alignment</h3>
       <p className="mb-4 text-sm text-ink-muted">
-        Paste two or more sequences in FASTA format (or one bare sequence per line). MAFFT aligns them; you can then design primers within a conserved column range.
+        Paste two or more sequences - FASTA, GenBank (a whole record or just its numbered sequence lines), or one bare sequence per line. MAFFT aligns them; you can then design primers within a conserved column range.
       </p>
 
       <textarea

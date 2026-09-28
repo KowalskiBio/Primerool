@@ -16,7 +16,7 @@
 [![Tauri](https://img.shields.io/badge/desktop-Tauri-24c8db?style=flat-square&logo=tauri&logoColor=white)](src-tauri)
 [![License: CC0](https://img.shields.io/badge/license-CC0_1.0-lightgrey?style=flat-square)](LICENSE)
 
-[**Features**](#-features) · [**Quick start**](#-quick-start) · [**How it works**](#-how-it-works) · [**Architecture**](#-architecture) · [**Development**](#-development)
+[**Features**](#features) · [**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Architecture**](#architecture) · [**Development**](#development)
 
 <br />
 
@@ -34,29 +34,29 @@ Primerool fetches genes live from **Ensembl** or **NCBI**, lays them out as an i
 <table>
   <tr>
     <td width="33%" valign="top">
-      <h3>🧬 Any organism</h3>
+      <h3>Any organism</h3>
       51 preset species across animals, plants, bacteria, fungi, protists and viruses, plus any Ensembl species name. You can also paste an accession or a raw sequence.
     </td>
     <td width="33%" valign="top">
-      <h3>🖱️ Direct design</h3>
+      <h3>Direct design</h3>
       Select bases, right-click and choose what to make. Drag a primer to move it, or drag its end to resize it. Everything is recomputed as you go.
     </td>
     <td width="33%" valign="top">
-      <h3>🌡️ Two engines</h3>
+      <h3>Two engines</h3>
       Strider (native Rust nearest-neighbour + Mathews 2004 folding) or Primer3, with an IDT OligoAnalyzer Tm next to Strider's when you want a second opinion.
     </td>
   </tr>
   <tr>
     <td valign="top">
-      <h3>🔀 Every assay type</h3>
+      <h3>Every assay type</h3>
       General PCR, whole-gene (WGA), exon–exon junction (qRT-PCR), ARMS allele-specific, TaqMan and allele-detection probes.
     </td>
     <td valign="top">
-      <h3>🧩 Alignments</h3>
+      <h3>Alignments</h3>
       MAFFT multiple alignment shown the classic way (numbered rows and a match line), plus primers designed in conserved regions.
     </td>
     <td valign="top">
-      <h3>💾 Keeps your work</h3>
+      <h3>Keeps your work</h3>
       Primer sets remembered per sequence, sessions saved to a file or autosaved, and light/dark themes with your own accent colour.
     </td>
   </tr>
@@ -64,7 +64,7 @@ Primerool fetches genes live from **Ensembl** or **NCBI**, lays them out as an i
 
 ---
 
-## ✨ Features
+## Features
 
 ### Find your gene
 
@@ -165,7 +165,7 @@ One set of reaction conditions is used everywhere: design, analysis, structures 
 
 ---
 
-## 🚀 Quick start
+## Quick start
 
 ### Use it online
 
@@ -206,7 +206,7 @@ cargo tauri build     # builds the frontend first, then the native app
 
 ---
 
-## 🔬 How it works
+## How it works
 
 ```mermaid
 flowchart LR
@@ -221,7 +221,7 @@ flowchart LR
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 The backend is a Rust workspace with one job per crate, and the frontend is a React single-page app. In production, one `axum` binary serves both the API and the built frontend.
 
@@ -268,7 +268,7 @@ Primerool/
 
 ---
 
-## 🛠️ Development
+## Development
 
 ```bash
 cargo test --workspace                     # Rust unit + parity tests
@@ -283,11 +283,11 @@ The golden fixtures in [`scripts/golden/fixtures`](scripts/golden/fixtures) pin 
 
 ---
 
-## 🙏 Acknowledgements
+## Acknowledgements
 
 Primerool stands on the shoulders of [Primer3](https://github.com/primer3-org/primer3) and [primer3-py](https://github.com/libnano/primer3-py), [MAFFT](https://mafft.cbrc.jp/alignment/software/), the [Ensembl REST API](https://rest.ensembl.org/), [NCBI E-utilities and BLAST](https://www.ncbi.nlm.nih.gov/), and [IDT OligoAnalyzer](https://www.idtdna.com/pages/tools/oligoanalyzer). Nearest-neighbour parameters follow SantaLucia & Hicks (2004); folding energies follow Mathews *et al.* (2004).
 
-## 📄 License
+## License
 
 Released into the public domain under [CC0 1.0 Universal](LICENSE): use it freely, for any purpose.
 

@@ -251,21 +251,35 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
             </Field>
 
             <Field label="Organism" className="w-full sm:w-72">
-              <Select
-                aria-label="Species"
-                value={speciesValue}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSpeciesValue(v);
-                  onSpeciesSelectionChange?.(v === '__custom__' ? customSpecies.trim() : v);
-                }}
-              >
-                {speciesOptions.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
+              <div className="relative">
+                {/* The mascot sits on the organism picker. The image has ~22%
+                    transparent margin below the sloth, hence the offset that
+                    puts its feet on the dropdown's top edge. Decorative, never
+                    takes clicks; hidden where this field wraps to a second row
+                    and would sit under the controls above it. */}
+                <img
+                  src="/logo.png"
+                  alt=""
+                  aria-hidden="true"
+                  draggable={false}
+                  className="pointer-events-none absolute bottom-[calc(100%-37px)] left-1/2 z-10 hidden h-[170px] w-auto -translate-x-1/2 select-none opacity-90 xl:block"
+                />
+                <Select
+                  aria-label="Species"
+                  value={speciesValue}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSpeciesValue(v);
+                    onSpeciesSelectionChange?.(v === '__custom__' ? customSpecies.trim() : v);
+                  }}
+                >
+                  {speciesOptions.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
             </Field>
 
           </div>

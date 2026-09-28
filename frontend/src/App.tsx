@@ -331,9 +331,22 @@ function App() {
       </header>
 
       <main className="mx-auto max-w-[110rem] px-4 py-6 sm:px-6 lg:px-8">
-        <Section step={1} title="Input Sequence" persistKey="section.input">
-          <InputPanel onGeneFound={handleGeneFound} inputMode={inputMode} onInputModeChange={setInputMode} onSpeciesSelectionChange={setSelectedSpecies} />
-        </Section>
+        {/* The mascot perches on the input card's top-right corner (as in the
+            original app), in the empty space above the organism picker - a
+            sibling, since Section clips its own overflow. Decorative only:
+            never takes clicks, and hidden where the controls wrap under it. */}
+        <div className="relative">
+          <img
+            src="/logo.png"
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            className="pointer-events-none absolute right-12 -top-12 z-10 hidden h-[180px] w-auto select-none opacity-90 lg:block"
+          />
+          <Section step={1} title="Input Sequence" persistKey="section.input">
+            <InputPanel onGeneFound={handleGeneFound} inputMode={inputMode} onInputModeChange={setInputMode} onSpeciesSelectionChange={setSelectedSpecies} />
+          </Section>
+        </div>
 
         {geneMode && transcripts.length > 0 && (
           <Section step={2} title="Select Transcript & Configure" persistKey="section.transcript">

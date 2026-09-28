@@ -156,8 +156,6 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
         onMouseDown={dragSelect.onMouseDown}
         onContextMenu={pickMenu.onContextMenu}
       >
-        {tooltip}
-        {dragSelect.overlay}
         {pieces.map((p, i) =>
           p.kind === 'label' ? (
             <span key={i} className="exon-label">
@@ -169,6 +167,12 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
             </span>
           ),
         )}
+        {/* After the pieces, never before: the first exon label's
+            `:first-child` style drops its top border/margin, so anything
+            rendered ahead of it (a tooltip on hover) would shift the whole
+            map down under the pointer, hide the tooltip, and shift it back. */}
+        {tooltip}
+        {dragSelect.overlay}
       </div>
       {pickMenu.overlay}
     </div>

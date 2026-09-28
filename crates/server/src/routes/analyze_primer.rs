@@ -32,7 +32,8 @@ pub struct AnalyzePrimerRequest {
 
 impl Default for AnalyzePrimerRequest {
     fn default() -> Self {
-        Self { sequence: String::new(), mv_conc: 50.0, dv_conc: 10.0, dntp_conc: 0.8, dna_conc: 250.0, engine: "primer3".to_string() }
+        let t = ThermoParams::default();
+        Self { sequence: String::new(), mv_conc: t.mv_conc, dv_conc: t.dv_conc, dntp_conc: t.dntp_conc, dna_conc: t.dna_conc, engine: "primer3".to_string() }
     }
 }
 

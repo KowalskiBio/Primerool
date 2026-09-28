@@ -79,7 +79,7 @@ pub struct AnalyzeParams {
 
 impl Default for AnalyzeParams {
     fn default() -> Self {
-        Self { mv_conc: 50.0, mg_conc: 10.0, dntp_conc: 0.8, oligo_conc: 0.25, folding_temp: 25.0 }
+        Self { mv_conc: 50.0, mg_conc: 3.0, dntp_conc: 0.8, oligo_conc: 0.2, folding_temp: 25.0 }
     }
 }
 

@@ -17,112 +17,112 @@
       "primers": [
         {
           "left": {
-            "gc": 60.0,
+            "gc": 55.0,
             "position": [
-              52,
+              4,
               20
             ],
-            "sequence": "GACACTTTGCGTTCGGGCTG",
-            "tm": 62.4
+            "sequence": "AAAGTCTAGAGCCACCGTCC",
+            "tm": 62.8
           },
           "pair_number": 1,
-          "product_size": 915,
+          "product_size": 489,
           "right": {
-            "gc": 55.0,
+            "gc": 50.0,
             "position": [
-              966,
+              492,
               20
             ],
-            "sequence": "GGCACAAACACGCACCTCAA",
-            "tm": 62.0
-          }
-        },
-        {
-          "left": {
-            "gc": 60.0,
-            "position": [
-              52,
-              20
-            ],
-            "sequence": "GACACTTTGCGTTCGGGCTG",
-            "tm": 62.4
-          },
-          "pair_number": 2,
-          "product_size": 764,
-          "right": {
-            "gc": 60.0,
-            "position": [
-              815,
-              20
-            ],
-            "sequence": "CCAACCTCAGGCGGCTCATA",
-            "tm": 62.0
-          }
-        },
-        {
-          "left": {
-            "gc": 60.0,
-            "position": [
-              52,
-              20
-            ],
-            "sequence": "GACACTTTGCGTTCGGGCTG",
-            "tm": 62.4
-          },
-          "pair_number": 3,
-          "product_size": 431,
-          "right": {
-            "gc": 55.0,
-            "position": [
-              482,
-              20
-            ],
-            "sequence": "TGCAAGAAGCCCAGACGGAA",
+            "sequence": "TGTCCCAGAATGCAAGAAGC",
             "tm": 62.1
           }
         },
         {
           "left": {
-            "gc": 60.0,
+            "gc": 55.0,
             "position": [
-              52,
+              4,
               20
             ],
-            "sequence": "GACACTTTGCGTTCGGGCTG",
-            "tm": 62.4
+            "sequence": "AAAGTCTAGAGCCACCGTCC",
+            "tm": 62.8
           },
-          "pair_number": 4,
-          "product_size": 598,
+          "pair_number": 2,
+          "product_size": 491,
           "right": {
-            "gc": 60.0,
+            "gc": 50.0,
             "position": [
-              649,
+              494,
               20
             ],
-            "sequence": "CCGTCATGTGCTGTGACTGC",
-            "tm": 61.9
+            "sequence": "GCTGTCCCAGAATGCAAGAA",
+            "tm": 62.1
           }
         },
         {
           "left": {
-            "gc": 60.0,
+            "gc": 55.0,
             "position": [
-              52,
+              4,
               20
             ],
-            "sequence": "GACACTTTGCGTTCGGGCTG",
-            "tm": 62.4
+            "sequence": "AAAGTCTAGAGCCACCGTCC",
+            "tm": 62.8
           },
-          "pair_number": 5,
-          "product_size": 432,
+          "pair_number": 3,
+          "product_size": 516,
           "right": {
             "gc": 55.0,
             "position": [
-              483,
+              519,
               20
             ],
-            "sequence": "ATGCAAGAAGCCCAGACGGA",
-            "tm": 61.8
+            "sequence": "GGAGTACGTGCAAGTCACAG",
+            "tm": 62.1
+          }
+        },
+        {
+          "left": {
+            "gc": 55.0,
+            "position": [
+              4,
+              20
+            ],
+            "sequence": "AAAGTCTAGAGCCACCGTCC",
+            "tm": 62.8
+          },
+          "pair_number": 4,
+          "product_size": 656,
+          "right": {
+            "gc": 55.0,
+            "position": [
+              659,
+              20
+            ],
+            "sequence": "CTCACAACCTCCGTCATGTG",
+            "tm": 62.1
+          }
+        },
+        {
+          "left": {
+            "gc": 55.0,
+            "position": [
+              4,
+              20
+            ],
+            "sequence": "AAAGTCTAGAGCCACCGTCC",
+            "tm": 62.8
+          },
+          "pair_number": 5,
+          "product_size": 320,
+          "right": {
+            "gc": 55.0,
+            "position": [
+              323,
+              20
+            ],
+            "sequence": "TCATCTGGACCTGGGTCTTC",
+            "tm": 62.1
           }
         }
       ]

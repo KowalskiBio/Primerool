@@ -165,6 +165,7 @@ pub fn design_junction_primer_pairs(
     gs.set_primer_size(DEFAULT_PRIMER_SIZE.opt_size as i32, primer_min, primer_max);
     gs.set_primer_tm(JUNCTION_PRIMER_TM.opt_tm, JUNCTION_PRIMER_TM.min_tm, JUNCTION_PRIMER_TM.max_tm);
     gs.set_primer_gc(JUNCTION_PRIMER_GC.min_gc, JUNCTION_PRIMER_GC.max_gc);
+    gs.set_salt_conc(thermo.mv_conc, thermo.dv_conc, thermo.dntp_conc, thermo.dna_conc);
     gs.set_num_return(20);
     gs.set_pick_primers(false, true);
     gs.set_pick_internal_oligo(false);

@@ -29,6 +29,8 @@ pub fn design_primers_for_region(sequence: &str, target_start: i32, target_end: 
     gs.set_primer_size(DEFAULT_PRIMER_SIZE.opt_size as i32, DEFAULT_PRIMER_SIZE.min_size as i32, DEFAULT_PRIMER_SIZE.max_size as i32);
     gs.set_primer_tm(DEFAULT_PRIMER_TM.opt_tm, DEFAULT_PRIMER_TM.min_tm, DEFAULT_PRIMER_TM.max_tm);
     gs.set_primer_gc(DEFAULT_PRIMER_GC.min_gc, DEFAULT_PRIMER_GC.max_gc);
+    let thermo = ThermoParams::default();
+    gs.set_salt_conc(thermo.mv_conc, thermo.dv_conc, thermo.dntp_conc, thermo.dna_conc);
     gs.set_num_return(NUM_RETURN);
     gs.set_pick_primers(true, true);
     gs.set_pick_internal_oligo(false);

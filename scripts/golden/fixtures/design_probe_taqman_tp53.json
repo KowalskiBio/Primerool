@@ -13,113 +13,113 @@
       "probes": [
         {
           "coords": [
-            14,
-            25
+            17,
+            22
           ],
-          "gc_percent": 68.0,
+          "gc_percent": 63.6,
           "hairpin": {
-            "dg": -0.2,
+            "dg": 0.0,
+            "structure": null,
             "structure_found": true,
-            "tm": 41.1,
-            "structure": null
+            "tm": 36.9
           },
           "homodimer": {
-            "dg": -7.2,
+            "dg": -7.4,
+            "structure": null,
             "structure_found": true,
-            "tm": 20.4,
-            "structure": null
+            "tm": 24.4
           },
-          "length": 25,
-          "sequence": "GCGTCGAGCCCCCTCTGAGTCAGGA",
-          "tm": 71.9
+          "length": 22,
+          "sequence": "TCGAGCCCCCTCTGAGTCAGGA",
+          "tm": 70.0
         },
         {
           "coords": [
-            14,
-            26
+            76,
+            22
           ],
-          "gc_percent": 65.4,
+          "gc_percent": 59.1,
           "hairpin": {
-            "dg": -0.2,
-            "structure_found": true,
-            "tm": 41.1,
-            "structure": null
+            "dg": 0.0,
+            "structure": null,
+            "structure_found": false,
+            "tm": 0.0
           },
           "homodimer": {
-            "dg": -7.2,
+            "dg": -4.2,
+            "structure": null,
             "structure_found": true,
-            "tm": 20.4,
-            "structure": null
+            "tm": -5.9
           },
-          "length": 26,
-          "sequence": "GCGTCGAGCCCCCTCTGAGTCAGGAA",
-          "tm": 72.0
+          "length": 22,
+          "sequence": "AACGTTCTGTCCCCCTTGCCGT",
+          "tm": 70.2
         },
         {
           "coords": [
-            14,
-            27
+            15,
+            22
           ],
-          "gc_percent": 63.0,
+          "gc_percent": 68.2,
           "hairpin": {
-            "dg": -0.2,
+            "dg": 0.0,
+            "structure": null,
             "structure_found": true,
-            "tm": 41.1,
-            "structure": null
+            "tm": 36.9
           },
           "homodimer": {
-            "dg": -7.2,
+            "dg": -6.5,
+            "structure": null,
             "structure_found": true,
-            "tm": 20.4,
-            "structure": null
+            "tm": 19.2
           },
-          "length": 27,
-          "sequence": "GCGTCGAGCCCCCTCTGAGTCAGGAAA",
-          "tm": 72.0
+          "length": 22,
+          "sequence": "CGTCGAGCCCCCTCTGAGTCAG",
+          "tm": 69.7
         },
         {
           "coords": [
-            14,
-            28
+            75,
+            22
           ],
-          "gc_percent": 64.3,
+          "gc_percent": 63.6,
           "hairpin": {
-            "dg": -0.2,
-            "structure_found": true,
-            "tm": 41.1,
-            "structure": null
+            "dg": 0.0,
+            "structure": null,
+            "structure_found": false,
+            "tm": 0.0
           },
           "homodimer": {
-            "dg": -7.2,
+            "dg": -4.8,
+            "structure": null,
             "structure_found": true,
-            "tm": 20.4,
-            "structure": null
+            "tm": -1.1
           },
-          "length": 28,
-          "sequence": "GCGTCGAGCCCCCTCTGAGTCAGGAAAC",
-          "tm": 72.4
+          "length": 22,
+          "sequence": "CAACGTTCTGTCCCCCTTGCCG",
+          "tm": 69.6
         },
         {
           "coords": [
-            14,
-            29
+            16,
+            22
           ],
-          "gc_percent": 62.1,
+          "gc_percent": 68.2,
           "hairpin": {
-            "dg": -0.2,
+            "dg": 0.0,
+            "structure": null,
             "structure_found": true,
-            "tm": 41.1,
-            "structure": null
+            "tm": 36.9
           },
           "homodimer": {
-            "dg": -7.2,
+            "dg": -7.4,
+            "structure": null,
             "structure_found": true,
-            "tm": 20.4,
-            "structure": null
+            "tm": 24.4
           },
-          "length": 29,
-          "sequence": "GCGTCGAGCCCCCTCTGAGTCAGGAAACA",
-          "tm": 73.3
+          "length": 22,
+          "sequence": "GTCGAGCCCCCTCTGAGTCAGG",
+          "tm": 69.6
         }
       ]
     },

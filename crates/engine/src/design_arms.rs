@@ -247,6 +247,7 @@ pub fn design_arms_primers(
     gs.set_primer_size(DEFAULT_PRIMER_SIZE.opt_size as i32, DEFAULT_PRIMER_SIZE.min_size as i32, DEFAULT_PRIMER_SIZE.max_size as i32);
     gs.set_primer_tm(ARMS_PRIMER_TM.opt_tm, ARMS_PRIMER_TM.min_tm, ARMS_PRIMER_TM.max_tm);
     gs.set_primer_gc(ARMS_PRIMER_GC.min_gc, ARMS_PRIMER_GC.max_gc);
+    gs.set_salt_conc(thermo.mv_conc, thermo.dv_conc, thermo.dntp_conc, thermo.dna_conc);
     gs.set_num_return(30);
     gs.set_pick_primers(false, true);
     gs.set_pick_internal_oligo(false);

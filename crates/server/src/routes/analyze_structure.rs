@@ -29,7 +29,8 @@ pub struct AnalyzeStructureRequest {
 
 impl Default for AnalyzeStructureRequest {
     fn default() -> Self {
-        Self { sequence: String::new(), partner_sequence: None, mv_conc: 50.0, dv_conc: 1.5, dntp_conc: 0.2, dna_conc: 50.0 }
+        let t = ThermoParams::default();
+        Self { sequence: String::new(), partner_sequence: None, mv_conc: t.mv_conc, dv_conc: t.dv_conc, dntp_conc: t.dntp_conc, dna_conc: t.dna_conc }
     }
 }
 

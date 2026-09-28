@@ -23,9 +23,9 @@ def _thermo_kwargs(therm_params: Optional[Dict[str, Any]] = None) -> Dict[str, A
     therm_params = therm_params or {}
     return {
         "mv_conc": therm_params.get("mv_conc", 50.0),
-        "dv_conc": therm_params.get("dv_conc", 1.5),
-        "dntp_conc": therm_params.get("dntp_conc", 0.2),
-        "dna_conc": therm_params.get("dna_conc", 50.0),
+        "dv_conc": therm_params.get("dv_conc", 3.0),
+        "dntp_conc": therm_params.get("dntp_conc", 0.8),
+        "dna_conc": therm_params.get("dna_conc", 200.0),
     }
 
 

@@ -118,7 +118,7 @@ pub struct IdtAnalyzeRequest {
 
 impl Default for IdtAnalyzeRequest {
     fn default() -> Self {
-        Self { p1_seq: String::new(), p2_seq: String::new(), token: String::new(), mv_conc: 50.0, mg_conc: 10.0, dntp_conc: 0.8, oligo_conc: 0.25, idt_region: "eu".to_string(), engine: "strider".to_string() }
+        Self { p1_seq: String::new(), p2_seq: String::new(), token: String::new(), mv_conc: 50.0, mg_conc: 3.0, dntp_conc: 0.8, oligo_conc: 0.2, idt_region: "eu".to_string(), engine: "strider".to_string() }
     }
 }
 

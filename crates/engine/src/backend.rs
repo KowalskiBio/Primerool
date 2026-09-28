@@ -14,9 +14,12 @@ pub struct ThermoParams {
 }
 
 impl Default for ThermoParams {
-    /// Matches `primer_utils.py::_thermo_kwargs`'s defaults exactly.
+    /// The app-wide reaction conditions: 50 mM Na+/K+, 3 mM Mg2+,
+    /// 0.8 mM dNTPs, 200 nM (0.2 µM) oligo — IDT OligoAnalyzer's qPCR
+    /// preset, so Tm/hairpin/dimer numbers line up with what a user sees
+    /// there. Every route and design path falls back to this.
     fn default() -> Self {
-        Self { mv_conc: 50.0, dv_conc: 1.5, dntp_conc: 0.2, dna_conc: 50.0 }
+        Self { mv_conc: 50.0, dv_conc: 3.0, dntp_conc: 0.8, dna_conc: 200.0 }
     }
 }
 

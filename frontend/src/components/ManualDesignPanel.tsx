@@ -54,9 +54,9 @@ export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, o
   const [probeGcMax, setProbeGcMax] = useSessionState('manual.probeGcMax', 80);
 
   const [mvConc, setMvConc] = useSessionState('manual.mvConc', 50.0);
-  const [dvConc, setDvConc] = useSessionState('manual.dvConc', 1.5);
-  const [dntpConc, setDntpConc] = useSessionState('manual.dntpConc', 0.2);
-  const [dnaConc, setDnaConc] = useSessionState('manual.dnaConc', 50.0);
+  const [dvConc, setDvConc] = useSessionState('manual.dvConc', 3.0);
+  const [dntpConc, setDntpConc] = useSessionState('manual.dntpConc', 0.8);
+  const [dnaConc, setDnaConc] = useSessionState('manual.dnaConc', 200.0);
   const [maxPolyX, setMaxPolyX] = useSessionState('manual.maxPolyX', 5);
   const [maxNs, setMaxNs] = useSessionState('manual.maxNs', 0);
 

@@ -635,9 +635,9 @@ def design_from_sequence():
     # Map advanced/thermo params
     therm_params = {
         "mv_conc": float(adv.get("mv_conc", 50.0)),
-        "dv_conc": float(adv.get("dv_conc", 1.5)),
-        "dntp_conc": float(adv.get("dntp_conc", 0.2)),
-        "dna_conc": float(adv.get("dna_conc", 50.0)),
+        "dv_conc": float(adv.get("dv_conc", 3.0)),
+        "dntp_conc": float(adv.get("dntp_conc", 0.8)),
+        "dna_conc": float(adv.get("dna_conc", 200.0)),
     }
 
     if cond:
@@ -871,9 +871,9 @@ def design_probe():
     # Map advanced/thermo params
     therm_params = {
         "mv_conc": float(adv.get("mv_conc", 50.0)),
-        "dv_conc": float(adv.get("dv_conc", 1.5)),
-        "dntp_conc": float(adv.get("dntp_conc", 0.2)),
-        "dna_conc": float(adv.get("dna_conc", 50.0)),
+        "dv_conc": float(adv.get("dv_conc", 3.0)),
+        "dntp_conc": float(adv.get("dntp_conc", 0.8)),
+        "dna_conc": float(adv.get("dna_conc", 200.0)),
     }
     
     # Sync base_args with thermo params for Primer3 engine

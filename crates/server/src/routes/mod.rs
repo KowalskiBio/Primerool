@@ -51,8 +51,8 @@ pub(crate) fn select_backend(requested: &str) -> Box<dyn ThermoBackend> {
 }
 
 /// `cond.advanced` in every design route's request body — the same
-/// four-key thermo shape everywhere (`primer_utils.py::_thermo_kwargs`'s
-/// defaults apply when a key, or the whole object, is absent), plus the
+/// four-key thermo shape everywhere (`ThermoParams::default()`'s
+/// values apply when a key, or the whole object, is absent), plus the
 /// two `PRIMER_MAX_POLY_X`/`PRIMER_MAX_NS_ACCEPTED` overrides that only
 /// `/design_from_sequence` reads from this same object (`design_probe`
 /// simply never populates them).
@@ -69,11 +69,12 @@ pub struct AdvancedThermo {
 
 impl AdvancedThermo {
     pub fn thermo_params(&self) -> ThermoParams {
+        let d = ThermoParams::default();
         ThermoParams {
-            mv_conc: self.mv_conc.unwrap_or(50.0),
-            dv_conc: self.dv_conc.unwrap_or(1.5),
-            dntp_conc: self.dntp_conc.unwrap_or(0.2),
-            dna_conc: self.dna_conc.unwrap_or(50.0),
+            mv_conc: self.mv_conc.unwrap_or(d.mv_conc),
+            dv_conc: self.dv_conc.unwrap_or(d.dv_conc),
+            dntp_conc: self.dntp_conc.unwrap_or(d.dntp_conc),
+            dna_conc: self.dna_conc.unwrap_or(d.dna_conc),
         }
     }
 }

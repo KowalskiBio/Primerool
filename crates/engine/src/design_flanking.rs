@@ -65,11 +65,12 @@ fn to_flanking_oligo(backend: &dyn ThermoBackend, oligo: &DesignedOligo, thermo:
     }
 }
 
-fn design_side(template: &str, included_start: i32, included_len: i32, pick_left: bool) -> Result<primer3_ffi::design::DesignResult, Primer3Error> {
+fn design_side(template: &str, included_start: i32, included_len: i32, pick_left: bool, thermo: ThermoParams) -> Result<primer3_ffi::design::DesignResult, Primer3Error> {
     let mut gs = GlobalSettings::new();
     gs.set_primer_size(DEFAULT_PRIMER_SIZE.opt_size as i32, DEFAULT_PRIMER_SIZE.min_size as i32, DEFAULT_PRIMER_SIZE.max_size as i32);
     gs.set_primer_tm(FLANKING_PRIMER_TM.opt_tm, FLANKING_PRIMER_TM.min_tm, FLANKING_PRIMER_TM.max_tm);
     gs.set_primer_gc(FLANKING_PRIMER_GC.min_gc, FLANKING_PRIMER_GC.max_gc);
+    gs.set_salt_conc(thermo.mv_conc, thermo.dv_conc, thermo.dntp_conc, thermo.dna_conc);
     gs.set_num_return(MAX_RETURNED);
     gs.set_pick_primers(pick_left, !pick_left);
     gs.set_pick_internal_oligo(false);
@@ -98,7 +99,7 @@ pub fn design_primers_for_flanking_regions(
         let win = flank_window.map(|w| w.min(up_len)).unwrap_or(up_len);
         let up_start = up_len - win;
 
-        let side = design_side(&upstream, up_start, win, true)?;
+        let side = design_side(&upstream, up_start, win, true, thermo)?;
         result.forward = FlankingSideResult {
             primers: side.left_candidates.iter().map(|o| to_flanking_oligo(backend, o, thermo)).collect(),
             explain: side.left_explain,
@@ -110,7 +111,7 @@ pub fn design_primers_for_flanking_regions(
         let down_len = downstream.len() as i32;
         let win = flank_window.map(|w| w.min(down_len)).unwrap_or(down_len);
 
-        let side = design_side(&downstream, 0, win, false)?;
+        let side = design_side(&downstream, 0, win, false, thermo)?;
         result.reverse = FlankingSideResult {
             primers: side.right_candidates.iter().map(|o| to_flanking_oligo(backend, o, thermo)).collect(),
             explain: side.right_explain,

@@ -73,24 +73,11 @@ pub fn design_probe(
     gs.set_internal_oligo_size(size_opt, size_min, size_max);
     gs.set_internal_oligo_tm(tm_opt, tm_min, tm_max);
     gs.set_internal_oligo_gc(gc_min, gc_max);
-    // `main.py` builds a `therm_params` dict from `adv` (with real user
-    // overrides for all four fields) but only ever writes it into
-    // `PRIMER_SALT_MONOVALENT`/`PRIMER_SALT_DIVALENT`/`PRIMER_DNTP_CONC`/
-    // `PRIMER_DNA_CONC` — the *primer* (LEFT/RIGHT) salt fields, never the
-    // `PRIMER_INTERNAL_*` ones `choose_primers` actually reads for internal-
-    // oligo picking (irrelevant here since `PICK_LEFT_PRIMER`/
-    // `PICK_RIGHT_PRIMER` are both 0). This is a real, permanent bug in the
-    // Python source, confirmed by a parity mismatch against real
-    // `primer3-py` output when this port instead threaded the user's
-    // `thermo` param through to `set_internal_oligo_salt_conc`: candidate
-    // *selection* always runs at primer3's true C-level internal-oligo
-    // salt defaults (`50.0, 0.0, 0.0, 50.0` — confirmed empirically, not
-    // `1.5`/`0.2` like the general primer defaults) regardless of what a
-    // caller passes for `dv_conc`/`dntp_conc`; only the QC *re-analysis*
-    // step below (`analyze_primer`) actually applies the caller's real
-    // `thermo`. Preserved exactly, not "fixed", since fixing it would
-    // change which probes get selected, not just how they're reported.
-    gs.set_internal_oligo_salt_conc(50.0, 0.0, 0.0, 50.0);
+    // Probe candidates are picked at the same reaction conditions they are
+    // reported at. (`main.py` only ever wrote them into the *primer* salt
+    // fields, so picking silently ran at primer3's internal-oligo defaults
+    // of 50/0/0/50 — deliberately no longer preserved.)
+    gs.set_internal_oligo_salt_conc(thermo.mv_conc, thermo.dv_conc, thermo.dntp_conc, thermo.dna_conc);
     gs.set_num_return(num_return);
 
     let mut sa = SeqArgs::new(&probe_region)?;

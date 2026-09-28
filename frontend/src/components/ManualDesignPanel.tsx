@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
 import { designFromSequence, designProbe, type BestPairResult, type DesignEngine, type FromSequencePrimerResult, type ProbeResult } from '../api/design';
 import EngineSelect from './EngineSelect';
@@ -29,44 +30,44 @@ interface Props {
 }
 
 export default function ManualDesignPanel({ data, onSelect, ampTarget, ampDev, onAmpTargetChange, onAmpDevChange, idtCredentials }: Props) {
-  const [fwdRegionText, setFwdRegionText] = useState('');
-  const [revRegionText, setRevRegionText] = useState('');
-  const [probeRegionText, setProbeRegionText] = useState('');
+  const [fwdRegionText, setFwdRegionText] = useSessionState('manual.fwdRegionText', '');
+  const [revRegionText, setRevRegionText] = useSessionState('manual.revRegionText', '');
+  const [probeRegionText, setProbeRegionText] = useSessionState('manual.probeRegionText', '');
 
-  const [tmMin, setTmMin] = useState(57);
-  const [tmOpt, setTmOpt] = useState(62);
-  const [tmMax, setTmMax] = useState(67);
-  const [lenMin, setLenMin] = useState(18);
-  const [lenOpt, setLenOpt] = useState(20);
-  const [lenMax, setLenMax] = useState(25);
-  const [gcMin, setGcMin] = useState(40);
-  const [gcMax, setGcMax] = useState(60);
-  const [numReturn, setNumReturn] = useState(5);
+  const [tmMin, setTmMin] = useSessionState('manual.tmMin', 57);
+  const [tmOpt, setTmOpt] = useSessionState('manual.tmOpt', 62);
+  const [tmMax, setTmMax] = useSessionState('manual.tmMax', 67);
+  const [lenMin, setLenMin] = useSessionState('manual.lenMin', 18);
+  const [lenOpt, setLenOpt] = useSessionState('manual.lenOpt', 20);
+  const [lenMax, setLenMax] = useSessionState('manual.lenMax', 25);
+  const [gcMin, setGcMin] = useSessionState('manual.gcMin', 40);
+  const [gcMax, setGcMax] = useSessionState('manual.gcMax', 60);
+  const [numReturn, setNumReturn] = useSessionState('manual.numReturn', 5);
 
-  const [probeTmMin, setProbeTmMin] = useState(55);
-  const [probeTmOpt, setProbeTmOpt] = useState(60);
-  const [probeTmMax, setProbeTmMax] = useState(75);
-  const [probeLenMin, setProbeLenMin] = useState(18);
-  const [probeLenOpt, setProbeLenOpt] = useState(22);
-  const [probeLenMax, setProbeLenMax] = useState(35);
-  const [probeGcMin, setProbeGcMin] = useState(20);
-  const [probeGcMax, setProbeGcMax] = useState(80);
+  const [probeTmMin, setProbeTmMin] = useSessionState('manual.probeTmMin', 55);
+  const [probeTmOpt, setProbeTmOpt] = useSessionState('manual.probeTmOpt', 60);
+  const [probeTmMax, setProbeTmMax] = useSessionState('manual.probeTmMax', 75);
+  const [probeLenMin, setProbeLenMin] = useSessionState('manual.probeLenMin', 18);
+  const [probeLenOpt, setProbeLenOpt] = useSessionState('manual.probeLenOpt', 22);
+  const [probeLenMax, setProbeLenMax] = useSessionState('manual.probeLenMax', 35);
+  const [probeGcMin, setProbeGcMin] = useSessionState('manual.probeGcMin', 20);
+  const [probeGcMax, setProbeGcMax] = useSessionState('manual.probeGcMax', 80);
 
-  const [mvConc, setMvConc] = useState(50.0);
-  const [dvConc, setDvConc] = useState(1.5);
-  const [dntpConc, setDntpConc] = useState(0.2);
-  const [dnaConc, setDnaConc] = useState(50.0);
-  const [maxPolyX, setMaxPolyX] = useState(5);
-  const [maxNs, setMaxNs] = useState(0);
+  const [mvConc, setMvConc] = useSessionState('manual.mvConc', 50.0);
+  const [dvConc, setDvConc] = useSessionState('manual.dvConc', 1.5);
+  const [dntpConc, setDntpConc] = useSessionState('manual.dntpConc', 0.2);
+  const [dnaConc, setDnaConc] = useSessionState('manual.dnaConc', 50.0);
+  const [maxPolyX, setMaxPolyX] = useSessionState('manual.maxPolyX', 5);
+  const [maxNs, setMaxNs] = useSessionState('manual.maxNs', 0);
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [engine, setEngine] = useState<DesignEngine>('strider');
-  const [fromSeqResult, setFromSeqResult] = useState<{ forward: FromSequencePrimerResult[]; reverse: FromSequencePrimerResult[]; bestPairs: BestPairResult[]; offset: number } | null>(null);
-  const [probeResult, setProbeResult] = useState<{ probes: ProbeResult[]; offset: number } | null>(null);
-  const [usedFwdSeq, setUsedFwdSeq] = useState<string | null>(null);
-  const [usedRevSeq, setUsedRevSeq] = useState<string | null>(null);
-  const [usedProbeSeq, setUsedProbeSeq] = useState<string | null>(null);
+  const [engine, setEngine] = useSessionState<DesignEngine>('manual.engine', 'strider');
+  const [fromSeqResult, setFromSeqResult] = useSessionState<{ forward: FromSequencePrimerResult[]; reverse: FromSequencePrimerResult[]; bestPairs: BestPairResult[]; offset: number } | null>('manual.fromSeqResult', null);
+  const [probeResult, setProbeResult] = useSessionState<{ probes: ProbeResult[]; offset: number } | null>('manual.probeResult', null);
+  const [usedFwdSeq, setUsedFwdSeq] = useSessionState<string | null>('manual.usedFwdSeq', null);
+  const [usedRevSeq, setUsedRevSeq] = useSessionState<string | null>('manual.usedRevSeq', null);
+  const [usedProbeSeq, setUsedProbeSeq] = useSessionState<string | null>('manual.usedProbeSeq', null);
 
   const advanced = { mv_conc: mvConc, dv_conc: dvConc, dntp_conc: dntpConc, dna_conc: dnaConc, max_poly_x: maxPolyX, max_ns: maxNs };
 

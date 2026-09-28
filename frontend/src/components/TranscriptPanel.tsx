@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSessionState } from '../session/sessionContext';
 import { getSequence } from '../api/sequence';
 import type { Transcript } from '../api/gene';
 import type { SequenceData } from '../api/sequence';
@@ -22,11 +23,11 @@ export default function TranscriptPanel({ geneName, species, apiSource, transcri
   // Lazy initializer only - App.tsx remounts this component (via a `key`
   // tied to the gene/species/source) whenever a new `transcripts` list
   // arrives, so there's no need to react to prop changes after mount.
-  const [transcriptId, setTranscriptId] = useState(() => transcripts.find((t) => t.is_canonical)?.id || transcripts[0]?.id || '');
-  const [includeIntrons, setIncludeIntrons] = useState(true);
-  const [includeUTR, setIncludeUTR] = useState(false);
-  const [upFlank, setUpFlank] = useState(200);
-  const [downFlank, setDownFlank] = useState(200);
+  const [transcriptId, setTranscriptId] = useSessionState('transcript.transcriptId', () => transcripts.find((t) => t.is_canonical)?.id || transcripts[0]?.id || '');
+  const [includeIntrons, setIncludeIntrons] = useSessionState('transcript.includeIntrons', true);
+  const [includeUTR, setIncludeUTR] = useSessionState('transcript.includeUTR', false);
+  const [upFlank, setUpFlank] = useSessionState('transcript.upFlank', 200);
+  const [downFlank, setDownFlank] = useSessionState('transcript.downFlank', 200);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSessionState } from '../session/sessionContext';
 import { alignSequences, designConserved, type ConservedPair, type ConservedCandidate } from '../api/align';
 import { ApiError } from '../api/client';
 import { parseMultiFasta } from '../utils/fasta';
@@ -21,21 +22,21 @@ import { fmt } from '../utils/format';
  * view instead - real MAFFT output, real conserved-region design against
  * it, just without Oligool's anchor-grid visualization layer. */
 export default function AlignmentPanel() {
-  const [fastaText, setFastaText] = useState('');
-  const [alignment, setAlignment] = useState<string | null>(null);
+  const [fastaText, setFastaText] = useSessionState('align.fastaText', '');
+  const [alignment, setAlignment] = useSessionState<string | null>('align.alignment', null);
   const [aligning, setAligning] = useState(false);
   const [alignError, setAlignError] = useState<string | null>(null);
 
-  const [colStart, setColStart] = useState(0);
-  const [colEnd, setColEnd] = useState(0);
-  const [useTarget, setUseTarget] = useState(false);
-  const [targetStart, setTargetStart] = useState(0);
-  const [targetEnd, setTargetEnd] = useState(0);
-  const [backend, setBackend] = useState<'primer3' | 'strider'>('strider');
+  const [colStart, setColStart] = useSessionState('align.colStart', 0);
+  const [colEnd, setColEnd] = useSessionState('align.colEnd', 0);
+  const [useTarget, setUseTarget] = useSessionState('align.useTarget', false);
+  const [targetStart, setTargetStart] = useSessionState('align.targetStart', 0);
+  const [targetEnd, setTargetEnd] = useSessionState('align.targetEnd', 0);
+  const [backend, setBackend] = useSessionState<'primer3' | 'strider'>('align.backend', 'strider');
   const [designing, setDesigning] = useState(false);
   const [designError, setDesignError] = useState<string | null>(null);
-  const [candidates, setCandidates] = useState<ConservedCandidate[] | null>(null);
-  const [pairs, setPairs] = useState<ConservedPair[] | null>(null);
+  const [candidates, setCandidates] = useSessionState<ConservedCandidate[] | null>('align.candidates', null);
+  const [pairs, setPairs] = useSessionState<ConservedPair[] | null>('align.pairs', null);
 
   async function runAlign() {
     setAlignError(null);

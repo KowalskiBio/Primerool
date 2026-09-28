@@ -1,14 +1,17 @@
-import { useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
+import { useSessionState } from '../../session/sessionContext';
 
 interface Props {
   title: ReactNode;
   step?: number;
   children: ReactNode;
   defaultCollapsed?: boolean;
+  /** Saves the collapsed state in the session under this key. */
+  persistKey?: string;
 }
 
-export default function Section({ title, step, children, defaultCollapsed = false }: Props) {
-  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+export default function Section({ title, step, children, defaultCollapsed = false, persistKey }: Props) {
+  const [collapsed, setCollapsed] = useSessionState(persistKey ?? null, defaultCollapsed);
 
   return (
     <section className="mb-5 overflow-hidden rounded-lg border border-line bg-surface">

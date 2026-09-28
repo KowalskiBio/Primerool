@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Transcript } from './api/gene';
 import type { SequenceData } from './api/sequence';
 import { EMPTY_SELECTIONS, type Selection, type Selections } from './utils/regionMapping';
@@ -11,6 +11,9 @@ import AutoDesignPanel from './components/AutoDesignPanel';
 import ManualDesignPanel from './components/ManualDesignPanel';
 import AlignmentPanel from './components/AlignmentPanel';
 import IdtSettingsPanel, { type IdtCredentials } from './components/IdtSettingsPanel';
+import SessionRestoreDialog from './components/SessionRestoreDialog';
+import Button from './components/ui/Button';
+import { useSession, useSessionState } from './session/sessionContext';
 
 function SunIcon() {
   return (
@@ -46,26 +49,30 @@ function ThemeToggle({ theme, onThemeChange }: { theme: 'light' | 'dark'; onThem
 function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'));
 
-  const [geneName, setGeneName] = useState('');
-  const [species, setSpecies] = useState('homo_sapiens');
+  const [geneName, setGeneName] = useSessionState('app.geneName', '');
+  const [species, setSpecies] = useSessionState('app.species', 'homo_sapiens');
   // The organism currently picked in the input panel's toggle (updated
   // live, unlike `species` which only moves when a gene is actually
   // searched) - forwarded to the sequence map's "Find in sequence" as an
   // rsID-lookup fallback, so a variant that exists only in the organism
   // the user is analyzing can still be found.
-  const [selectedSpecies, setSelectedSpecies] = useState('homo_sapiens');
-  const [apiSource, setApiSource] = useState<'ensembl' | 'ncbi'>('ncbi');
-  const [transcripts, setTranscripts] = useState<Transcript[]>([]);
-  const [sequenceData, setSequenceData] = useState<SequenceData | null>(null);
-  const [truncateIntrons, setTruncateIntrons] = useState(true);
-  const [selections, setSelections] = useState<Selections>(EMPTY_SELECTIONS);
+  const [selectedSpecies, setSelectedSpecies] = useSessionState('app.selectedSpecies', 'homo_sapiens');
+  const [apiSource, setApiSource] = useSessionState<'ensembl' | 'ncbi'>('app.apiSource', 'ncbi');
+  const [transcripts, setTranscripts] = useSessionState<Transcript[]>('app.transcripts', []);
+  const [sequenceData, setSequenceData] = useSessionState<SequenceData | null>('app.sequenceData', null);
+  const [truncateIntrons, setTruncateIntrons] = useSessionState('app.truncateIntrons', true);
+  const [storedSelections, setSelections] = useSessionState<Selections>('app.selections', EMPTY_SELECTIONS);
+  // A session saved before a slot existed lacks it - fill it with `null`.
+  const selections = useMemo(() => ({ ...EMPTY_SELECTIONS, ...storedSelections }), [storedSelections]);
   // Primer sets are remembered per loaded sequence (gene, transcript and
   // view settings - see `primerSetKey`): loading a sequence restores the
   // sets made on it, and every change is saved back. Switched at render
   // time, not in an effect, so the save below can never write one
   // sequence's sets under another's key.
   const setKey = primerSetKey(sequenceData);
-  const [loadedSetKey, setLoadedSetKey] = useState<string | null>(null);
+  // Starts at the mounted sequence's key, so a restored session's own
+  // `selections` aren't replaced by that sequence's stored sets.
+  const [loadedSetKey, setLoadedSetKey] = useState<string | null>(() => setKey);
   if (setKey !== loadedSetKey) {
     setLoadedSetKey(setKey);
     setSelections(loadPrimerSets(setKey));
@@ -73,9 +80,9 @@ function App() {
   useEffect(() => {
     if (setKey === loadedSetKey) savePrimerSets(setKey, selections);
   }, [setKey, loadedSetKey, selections]);
-  const [primerMode, setPrimerMode] = useState<'flanking' | 'junction' | 'general' | 'arms'>('flanking');
-  const [ampTarget, setAmpTarget] = useState(150);
-  const [ampDev, setAmpDev] = useState(50);
+  const [primerMode, setPrimerMode] = useSessionState<'flanking' | 'junction' | 'general' | 'arms'>('app.primerMode', 'flanking');
+  const [ampTarget, setAmpTarget] = useSessionState('app.ampTarget', 150);
+  const [ampDev, setAmpDev] = useSessionState('app.ampDev', 50);
 
   // IDT OligoAnalyzer credentials - five discrete `localStorage` keys,
   // matching Oligool's own storage shape exactly (the rewrite plan's
@@ -132,6 +139,46 @@ function App() {
 
   const isCustomSequence = sequenceData?.transcript_id === 'custom';
 
+  const session = useSession();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [sessionMsg, setSessionMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const msgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function flashSessionMsg(type: 'ok' | 'err', text: string, ms = 3000) {
+    setSessionMsg({ type, text });
+    if (msgTimer.current) clearTimeout(msgTimer.current);
+    msgTimer.current = setTimeout(() => setSessionMsg(null), ms);
+  }
+  function saveSession() {
+    try {
+      session.save();
+      flashSessionMsg('ok', 'Session saved');
+    } catch (e) {
+      flashSessionMsg('err', e instanceof Error ? e.message : 'Failed to save session', 5000);
+    }
+  }
+  async function loadSessionFile(file: File) {
+    try {
+      await session.loadFile(file);
+    } catch (e) {
+      flashSessionMsg('err', e instanceof Error ? e.message : 'Failed to load session', 5000);
+    }
+  }
+  // Ctrl/Cmd+S saves the session instead of the browser's "save page".
+  const saveRef = useRef(saveSession);
+  useEffect(() => {
+    saveRef.current = saveSession;
+  });
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        saveRef.current();
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b border-line bg-base">
@@ -140,17 +187,41 @@ function App() {
             <span className="text-[15px] font-semibold tracking-tight text-ink">Primerool</span>
             <span className="hidden text-xs text-ink-faint sm:inline">Primer design for any organism</span>
           </div>
-          <ThemeToggle theme={theme} onThemeChange={applyTheme} />
+          <div className="flex items-center gap-2">
+            {sessionMsg && (
+              <span role="status" className={`hidden text-xs sm:inline ${sessionMsg.type === 'ok' ? 'text-ink-muted' : 'text-danger'}`}>
+                {sessionMsg.text}
+              </span>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void loadSessionFile(file);
+                e.target.value = ''; // allow re-loading the same file
+              }}
+            />
+            <Button size="sm" onClick={() => fileInputRef.current?.click()} title="Load a saved Primerool session (.primerool.json)">
+              Load
+            </Button>
+            <Button size="sm" onClick={saveSession} disabled={!session.hasContent} title="Save this session - gene, transcript, sequence, primers, probes and design results - to a file (Ctrl+S)">
+              Save
+            </Button>
+            <ThemeToggle theme={theme} onThemeChange={applyTheme} />
+          </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-[110rem] px-4 py-6 sm:px-6 lg:px-8">
-        <Section step={1} title="Input Sequence">
+        <Section step={1} title="Input Sequence" persistKey="section.input">
           <InputPanel onGeneFound={handleGeneFound} onCustomSequence={handleCustomSequence} onSpeciesSelectionChange={setSelectedSpecies} />
         </Section>
 
         {transcripts.length > 0 && (
-          <Section step={2} title="Select Transcript & Configure">
+          <Section step={2} title="Select Transcript & Configure" persistKey="section.transcript">
             <TranscriptPanel
               key={`${geneName}-${species}-${apiSource}`}
               geneName={geneName}
@@ -165,7 +236,7 @@ function App() {
         )}
 
         {sequenceData && (
-          <Section step={3} title="Sequence & Features">
+          <Section step={3} title="Sequence & Features" persistKey="section.features">
             <SequenceFeaturesPanel
               data={sequenceData}
               selections={selections}
@@ -182,7 +253,7 @@ function App() {
         )}
 
         {sequenceData && !isCustomSequence && (
-          <Section step={4} title="Primer Design: Automatic">
+          <Section step={4} title="Primer Design: Automatic" persistKey="section.auto">
             <AutoDesignPanel
               data={sequenceData}
               species={species}
@@ -196,7 +267,7 @@ function App() {
         )}
 
         {sequenceData && (
-          <Section step={5} title="Primer Design: Manual">
+          <Section step={5} title="Primer Design: Manual" persistKey="section.manual">
             <ManualDesignPanel
               data={sequenceData}
               onSelect={handleSelect}
@@ -209,7 +280,7 @@ function App() {
           </Section>
         )}
 
-        <Section step={6} title="Multi-Sequence Alignment (Conserved-Region Primers)" defaultCollapsed>
+        <Section step={6} title="Multi-Sequence Alignment (Conserved-Region Primers)" defaultCollapsed persistKey="section.align">
           <AlignmentPanel />
         </Section>
 
@@ -217,6 +288,16 @@ function App() {
           <IdtSettingsPanel credentials={idtCredentials} onChange={handleIdtCredentialsChange} />
         </Section>
       </main>
+
+      <SessionRestoreDialog
+        session={session.pending}
+        onCancel={session.dismissPending}
+        onConfirm={() => {
+          const name = session.pending?.name;
+          session.confirmPending();
+          flashSessionMsg('ok', `Loaded "${name ?? 'session'}"`);
+        }}
+      />
     </div>
   );
 }

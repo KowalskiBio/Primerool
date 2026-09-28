@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSessionState } from '../session/sessionContext';
 import { searchGene } from '../api/gene';
 import { blastSequence, type BlastHit } from '../api/blast';
 import type { Transcript } from '../api/gene';
@@ -25,13 +26,13 @@ interface Props {
 }
 
 export default function InputPanel({ onGeneFound, onCustomSequence, onSpeciesSelectionChange }: Props) {
-  const [inputMode, setInputMode] = useState<'gene' | 'fasta'>('gene');
-  const [apiSource, setApiSource] = useState<'ensembl' | 'ncbi'>('ncbi');
-  const [kingdom, setKingdom] = useState<Kingdom>('animals');
-  const [speciesValue, setSpeciesValue] = useState('homo_sapiens');
-  const [customSpecies, setCustomSpecies] = useState('');
-  const [geneInput, setGeneInput] = useState('');
-  const [fastaInput, setFastaInput] = useState('');
+  const [inputMode, setInputMode] = useSessionState<'gene' | 'fasta'>('input.inputMode', 'gene');
+  const [apiSource, setApiSource] = useSessionState<'ensembl' | 'ncbi'>('input.apiSource', 'ncbi');
+  const [kingdom, setKingdom] = useSessionState<Kingdom>('input.kingdom', 'animals');
+  const [speciesValue, setSpeciesValue] = useSessionState('input.speciesValue', 'homo_sapiens');
+  const [customSpecies, setCustomSpecies] = useSessionState('input.customSpecies', '');
+  const [geneInput, setGeneInput] = useSessionState('input.geneInput', '');
+  const [fastaInput, setFastaInput] = useSessionState('input.fastaInput', '');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   /** Shown instead of `success` when a search resolved to a gene whose
@@ -40,8 +41,8 @@ export default function InputPanel({ onGeneFound, onCustomSequence, onSpeciesSel
   const [searching, setSearching] = useState(false);
   const [blastRunning, setBlastRunning] = useState(false);
   const [blastProgress, setBlastProgress] = useState(0);
-  const [blastHits, setBlastHits] = useState<BlastHit[] | null>(null);
-  const [showSnpBatch, setShowSnpBatch] = useState(false);
+  const [blastHits, setBlastHits] = useSessionState<BlastHit[] | null>('input.blastHits', null);
+  const [showSnpBatch, setShowSnpBatch] = useSessionState('input.showSnpBatch', false);
 
   const effectiveSpecies = speciesValue === '__custom__' ? customSpecies.trim() : speciesValue;
 

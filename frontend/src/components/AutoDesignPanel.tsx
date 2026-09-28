@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
 import { designFlanking, designInternal, designJunction, type DesignEngine, type FlankingOligoResult, type InternalDesignPair, type JunctionPairResult } from '../api/design';
 import EngineSelect from './EngineSelect';
@@ -29,22 +30,22 @@ interface Props {
 }
 
 export default function AutoDesignPanel({ data, species, apiSource, primerMode, onPrimerModeChange, onSelect, idtCredentials }: Props) {
-  const [junctionPos, setJunctionPos] = useState('');
-  const [overlapMin, setOverlapMin] = useState(6);
-  const [overlapMax, setOverlapMax] = useState(12);
-  const [ampliconMin, setAmpliconMin] = useState(80);
-  const [ampliconMax, setAmpliconMax] = useState(220);
-  const [targetStart, setTargetStart] = useState(0);
-  const [targetEnd, setTargetEnd] = useState(0);
+  const [junctionPos, setJunctionPos] = useSessionState('auto.junctionPos', '');
+  const [overlapMin, setOverlapMin] = useSessionState('auto.overlapMin', 6);
+  const [overlapMax, setOverlapMax] = useSessionState('auto.overlapMax', 12);
+  const [ampliconMin, setAmpliconMin] = useSessionState('auto.ampliconMin', 80);
+  const [ampliconMax, setAmpliconMax] = useSessionState('auto.ampliconMax', 220);
+  const [targetStart, setTargetStart] = useSessionState('auto.targetStart', 0);
+  const [targetEnd, setTargetEnd] = useSessionState('auto.targetEnd', 0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [engine, setEngine] = useState<DesignEngine>('strider');
-  const [flankWindow, setFlankWindow] = useState('');
-  const [flankingResult, setFlankingResult] = useState<{ forward: FlankingOligoResult[]; reverse: FlankingOligoResult[]; pairDg: number | null; pairFound: boolean } | null>(null);
-  const [junctionPairs, setJunctionPairs] = useState<JunctionPairResult[] | null>(null);
-  const [generalPairs, setGeneralPairs] = useState<InternalDesignPair[] | null>(null);
-  const [usedWgaFwdSeq, setUsedWgaFwdSeq] = useState<string | null>(null);
-  const [usedWgaRevSeq, setUsedWgaRevSeq] = useState<string | null>(null);
+  const [engine, setEngine] = useSessionState<DesignEngine>('auto.engine', 'strider');
+  const [flankWindow, setFlankWindow] = useSessionState('auto.flankWindow', '');
+  const [flankingResult, setFlankingResult] = useSessionState<{ forward: FlankingOligoResult[]; reverse: FlankingOligoResult[]; pairDg: number | null; pairFound: boolean } | null>('auto.flankingResult', null);
+  const [junctionPairs, setJunctionPairs] = useSessionState<JunctionPairResult[] | null>('auto.junctionPairs', null);
+  const [generalPairs, setGeneralPairs] = useSessionState<InternalDesignPair[] | null>('auto.generalPairs', null);
+  const [usedWgaFwdSeq, setUsedWgaFwdSeq] = useSessionState<string | null>('auto.usedWgaFwdSeq', null);
+  const [usedWgaRevSeq, setUsedWgaRevSeq] = useSessionState<string | null>('auto.usedWgaRevSeq', null);
 
   function selectWGA(which: 'forward' | 'reverse', region: 'up' | 'down', interval: [number, number], primerSeq: string, source: 'recommended' | 'manual' = 'recommended') {
     const [start, end] = interval;

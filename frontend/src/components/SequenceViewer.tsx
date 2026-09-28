@@ -9,6 +9,7 @@ import { baseAtPoint, describeGenePosition, useBaseHover } from './BaseHoverTool
 import { ALL_PICK_KINDS, alleleMutantProbe, armsMutantTwin, type PickKind } from '../utils/mapPickMenu';
 import { useMapPickMenu } from './useMapPickMenu';
 import { useMapDragSelect } from './useMapDragSelect';
+import { useSessionState } from '../session/sessionContext';
 
 interface Segment {
   text: string;
@@ -708,9 +709,12 @@ interface Props {
    * the user is analyzing while the loaded sequence is from another (or
    * is a custom paste). Human is always tried last as the common case. */
   selectedSpecies?: string;
+  /** Saves the "Find in sequence" query in the session under this key
+   * prefix - only the main map passes it, not viewers inside modals. */
+  persistKey?: string;
 }
 
-export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, pickKinds = ALL_PICK_KINDS, variantMarkers = [], species, apiSource, selectedSpecies }: Props) {
+export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, pickKinds = ALL_PICK_KINDS, variantMarkers = [], species, apiSource, selectedSpecies, persistKey }: Props) {
   const interactive = Boolean(onSelect);
   const [dragSession, setDragSession] = useState<DragSession | null>(null);
   const [deltaChars, setDeltaChars] = useState(0);
@@ -729,8 +733,8 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   // "Find in sequence" - lets a reader locate a pasted primer/probe (or any
   // sequence) within the map below, forward and/or reverse-complement; an
   // rsID-shaped query takes the variant-lookup path instead (see below).
-  const [searchQuery, setSearchQuery] = useState('');
-  const [includeRevComp, setIncludeRevComp] = useState(true);
+  const [searchQuery, setSearchQuery] = useSessionState(persistKey ? `${persistKey}.searchQuery` : null, '');
+  const [includeRevComp, setIncludeRevComp] = useSessionState(persistKey ? `${persistKey}.includeRevComp` : null, true);
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
 
   // A newly loaded sequence invalidates any in-progress search, and a

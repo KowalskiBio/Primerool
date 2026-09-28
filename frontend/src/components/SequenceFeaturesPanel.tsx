@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
 import type { Selection, Selections } from '../utils/regionMapping';
 import SequenceViewer from './SequenceViewer';
@@ -30,8 +30,8 @@ interface Props {
 }
 
 export default function SequenceFeaturesPanel({ data, selections, truncateIntrons, primerMode, onPrimerModeChange, onClearSelections, onSelect, species, apiSource, selectedSpecies }: Props) {
-  const [showFeatureMap, setShowFeatureMap] = useState(false);
-  const [showSplicedMap, setShowSplicedMap] = useState(false);
+  const [showFeatureMap, setShowFeatureMap] = useSessionState('features.showFeatureMap', false);
+  const [showSplicedMap, setShowSplicedMap] = useSessionState('features.showSplicedMap', false);
 
   const hasAnnotations = (data.annotations || []).length > 0;
 
@@ -86,7 +86,7 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
         </>
       )}
 
-      <SequenceViewer data={data} selections={selections} truncateIntrons={truncateIntrons} onSelect={onSelect} species={species} apiSource={apiSource} selectedSpecies={selectedSpecies} />
+      <SequenceViewer persistKey="viewer.main" data={data} selections={selections} truncateIntrons={truncateIntrons} onSelect={onSelect} species={species} apiSource={apiSource} selectedSpecies={selectedSpecies} />
 
       {primerMode === 'junction' && showSplicedMap && (
         <div className="mt-6">

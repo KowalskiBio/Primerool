@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { dropUnfinished, useSessionState } from '../session/sessionContext';
 import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
 import { analyzePrimer, designFlanking, type DesignEngine } from '../api/design';
 import { searchGene } from '../api/gene';
@@ -239,16 +240,16 @@ interface Props {
 }
 
 export default function SnpBatchPanel({ selectedSpecies }: Props) {
-  const [blocks, setBlocks] = useState<SnpBlock[] | null>(null);
+  const [blocks, setBlocks] = useSessionState<SnpBlock[] | null>('snpBatch.blocks', null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
-  const [pastedText, setPastedText] = useState('');
+  const [pastedText, setPastedText] = useSessionState('snpBatch.pastedText', '');
 
-  const [flankWindow, setFlankWindow] = useState('130');
-  const [mergeDistance, setMergeDistance] = useState('20');
-  const [maxProduct, setMaxProduct] = useState('');
-  const [engine, setEngine] = useState<DesignEngine>('strider');
-  const [results, setResults] = useState<Record<string, BatchResult>>({});
+  const [flankWindow, setFlankWindow] = useSessionState('snpBatch.flankWindow', '130');
+  const [mergeDistance, setMergeDistance] = useSessionState('snpBatch.mergeDistance', '20');
+  const [maxProduct, setMaxProduct] = useSessionState('snpBatch.maxProduct', '');
+  const [engine, setEngine] = useSessionState<DesignEngine>('snpBatch.engine', 'strider');
+  const [results, setResults] = useSessionState<Record<string, BatchResult>>('snpBatch.results', {}, dropUnfinished((r) => r.status === 'done' || r.status === 'error'));
   const [running, setRunning] = useState(false);
   const [openGene, setOpenGene] = useState<string | null>(null);
   const [openPrimer, setOpenPrimer] = useState<{ label: string; forward: string; reverse: string } | null>(null);
@@ -258,7 +259,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   // stale the moment `AmpliconDetailModal` commits an edit; looking it up
   // by key on every render (see `openAmpliconData`) keeps it live instead.
   const [openAmpliconKey, setOpenAmpliconKey] = useState<string | null>(null);
-  const [canonicalChecks, setCanonicalChecks] = useState<Record<string, CanonicalCheck>>({});
+  const [canonicalChecks, setCanonicalChecks] = useSessionState<Record<string, CanonicalCheck>>('snpBatch.canonicalChecks', {}, dropUnfinished((c) => c.status !== 'checking'));
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
   // work checks this before each write so a stale check from a superseded
   // import can't clobber a fresh one (same purpose as the `cancelled` flag

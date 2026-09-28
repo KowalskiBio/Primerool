@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { dropUnfinished, useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
 import { lookupVariant, searchVariants, type VariantHit } from '../api/variants';
 import { designArms, type ArmsAllelePrimerResult, type ArmsCommonCandidateResult, type DesignArmsResponse, type DesignEngine } from '../api/design';
@@ -146,16 +147,16 @@ interface DesignOutcome {
 }
 
 export default function ArmsDesignPanel({ data, species, apiSource, onSelect, idtCredentials }: Props) {
-  const [regionStart, setRegionStart] = useState(0);
-  const [regionEnd, setRegionEnd] = useState(Math.min(500, data.gene_len));
-  const [lookupId, setLookupId] = useState('');
-  const [hits, setHits] = useState<VariantHit[] | null>(null);
+  const [regionStart, setRegionStart] = useSessionState('arms.regionStart', 0);
+  const [regionEnd, setRegionEnd] = useSessionState('arms.regionEnd', Math.min(500, data.gene_len));
+  const [lookupId, setLookupId] = useSessionState('arms.lookupId', '');
+  const [hits, setHits] = useSessionState<VariantHit[] | null>('arms.hits', null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [expandedHitId, setExpandedHitId] = useState<string | null>(null);
-  const [hitRefAllele, setHitRefAllele] = useState<Record<string, string>>({});
-  const [hitAltAllele, setHitAltAllele] = useState<Record<string, string>>({});
+  const [hitRefAllele, setHitRefAllele] = useSessionState<Record<string, string>>('arms.hitRefAllele', {});
+  const [hitAltAllele, setHitAltAllele] = useSessionState<Record<string, string>>('arms.hitAltAllele', {});
   const [pageSize, setPageSize] = useState<number>(10);
   const [page, setPage] = useState(0);
   const [sort, setSort] = useState<{ columnIndex: number; direction: 'asc' | 'desc' } | null>(null);
@@ -173,25 +174,25 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
    * `minor_allele_freq` from the search response itself (i.e. position/
    * region search results - see `VariantHit.minor_allele_freq`'s doc).
    * Keyed by variant id; absent = not yet requested. */
-  const [frequencies, setFrequencies] = useState<Record<string, { loading: boolean; value: number | null; minorAllele: string | null }>>({});
+  const [frequencies, setFrequencies] = useSessionState<Record<string, { loading: boolean; value: number | null; minorAllele: string | null }>>('arms.frequencies', {}, dropUnfinished((f) => !f.loading));
   const [bulkFreqLoading, setBulkFreqLoading] = useState(false);
 
-  const [manualPos, setManualPos] = useState(0);
-  const [manualRef, setManualRef] = useState('');
-  const [manualAlt, setManualAlt] = useState('');
+  const [manualPos, setManualPos] = useSessionState('arms.manualPos', 0);
+  const [manualRef, setManualRef] = useSessionState('arms.manualRef', '');
+  const [manualAlt, setManualAlt] = useSessionState('arms.manualAlt', '');
 
-  const [selectedVariants, setSelectedVariants] = useState<SelectedVariant[]>([]);
+  const [selectedVariants, setSelectedVariants] = useSessionState<SelectedVariant[]>('arms.selectedVariants', []);
 
-  const [mismatchEnabled, setMismatchEnabled] = useState(true);
-  const [mismatchOffset, setMismatchOffset] = useState(3);
-  const [engine, setEngine] = useState<DesignEngine>('strider');
+  const [mismatchEnabled, setMismatchEnabled] = useSessionState('arms.mismatchEnabled', true);
+  const [mismatchOffset, setMismatchOffset] = useSessionState('arms.mismatchOffset', 3);
+  const [engine, setEngine] = useSessionState<DesignEngine>('arms.engine', 'strider');
 
   const [designLoading, setDesignLoading] = useState(false);
   const [designError, setDesignError] = useState<string | null>(null);
-  const [results, setResults] = useState<DesignOutcome[]>([]);
+  const [results, setResults] = useSessionState<DesignOutcome[]>('arms.results', []);
   /** `${variant.key}:${sequence}` of the common candidate last picked for
    * that variant, so the matching PrimerCard shows "Used". */
-  const [usedCommonKey, setUsedCommonKey] = useState<string | null>(null);
+  const [usedCommonKey, setUsedCommonKey] = useSessionState<string | null>('arms.usedCommonKey', null);
 
   const canUseVariantSearch = data.include_introns;
 

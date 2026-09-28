@@ -43,6 +43,20 @@ export interface AlleleProbeRequest {
   end: number;
   /** The selected gene bases, sense strand. */
   seq: string;
+  /** A variant the user just located (the "Find in sequence" rsID search),
+   * offered as this probe's SNP - `snpPos` may lie outside `[start, end)`;
+   * the dialog decides whether to pre-select it or just mention it. */
+  snpSuggestion?: RsSnpSuggestion;
+}
+
+/** An rsID lookup's SNP in `gene_seq` coordinates, proposed as an allele
+ * probe's SNP - the template base (when it is a plain base) and its first
+ * variant allele (when the catalog reported one). */
+export interface RsSnpSuggestion {
+  snpPos: number;
+  wtBase: string | null;
+  altBase: string | null;
+  rsid: string;
 }
 
 export interface PickMenuContext {
@@ -56,6 +70,10 @@ export interface PickMenuContext {
   openStructures: (seq: string) => void;
   openArmsTwins: (req: ArmsTwinRequest) => void;
   openAlleleProbe: (req: AlleleProbeRequest) => void;
+  /** The rsID currently located by the map's "Find in sequence" search, if
+   * any - proposed as a new allele-probe pair's SNP (never applied to an
+   * already-existing pair). */
+  rsSuggestion?: RsSnpSuggestion;
 }
 
 /** 1-based position from the gene start (negative upstream, no 0) of a
@@ -332,7 +350,10 @@ export function buildPickMenu(ctx: PickMenuContext): { heading: string; entries:
         label: 'Allele detection (wild type / mutant)',
         disabledReason,
         hint: hint ?? 'then pick the SNP base',
-        onRun: () => contiguous && ctx.openAlleleProbe({ start: contiguous.start, end: contiguous.end, seq: seq! }),
+        // A searched rsID is only proposed as a probe's SNP when the probe pair
+        // doesn't exist yet - searching after the pair was made must leave it as is.
+        onRun: () =>
+          contiguous && ctx.openAlleleProbe({ start: contiguous.start, end: contiguous.end, seq: seq!, snpSuggestion: selections.geneProbe?.allele ? undefined : ctx.rsSuggestion }),
       },
     ];
   }

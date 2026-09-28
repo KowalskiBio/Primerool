@@ -869,6 +869,24 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     [rsVariant, rsFoundInSpecies, species, data.strand],
   );
 
+  /** The looked-up rsID as a proposed allele-probe SNP (see
+   * `RsSnpSuggestion`): the real template base at its position as WT (ground
+   * truth from `gene_seq`, never the catalog's allele order - same rule as
+   * `ArmsDesignPanel.tsx`'s `refAltCandidates`) and the first other catalog
+   * allele as the mutant. Indel `-` placeholders (and any multi-base
+   * allele) don't qualify, so a proposed WT/MUT pair can never coincide. */
+  const rsSuggestion = useMemo(() => {
+    if (!rsVariant || rsLocalPos === null) return undefined;
+    const wt = (data.gene_seq[rsLocalPos] || '').toUpperCase();
+    const isBase = (b: string) => /^[ACGT]$/.test(b);
+    return {
+      snpPos: rsLocalPos,
+      wtBase: isBase(wt) ? wt : null,
+      altBase: rsOrientedAlleles.map((a) => a.toUpperCase()).find((a) => isBase(a) && a !== wt) ?? null,
+      rsid: rsVariant.id,
+    };
+  }, [rsVariant, rsLocalPos, rsOrientedAlleles, data.gene_seq]);
+
   const rsMarker = useMemo<VariantMarker[]>(() => {
     if (!rsVariant || rsLocalPos === null) return [];
     return [{ rsid: rsVariant.id, start: rsLocalPos, end: rsLocalPos + 1, alleles: rsOrientedAlleles }];
@@ -963,7 +981,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
 
   // Right-click menu over a selected stretch (primer/probe picks, BLAST,
   // structures) and the set-then-analyze step drag commits share with it.
-  const pickMenu = useMapPickMenu({ data, selections, onSelect, pickKinds });
+  const pickMenu = useMapPickMenu({ data, selections, onSelect, pickKinds, rsSuggestion });
   const commitSelection = pickMenu.commitSelection;
 
   useEffect(() => {

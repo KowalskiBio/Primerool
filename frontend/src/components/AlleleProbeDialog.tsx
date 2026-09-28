@@ -27,8 +27,16 @@ export default function AlleleProbeDialog({ request, posLabel, onConfirm, onCanc
 
 function DialogBody({ request, posLabel, onConfirm, onCancel }: Props & { request: AlleleProbeRequest }) {
   const seq = request.seq.toUpperCase();
-  const [snpIdx, setSnpIdx] = useState<number | null>(null);
-  const [mut, setMut] = useState<string | null>(null);
+  // A searched rsID (`request.snpSuggestion`) pre-fills the SNP base and its
+  // mutant allele - but only when it lies inside this selection (a pair that
+  // can't cover its SNP is useless). Everything stays editable: the user can
+  // click a different base and/or mutant.
+  const sug = request.snpSuggestion ?? null;
+  const sugIdx = sug && sug.snpPos >= request.start && sug.snpPos < request.end ? sug.snpPos - request.start : null;
+  const [snpIdx, setSnpIdx] = useState<number | null>(sugIdx);
+  // If a suggestion couldn't name a real template base at its position (an
+  // indel, per the producer's note), don't trust its mutant either.
+  const [mut, setMut] = useState<string | null>(sugIdx !== null && sug && sug.wtBase === seq[sugIdx] ? sug.altBase : null);
   const [wtName, setWtName] = useState('P-WT');
   const [mutName, setMutName] = useState('P-MUT');
 
@@ -47,6 +55,11 @@ function DialogBody({ request, posLabel, onConfirm, onCancel }: Props & { reques
     // Keep a still-valid mutant choice, else default to the first other base.
     if (mut === null || mut === seq[i]) setMut(BASES.find((b) => b !== seq[i]) ?? null);
   }
+
+  /** True while the shown SNP base is still the one the searched rsID
+   * proposed (not the user's own click) - used to credit the search in the
+   * header. */
+  const preFilled = sugIdx !== null && snpIdx === sugIdx;
 
   const ready = snpIdx !== null && mut !== null;
   const confirm = () => {
@@ -80,7 +93,13 @@ function DialogBody({ request, posLabel, onConfirm, onCancel }: Props & { reques
         <div className="mb-4">
           <div className="mb-1.5 text-xs font-medium text-ink-muted">
             SNP base{snpIdx !== null && <span className="text-ink"> · position {posLabel(request.start + snpIdx)}</span>}
+            {preFilled && <span className="text-accent"> · from {sug!.rsid}</span>}
           </div>
+          {sug && sugIdx === null && (
+            <p className="mb-1.5 text-xs text-ink-faint">
+              The searched {sug.rsid} is at position {posLabel(sug.snpPos)} - outside this selection, so nothing is pre-selected.
+            </p>
+          )}
           <div className="flex flex-wrap gap-0.5" role="radiogroup" aria-label="SNP base">
             {Array.from(seq).map((b, i) => (
               <button

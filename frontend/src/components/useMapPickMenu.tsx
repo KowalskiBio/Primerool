@@ -3,7 +3,7 @@ import type { SequenceData } from '../api/sequence';
 import { analyzePrimer } from '../api/design';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { resolveMapSelection, type MapPick } from '../utils/mapSelection';
-import { buildPickMenu, buildPrimerMenu, createAlleleProbes, createArmsTwins, genePosLabel, type AlleleProbeRequest, type ArmsTwinRequest, type PickKind } from '../utils/mapPickMenu';
+import { buildPickMenu, buildPrimerMenu, createAlleleProbes, createArmsTwins, genePosLabel, type AlleleProbeRequest, type ArmsTwinRequest, type PickKind, type RsSnpSuggestion } from '../utils/mapPickMenu';
 import SequenceContextMenu from './SequenceContextMenu';
 import ArmsTwinDialog from './ArmsTwinDialog';
 import AlleleProbeDialog from './AlleleProbeDialog';
@@ -16,6 +16,10 @@ interface Options {
   /** Absent: the menu still offers BLAST/structures, but no picks. */
   onSelect?: (key: keyof Selections, value: Selection | null) => void;
   pickKinds: readonly PickKind[];
+  /** The rsID currently located by the map's "Find in sequence" search, if
+   * any - forwarded to the pick menu, which offers it as a new allele-probe
+   * pair's SNP. */
+  rsSuggestion?: RsSnpSuggestion;
 }
 
 /** Heading labels for the per-pick menu, for picks with no user-given
@@ -41,7 +45,7 @@ const PICK_LABELS: Record<keyof Selections, string> = {
  *
  * Also owns `commitSelection` - set a pick, then fill in its Strider
  * analysis - which `SequenceViewer`'s drag-resize reuses. */
-export function useMapPickMenu({ data, selections, onSelect, pickKinds }: Options) {
+export function useMapPickMenu({ data, selections, onSelect, pickKinds, rsSuggestion }: Options) {
   const [menu, setMenu] = useState<{ x: number; y: number; target: MapPick | { error: string } | { pickKey: keyof Selections } } | null>(null);
   const [blastSeq, setBlastSeq] = useState<string | null>(null);
   const [structureSeq, setStructureSeq] = useState<string | null>(null);
@@ -115,6 +119,7 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds }: Option
           openStructures: afterMenu(setStructureSeq),
           openArmsTwins: afterMenu(setArmsRequest),
           openAlleleProbe: afterMenu(setAlleleRequest),
+          rsSuggestion,
         })
       : null;
 

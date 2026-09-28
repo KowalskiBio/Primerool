@@ -50,22 +50,6 @@ fn load_corpus() -> Corpus {
     serde_json::from_str(&raw).expect("mathews2004_corpus.json must be valid JSON matching the Case shape")
 }
 
-/// Primerool deliberately adds a ΔG₃₇-only penalty to A·T-closed triloops
-/// that the fork lacks (`structure_thermo::TRILOOP_AT_CLOSURE_DG37`), so
-/// reference folds ending in one are expected to differ — by exactly that
-/// penalty when the same fold is still chosen.
-const TRILOOP_AT_CLOSURE_DG37: f64 = 0.5;
-const T_REF: f64 = 310.15;
-
-fn ends_in_at_closed_triloop(seq: &str, structure: &str) -> bool {
-    let s = seq.as_bytes();
-    let db = structure.as_bytes();
-    let Some(i) = db.iter().rposition(|&c| c == b'(') else { return false };
-    let Some(off) = db[i + 1..].iter().position(|&c| c == b')') else { return false };
-    let j = i + 1 + off;
-    j - i - 1 == 3 && matches!((s[i].to_ascii_uppercase(), s[j].to_ascii_uppercase()), (b'A', b'T') | (b'T', b'A'))
-}
-
 fn assert_close(name: &str, seq: &str, got: f64, want: f64) {
     assert!((got - want).abs() < TOL, "{name} mismatch for {seq:?}: got {got}, want {want} (diff {})", (got - want).abs());
 }
@@ -79,7 +63,6 @@ fn mathews2004_thermo_matches_strider_python_reference() {
     let mut dimer_count = 0;
     let mut tie_divergences = 0;
     let mut total_structures = 0;
-    let mut at_triloop_cases = 0;
 
     for case in &corpus.cases {
         match case.kind.as_str() {
@@ -102,22 +85,6 @@ fn mathews2004_thermo_matches_strider_python_reference() {
                 // algorithm, skip per-case numeric assertions on a structure
                 // mismatch and rely on `tie_rate` below to catch anything
                 // systematic (a real formula bug would not stay this rare).
-                if ends_in_at_closed_triloop(seq, &case.structure) {
-                    at_triloop_cases += 1;
-                    if h.structure == case.structure {
-                        // Same fold: ΔH untouched, ΔG₃₇ up by exactly the
-                        // penalty, and ΔS/Tm re-derived from those two.
-                        let dg37 = case.dg37 + TRILOOP_AT_CLOSURE_DG37;
-                        let ds = (case.dh - dg37) / T_REF;
-                        assert_close("hairpin.dh (AT triloop)", seq, h.dh, case.dh);
-                        assert_close("hairpin.dg37 (AT triloop)", seq, h.dg37, dg37);
-                        assert_close("hairpin.ds (AT triloop)", seq, h.ds, ds * 1000.0);
-                        assert_close("hairpin.tm (AT triloop)", seq, h.tm_celsius, case.dh / ds - 273.15);
-                    }
-                    // Otherwise the penalty moved the MFE off the triloop:
-                    // no reference to compare against.
-                    continue;
-                }
                 total_structures += 1;
                 if h.structure != case.structure {
                     tie_divergences += 1;
@@ -169,7 +136,6 @@ fn mathews2004_thermo_matches_strider_python_reference() {
     }
 
     assert!(hairpin_count >= 10, "expected at least 10 hairpin cases, got {hairpin_count}");
-    assert!(at_triloop_cases < hairpin_count / 2, "{at_triloop_cases}/{hairpin_count} hairpin cases hit the AT-triloop exemption — too many to still be a parity test");
     assert!(dimer_count >= 10, "expected at least 10 dimer cases, got {dimer_count}");
 
     // Tie-break divergences (ΔG₃₇-only match) should be a small minority —

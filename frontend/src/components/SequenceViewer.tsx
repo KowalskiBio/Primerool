@@ -771,6 +771,9 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   // literal query on sequence change.
   const [alignQuery, setAlignQuery] = useSessionState(persistKey ? `${persistKey}.alignQuery` : null, '');
   const [alignHit, setAlignHit] = useState<AlignmentHit | null>(null);
+  // Which match the map last scrolled to (-1 = none yet). Set only by an
+  // explicit action - never by typing; see the scroll effect below.
+  const [scrollToIdx, setScrollToIdx] = useState(-1);
 
   // A newly loaded sequence invalidates any in-progress search, and a
   // changed query/checkbox should always land back on its first hit rather
@@ -790,10 +793,19 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     }
   } else if (searchKey !== prevSearchKey) {
     setPrevSearchKey(searchKey);
+    // Typing in the literal field resets where Prev/Next sits (back to the
+    // first hit) - deliberately WITHOUT scrolling, so editing one field
+    // doesn't yank the map away from whatever the other search highlighted.
     if (activeMatchIndex !== 0) setActiveMatchIndex(0);
+    setScrollToIdx(-1);
   }
 
   const literalMatches = useMemo(() => computeSearchMatches(data, searchQuery, includeRevComp), [data, searchQuery, includeRevComp]);
+
+  /** Scrolls match idx 0 on an align/rsID hit landing; assigned after
+   * `scrollToMatch` is defined below (the debounced align effect and the
+   * report blocks run before it is). */
+  const scrollToFirstRef = useRef(() => {});
 
   // Debounced like the typing: the DP is cheap but pointless to rerun per
   // keystroke of a half-pasted sequence. Below ~10 bases a local alignment
@@ -805,7 +817,13 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
       setAlignHit(null);
       return;
     }
-    const timer = setTimeout(() => setAlignHit(findBestAlignment(data, q)), 300);
+    const timer = setTimeout(() => {
+      setAlignHit(findBestAlignment(data, q));
+      // The binding site lands as match idx 0 - scroll to it once on
+      // landing so it's visible without the user hunting for it (typing
+      // a longer query replaces the hit in kind, so this stays put).
+      scrollToFirstRef.current();
+    }, 300);
     return () => clearTimeout(timer);
   }, [data, alignQuery]);
 
@@ -897,12 +915,27 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
    * the genomic-to-local mapping valid at all (see `localGenePos`), and
    * doubles as the "not a custom pasted sequence" check - those have no
    * genomic coordinates. */
+
   const rsLocalPos = useMemo(() => {
     if (!rsVariant || rsFoundInSpecies === null || rsFoundInSpecies !== species) return null;
     if (!data.include_introns) return null;
     if (rsVariant.chrom && data.chrom && rsVariant.chrom !== data.chrom) return null;
     return localGenePos(data, rsVariant.start);
   }, [rsVariant, rsFoundInSpecies, species, data]);
+
+  // Scroll the map to the variant the first time one lands (a stable
+  // key built from the located position, so re-render storms from a
+  // literal query in the other field don't keep re-jumping).
+  const prevRsPlacedKey = useRef<string | null>(null);
+  if (rsLocalPos !== null) {
+    const key = `${data.transcript_id}:${rsLocalPos}`;
+    if (prevRsPlacedKey.current !== key) {
+      prevRsPlacedKey.current = key;
+      scrollToFirstRef.current();
+    }
+  } else {
+    prevRsPlacedKey.current = null;
+  }
 
   // Alleles re-oriented into `gene_seq`'s own strand sense (a minus-strand
   // gene's sequence is reverse-complemented at fetch time, so showing the
@@ -971,31 +1004,52 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   }, [segments, interactive]);
 
   const searchMatches = useMemo<SearchMatch[]>(() => {
-    // Precedence: an explicit alignment result outranks the rsID hit, which
-    // outranks literal matches - each is a single located span meant to take
-    // over the map's focus.
-    if (alignHit) return [{ start: alignHit.start, end: alignHit.end, region: alignHit.region, idx: 0 }];
-    if (rsLocalPos === null) return literalMatches;
-    return [{ start: rsLocalPos, end: rsLocalPos + 1, region: 'gene', idx: 0 }];
+    // Every active search contributes its own highlighting at once: the
+    // alignment hit (if any), the rsID hit, and the literal matches. The
+    // located "where is it" spans (alignment first, then rsID) lead the
+    // ordering so index 0 - what Enter/Next steps to first - is the
+    // alignment's binding site when one is set.
+    const hits: SearchMatch[] = [];
+    if (alignHit) hits.push({ start: alignHit.start, end: alignHit.end, region: alignHit.region, idx: 0 });
+    if (rsLocalPos !== null) hits.push({ start: rsLocalPos, end: rsLocalPos + 1, region: 'gene', idx: 0 });
+    hits.push(...literalMatches.map((m) => ({ ...m, idx: 0 })));
+    return hits.map((m, idx) => ({ ...m, idx }));
   }, [alignHit, rsLocalPos, literalMatches]);
   const activeSearchIdx = searchMatches.length > 0 ? Math.min(activeMatchIndex, searchMatches.length - 1) : -1;
 
   // Scrolling the active match into view is a real effect: it reaches out
   // to the DOM (an external system) rather than deriving React state.
+  // Driven by `scrollToIdx` - set only by an explicit action (Next/Prev/
+  // Enter, clicking the summary's binding-site position, an rsID lookup
+  // landing), never by merely typing - otherwise every keystroke in either
+  // field would yank the map back to a highlight while the user is still
+  // editing the other one.
   useEffect(() => {
-    if (activeSearchIdx < 0 || !containerRef.current) return;
-    const el = containerRef.current.querySelector(`[data-search-idx="${activeSearchIdx}"]`);
+    if (scrollToIdx < 0 || !containerRef.current) return;
+    const el = containerRef.current.querySelector(`[data-search-idx="${scrollToIdx}"]`);
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [activeSearchIdx, searchMatches]);
+  }, [scrollToIdx, searchMatches]);
+
+  /** Scroll only explicit, never from the searchKey-typing reset. */
+  function scrollToMatch(idx: number) {
+    setScrollToIdx(idx);
+    setActiveMatchIndex(idx);
+  }
+
+  function gotoFirst() {
+    if (searchMatches.length > 0) scrollToMatch(0);
+  }
+
+  scrollToFirstRef.current = gotoFirst;
 
   function gotoNextMatch() {
     if (searchMatches.length === 0) return;
-    setActiveMatchIndex((i) => (Math.min(i, searchMatches.length - 1) + 1) % searchMatches.length);
+    scrollToMatch((activeSearchIdx + 1) % searchMatches.length);
   }
 
   function gotoPrevMatch() {
     if (searchMatches.length === 0) return;
-    setActiveMatchIndex((i) => (Math.min(i, searchMatches.length - 1) - 1 + searchMatches.length) % searchMatches.length);
+    scrollToMatch((activeSearchIdx - 1 + searchMatches.length) % searchMatches.length);
   }
 
   function commitDrag(session: DragSession, finalDeltaChars: number) {
@@ -1182,11 +1236,11 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
           Clear
         </button>
         <span className="text-xs text-ink-faint" aria-live="polite">
-          {searchQuery === '' || rsQuery
-            ? ''
-            : searchMatches.length === 0
-              ? 'No matches found'
-              : `${activeSearchIdx + 1} of ${searchMatches.length} match${searchMatches.length === 1 ? '' : 'es'}`}
+          {literalMatches.length === 0
+            ? rsQuery || searchQuery === ''
+              ? ''
+              : 'No matches found'
+            : `${Math.min(activeMatchIndex, literalMatches.length - 1) + 1} of ${literalMatches.length} match${literalMatches.length === 1 ? '' : 'es'}`}
         </span>
         <span aria-hidden="true" className="mx-1 hidden h-5 w-px bg-line-strong sm:inline-block" />
         <label htmlFor="sequence-align-input" className="text-sm font-medium text-ink-muted">
@@ -1227,9 +1281,9 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
        * (see the `rsQuery` machinery above). Kept outside the search bar's
        * flex row so a long consequence/clinical-significance list can wrap
        * without stretching the input row. */}
-      {rsQuery && rsLookupCurrent?.status === 'loading' && !alignHit && <p className="-mt-2 mb-3 text-xs text-ink-muted">Looking up {rsQuery}…</p>}
-      {rsQuery && rsLookupCurrent?.status === 'error' && !alignHit && <p className="-mt-2 mb-3 text-xs text-ink-muted">{rsLookupCurrent.message}</p>}
-      {rsVariant && rsFound && !alignHit && (
+      {rsQuery && rsLookupCurrent?.status === 'loading' && <p className="-mt-2 mb-3 text-xs text-ink-muted">Looking up {rsQuery}…</p>}
+      {rsQuery && rsLookupCurrent?.status === 'error' && <p className="-mt-2 mb-3 text-xs text-ink-muted">{rsLookupCurrent.message}</p>}
+      {rsVariant && rsFound && (
         <div className="-mt-2 mb-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="font-mono font-semibold text-ink">{rsVariant.id}</span>
@@ -1262,17 +1316,22 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
       )}
 
       {/* "Align in sequence" result - position/strand/identity on one line,
-       * the pairwise rows themselves when the match is imperfect. Same slot
-       * the rsID summary above uses, and it wins over it (only one summary
-       * shows at a time). */}
+       * the pairwise rows themselves when the match is imperfect. Sits
+       * beside the rsID summary above - both stay visible when both fields
+       * are in use, each search highlighting its own span. */}
       {alignHit && (
         <div className="-mt-2 mb-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="font-semibold text-ink">
               Best binding site:{' '}
-              <span className="font-mono">
+              <button
+                type="button"
+                onClick={() => scrollToMatch(0)}
+                title="Scroll the map to this hit"
+                className="font-mono text-accent hover:text-accent-hover hover:underline"
+              >
                 {alignHit.region === 'up' ? 'upstream flank' : alignHit.region === 'down' ? 'downstream flank' : 'gene'} {alignHit.start + 1}–{alignHit.end}
-              </span>
+              </button>
             </span>
             <span className="font-mono">strand {alignHit.strand === '+' ? '+' : '−'}</span>
             <span>

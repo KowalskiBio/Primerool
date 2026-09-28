@@ -49,7 +49,7 @@ function fmtPct(v: number | null): string {
  * nothing to draw (e.g. a no-bulge model with zero pairs). Exported for
  * `PrimerStructureModal.tsx`, which reuses this exact box (and the dual
  * with-bulge/no-bulge layout below) outside the primer-design cards. */
-export function VariantBox({ label, variant, diagram }: { label: string; variant: StructureVariant; diagram: ReactNode }) {
+export function VariantBox({ label, variant, diagram, dgTempLabel }: { label: string; variant: StructureVariant; diagram: ReactNode; dgTempLabel?: string }) {
   return (
     <div className="rounded-md border border-line bg-base p-3">
       <div className="mb-2 flex items-center justify-between">
@@ -62,7 +62,7 @@ export function VariantBox({ label, variant, diagram }: { label: string; variant
       </div>
       <div className="mb-2 flex gap-3 text-[13px] text-ink-muted">
         <span>
-          Strider ΔG: <span className={`font-mono font-medium tabular-nums ${dgColor(variant.dg)}`}>{fmtDg(variant.dg)}</span>
+          Strider ΔG{dgTempLabel && ` (${dgTempLabel})`}: <span className={`font-mono font-medium tabular-nums ${dgColor(variant.dg)}`}>{fmtDg(variant.dg)}</span>
         </span>
         <span>
           Strider Tm: <span className="font-mono font-medium tabular-nums text-ink">{fmtTm(variant.tm)}</span>
@@ -257,11 +257,13 @@ export default function PrimerCard({ index, primer, name, positionLabel, selecte
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <VariantBox
                 label="Hairpin - with bulges (Strider MFE)"
+                dgTempLabel="25 °C"
                 variant={structure.hairpin.with_bulge}
                 diagram={structure.hairpin.with_bulge.structure && hairpin(primer.sequence, structure.hairpin.with_bulge.structure)}
               />
               <VariantBox
                 label="Hairpin - no bulge (pure sliding)"
+                dgTempLabel="25 °C"
                 variant={structure.hairpin.no_bulge}
                 diagram={structure.hairpin.no_bulge.structure && hairpin(primer.sequence, structure.hairpin.no_bulge.structure)}
               />

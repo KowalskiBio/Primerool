@@ -57,7 +57,7 @@ fn strider_enrichment(p1_seq: &str, p2_seq: &str, mv_conc: f64, mg_conc: f64, dn
     let strand_conc_m = oligo_conc_um * 1e-6;
 
     let hairpin_json = |seq: &str| match hairpin_thermo(seq, sodium_m, magnesium_m, 2) {
-        Ok(h) => json!({"tm": h.tm_celsius, "dh": h.dh, "ds": h.ds, "dg37": h.dg37, "n_pairs": h.n_pairs, "structure": h.structure}),
+        Ok(h) => json!({"tm": h.tm_celsius, "dh": h.dh, "ds": h.ds, "dg37": h.dg37, "dg25": h.dg25, "n_pairs": h.n_pairs, "structure": h.structure}),
         Err(_) => Value::Null,
     };
     let subopt_json = |seq1: &str, seq2: Option<&str>| -> Vec<Value> {

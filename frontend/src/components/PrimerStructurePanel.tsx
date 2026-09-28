@@ -158,7 +158,7 @@ export default function PrimerStructurePanel({ pair }: Props) {
             <p className="mb-2 break-all font-mono text-xs text-ink">
               {pair.reverse ? 'Forward' : 'Selection'}: {pair.forward} <span className="text-ink-faint">({pair.forward.length} bp)</span>
             </p>
-            <CategorySection title="Hairpin (Strider MFE)">
+            <CategorySection title="Hairpin (Strider MFE, ΔG at 25 °C)">
               <CandidateStrip candidates={shownFwd.hairpin.with_bulge.candidates} diagram={(s) => hairpin(pair.forward, s)} />
             </CategorySection>
             <CategorySection title="Self-dimer (Strider MFE)">
@@ -171,7 +171,7 @@ export default function PrimerStructurePanel({ pair }: Props) {
                 <p className="mb-2 break-all font-mono text-xs text-ink">
                   Reverse: {pair.reverse} <span className="text-ink-faint">({pair.reverse.length} bp)</span>
                 </p>
-                <CategorySection title="Hairpin (Strider MFE)">
+                <CategorySection title="Hairpin (Strider MFE, ΔG at 25 °C)">
                   <CandidateStrip candidates={shownRev.hairpin.with_bulge.candidates} diagram={(s) => hairpin(pair.reverse!, s)} />
                 </CategorySection>
                 <CategorySection title="Self-dimer (Strider MFE)">

@@ -15,6 +15,9 @@ use crate::structure_thermo::{dotbracket, sum_dimer_elements, sum_hairpin_elemen
 use crate::{salt, ThermoError};
 
 const T_REF: f64 = 310.15; // K, 37 °C — reference temperature of the ΔG tables
+/// Temperature (K, 25 °C) hairpin ΔG is *reported* at — see
+/// [`HairpinThermo::dg25`]. Matches IDT OligoAnalyzer's hairpin default.
+pub const T_HAIRPIN_REPORT: f64 = 298.15;
 const R: f64 = 1.987e-3; // kcal / (mol . K)
 
 // SantaLucia & Hicks (2004) unified bimolecular duplex *initiation*
@@ -37,6 +40,10 @@ pub struct HairpinThermo {
     pub dh: f64,
     pub ds: f64, // cal/mol/K
     pub dg37: f64,
+    /// Salt-corrected ΔG at [`T_HAIRPIN_REPORT`] (25 °C), `ΔH − T·ΔS` from
+    /// the same two-state ΔH/ΔS as `dg37`. What the UI shows for hairpins;
+    /// `dg37` is still what folding/ranking uses (the tables are ΔG₃₇).
+    pub dg25: f64,
     pub n_pairs: usize,
     pub structure: String,
 }
@@ -70,7 +77,9 @@ fn hairpin_thermo_from_pairs(bytes: &[u8], pairs: &[(usize, usize)], sodium_m: f
     }
     let tm_k = dh / ds_kcal;
 
-    Ok(HairpinThermo { tm_celsius: tm_k - 273.15, dh, ds: ds_kcal * 1000.0, dg37, n_pairs: n, structure: dotbracket(bytes.len(), pairs) })
+    let dg25 = dh - T_HAIRPIN_REPORT * ds_kcal;
+
+    Ok(HairpinThermo { tm_celsius: tm_k - 273.15, dh, ds: ds_kcal * 1000.0, dg37, dg25, n_pairs: n, structure: dotbracket(bytes.len(), pairs) })
 }
 
 /// Two-state hairpin thermodynamics for the MFE fold of `seq` — bulges and
@@ -380,6 +389,14 @@ mod tests {
         assert!(result.dg37 < 0.0);
         assert!(result.tm_celsius.is_finite());
         assert!(result.n_pairs >= 5, "n_pairs={}", result.n_pairs);
+    }
+
+    #[test]
+    fn hairpin_dg25_is_two_state_extrapolation_of_dh_ds() {
+        let h = hairpin_thermo("GCGCGCGAAACGCGCGC", 0.05, 0.003, 2).unwrap();
+        assert!((h.dg25 - (h.dh - T_HAIRPIN_REPORT * h.ds / 1000.0)).abs() < 1e-9);
+        // Folding is exothermic with negative ΔS, so it's more stable at 25 °C.
+        assert!(h.dg25 < h.dg37, "dg25={} dg37={}", h.dg25, h.dg37);
     }
 
     #[test]

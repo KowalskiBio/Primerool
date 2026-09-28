@@ -29,6 +29,8 @@ const T_REF: f64 = 310.15; // K, 37 degC — ditto
 /// up to `SUBOPT_COUNT` of these, best (index 0) first.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StructureCandidate {
+    /// kcal/mol — at 25 °C for hairpins (`HairpinThermo::dg25`, matching
+    /// IDT OligoAnalyzer's hairpin default), at 37 °C for dimers.
     pub dg: f64,
     pub tm: f64,
     pub structure: String,
@@ -80,8 +82,9 @@ pub struct FullStructureAnalysis {
 /// `population_i = exp(-dG_i/RT) / sum_j exp(-dG_j/RT)` — algebraically the
 /// same share Oligool computes via `ensemble_dG = -RT*ln(Z)` then
 /// `exp(-(dG_i - ensemble_dG)/RT)`, just without the intermediate value.
-fn population_fractions(dgs: &[f64]) -> Vec<f64> {
-    let weights: Vec<f64> = dgs.iter().map(|dg| (-dg / (R_GAS * T_REF)).exp()).collect();
+/// `temp_k` must be the temperature `dgs` were evaluated at.
+fn population_fractions(dgs: &[f64], temp_k: f64) -> Vec<f64> {
+    let weights: Vec<f64> = dgs.iter().map(|dg| (-dg / (R_GAS * temp_k)).exp()).collect();
     let z: f64 = weights.iter().sum();
     if z <= 0.0 {
         return vec![0.0; dgs.len()];
@@ -89,16 +92,19 @@ fn population_fractions(dgs: &[f64]) -> Vec<f64> {
     weights.iter().map(|w| w / z).collect()
 }
 
-fn hairpin_variant_from_subopt(subopt: Vec<thermo_core::thermo::HairpinThermo>) -> StructureVariant {
+/// Hairpins are reported (ΔG, population share, order) at 25 °C — see
+/// `HairpinThermo::dg25`.
+fn hairpin_variant_from_subopt(mut subopt: Vec<thermo_core::thermo::HairpinThermo>) -> StructureVariant {
     if subopt.is_empty() {
         return StructureVariant::none();
     }
-    let dgs: Vec<f64> = subopt.iter().map(|h| h.dg37).collect();
-    let shares = population_fractions(&dgs);
+    subopt.sort_by(|a, b| a.dg25.partial_cmp(&b.dg25).unwrap());
+    let dgs: Vec<f64> = subopt.iter().map(|h| h.dg25).collect();
+    let shares = population_fractions(&dgs, thermo_core::thermo::T_HAIRPIN_REPORT);
     let candidates: Vec<StructureCandidate> = subopt
         .iter()
         .zip(shares.iter())
-        .map(|(h, &population_fraction)| StructureCandidate { dg: h.dg37, tm: h.tm_celsius, structure: h.structure.clone(), population_fraction })
+        .map(|(h, &population_fraction)| StructureCandidate { dg: h.dg25, tm: h.tm_celsius, structure: h.structure.clone(), population_fraction })
         .collect();
     let best = &candidates[0];
     StructureVariant { structure_found: true, dg: Some(best.dg), tm: Some(best.tm), structure: Some(best.structure.clone()), population_fraction: Some(best.population_fraction), candidates }
@@ -109,7 +115,7 @@ fn dimer_variant_from_subopt(subopt: Vec<thermo_core::thermo::DimerThermo>) -> S
         return StructureVariant::none();
     }
     let dgs: Vec<f64> = subopt.iter().map(|d| d.dg37).collect();
-    let shares = population_fractions(&dgs);
+    let shares = population_fractions(&dgs, T_REF);
     let candidates: Vec<StructureCandidate> = subopt
         .iter()
         .zip(shares.iter())

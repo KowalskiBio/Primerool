@@ -45,6 +45,8 @@ export interface StriderThermoStructure {
   dh: number;
   ds: number;
   dg37: number;
+  /** Hairpins only: ΔG at 25 °C (what the UI reports for hairpins). */
+  dg25?: number;
   n_pairs: number;
   structure: string;
 }

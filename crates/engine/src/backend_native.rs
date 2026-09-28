@@ -54,8 +54,9 @@ impl ThermoBackend for NativeBackend {
         let (sodium_m, ..) = to_molar_conc(params);
         let magnesium_m = effective_magnesium_m(params);
         // dangles=2, matching Oligool's own `hairpin_thermo(..., dangles=2)` call.
+        // ΔG reported at 25 °C (`dg25`, IDT OligoAnalyzer's hairpin default).
         match thermo_core::thermo::hairpin_thermo(seq, sodium_m, magnesium_m, 2) {
-            Ok(h) => DimerResult { structure_found: true, tm: Some(h.tm_celsius), dg: Some(h.dg37), structure: Some(h.structure) },
+            Ok(h) => DimerResult { structure_found: true, tm: Some(h.tm_celsius), dg: Some(h.dg25), structure: Some(h.structure) },
             Err(_) => DimerResult { structure_found: false, tm: None, dg: None, structure: None },
         }
     }

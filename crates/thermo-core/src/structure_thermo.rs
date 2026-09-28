@@ -29,6 +29,22 @@ pub(crate) fn stack_energy(mode: Mode, seq: &[u8], i: usize, j: usize) -> f64 {
     params().stack(mode, &key).unwrap_or(-1.5)
 }
 
+/// Extra ΔG₃₇ (kcal/mol) for a 3-nt hairpin loop closed by an A·T pair —
+/// Primerool's own addition, NOT in the fork (so it deliberately breaks
+/// parity with Oligool for such folds). The bundled Mathews2004 ΔG₃₇ table
+/// has a zero terminal A·T penalty and gives Watson-Crick "mismatches" a
+/// zero hairpin-mismatch bonus, so a stem could always grow by one more
+/// A·T stack to leave a triloop at no loop cost — e.g. `…A TAAAA T…` was
+/// folded as `AT(AAA)AT` where UNAFold/IDT keep the TAAAA pentaloop. This
+/// mirrors SantaLucia & Hicks (2004)'s terminal-AT penalty on triloops.
+/// ΔG-only (no ΔH counterpart), i.e. entropic: it also lowers that fold's
+/// Tm via `ΔS = (ΔH − ΔG₃₇) / T`.
+pub(crate) const TRILOOP_AT_CLOSURE_DG37: f64 = 0.5;
+
+fn is_at_pair(a: u8, b: u8) -> bool {
+    matches!((a.to_ascii_uppercase(), b.to_ascii_uppercase()), (b'A', b'T') | (b'T', b'A'))
+}
+
 /// `_hairpin_loop_energy`. `loop_size = j - i - 1` must be >= 3 (the DP
 /// that produces any structure walked here already enforces this).
 pub(crate) fn hairpin_loop_energy(mode: Mode, seq: &[u8], i: usize, j: usize) -> f64 {
@@ -47,6 +63,9 @@ pub(crate) fn hairpin_loop_energy(mode: Mode, seq: &[u8], i: usize, j: usize) ->
         dg += p.terminal_penalty(mode, &key2(seq, j, i));
         dg += p.hairpin_triloop(mode, &key);
         dg += p.terminal_penalty(mode, &key2(seq, i, j));
+        if mode == Mode::Dg && is_at_pair(seq[i], seq[j]) {
+            dg += TRILOOP_AT_CLOSURE_DG37;
+        }
         return dg;
     }
 
@@ -372,6 +391,20 @@ mod tests {
     fn parse_hairpin_pairs_accepts_nested_stem() {
         let pairs = parse_hairpin_pairs("((...))").unwrap();
         assert_eq!(pairs, vec![(0, 6), (1, 5)]);
+    }
+
+    #[test]
+    fn at_closed_triloop_costs_extra_dg_only() {
+        // Same loop size and (empty) triloop-table/terminal-penalty terms
+        // in ΔG₃₇, so the only ΔG difference is the A·T closure penalty.
+        let at = hairpin_loop_energy(Mode::Dg, b"ACCCT", 0, 4);
+        let gc = hairpin_loop_energy(Mode::Dg, b"GCCCC", 0, 4);
+        assert!((at - gc - TRILOOP_AT_CLOSURE_DG37).abs() < 1e-9, "at={at} gc={gc}");
+        // Larger loops closed by A·T are unaffected.
+        let at5 = hairpin_loop_energy(Mode::Dg, b"ACCCCCT", 0, 6);
+        let size5 = params().hairpin_size(Mode::Dg, 4);
+        let mm = params().hairpin_mismatch(Mode::Dg, "CTAC");
+        assert!((at5 - size5 - mm).abs() < 1e-9, "at5={at5}");
     }
 
     #[test]

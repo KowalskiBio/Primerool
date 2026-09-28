@@ -20,6 +20,11 @@ interface Options {
    * any - forwarded to the pick menu, which offers it as a new allele-probe
    * pair's SNP. */
   rsSuggestion?: RsSnpSuggestion;
+  /** Rewrites a text selection before the menu is built - the Exon map
+   * turns one lying within a single exon into the same gene stretch, so it
+   * gets the genomic map's picks (general, ARMS, probe), not only junction
+   * ones. */
+  translatePick?: (pick: MapPick) => MapPick;
 }
 
 /** Heading labels for the per-pick menu, for picks with no user-given
@@ -44,8 +49,8 @@ const PICK_LABELS: Record<keyof Selections, string> = {
  * container and render `overlay` anywhere in the component.
  *
  * Also owns `commitSelection` - set a pick, then fill in its Strider
- * analysis - which `SequenceViewer`'s drag-resize reuses. */
-export function useMapPickMenu({ data, selections, onSelect, pickKinds, rsSuggestion }: Options) {
+ * analysis - which both maps' drag-resize reuses. */
+export function useMapPickMenu({ data, selections, onSelect, pickKinds, rsSuggestion, translatePick }: Options) {
   const [menu, setMenu] = useState<{ x: number; y: number; target: MapPick | { error: string } | { pickKey: keyof Selections } } | null>(null);
   const [blastSeq, setBlastSeq] = useState<string | null>(null);
   const [structureSeq, setStructureSeq] = useState<string | null>(null);
@@ -78,9 +83,10 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds, rsSugges
       setMenu({ x: e.clientX, y: e.clientY, target: { pickKey } });
       return;
     }
-    const target = resolveMapSelection(e.currentTarget);
-    if (!target) return; // nothing selected in the map - keep the browser's own menu
+    const resolved = resolveMapSelection(e.currentTarget);
+    if (!resolved) return; // nothing selected in the map - keep the browser's own menu
     e.preventDefault();
+    const target = translatePick && !('error' in resolved) ? translatePick(resolved) : resolved;
     setMenu({ x: e.clientX, y: e.clientY, target });
   }
 

@@ -6,7 +6,8 @@ import { cleanDNA, reverseComplement } from '../utils/dna';
 import { lookupVariant, type VariantHit } from '../api/variants';
 import { localGenePos } from '../utils/variantMapping';
 import { baseAtPoint, describeGenePosition, useBaseHover } from './BaseHoverTooltip';
-import { ALL_PICK_KINDS, alleleMutantProbe, armsMutantTwin, LIMITS, type PickKind } from '../utils/mapPickMenu';
+import { ALL_PICK_KINDS, alleleMutantProbe, armsMutantTwin, type PickKind } from '../utils/mapPickMenu';
+import { computeDraggedInterval, type DragGeometry } from '../utils/dragInterval';
 import { useMapPickMenu } from './useMapPickMenu';
 import { useMapDragSelect } from './useMapDragSelect';
 import { useSessionState } from '../session/sessionContext';
@@ -226,13 +227,6 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
   return wrapHighlights(seq, 0, data.include_utr ? 'seq-utr' : 'seq-cds');
 }
 
-/** Drag-resizing allows the same lengths as a right-click pick - tighter
- * bounds snapped any longer pick (e.g. a 35 bp probe) down on its first
- * edge drag, and it could never be lengthened back. */
-function lenBounds(): readonly [number, number] {
-  return LIMITS.primer;
-}
-
 function colorClassName(key: keyof Selections): string {
   return key === 'geneProbe' ? 'seq-probe' : 'seq-primer';
 }
@@ -243,73 +237,9 @@ function regionRawSeq(data: SequenceData, region: Selection['region']): string {
   return data.gene_seq || '';
 }
 
-interface DragSession {
+interface DragSession extends DragGeometry {
   selKey: keyof Selections;
-  type: 'move' | 'left' | 'right';
-  /** Local position of the base the drag grabbed - the drag distance is
-   * the base now under the pointer minus this one, so it follows the
-   * pointer across row wraps, not just along one row. */
-  anchorPos: number;
-  initStart: number;
-  initEnd: number;
   region: Selection['region'];
-  /** A base the span must keep covering - an allele probe's SNP. */
-  mustCover?: number;
-}
-
-/** Applies `deltaChars` to a drag session's original bounds, clamping to
- * the primer/probe's length bounds and the sequence's own bounds. Used for both
- * the live preview (every mousemove) and the final commit (mouseup) so
- * they always agree on the same result. */
-function computeDraggedInterval(session: DragSession, deltaChars: number, seqLen: number): { start: number; end: number } {
-  const [minLen, maxLen] = lenBounds();
-  let start = session.initStart;
-  let end = session.initEnd;
-
-  if (session.type === 'move') {
-    start += deltaChars;
-    end += deltaChars;
-  } else if (session.type === 'left') {
-    start += deltaChars;
-  } else {
-    end += deltaChars;
-  }
-
-  const len = end - start;
-  if (len < minLen) {
-    if (session.type === 'left') start = end - minLen;
-    else if (session.type === 'right') end = start + minLen;
-  } else if (len > maxLen) {
-    if (session.type === 'left') start = end - maxLen;
-    else if (session.type === 'right') end = start + maxLen;
-  }
-
-  if (start < 0) {
-    if (session.type === 'move') end -= start;
-    start = 0;
-  }
-  if (end > seqLen) {
-    if (session.type === 'move') start -= end - seqLen;
-    end = seqLen;
-  }
-
-  if (session.mustCover !== undefined) {
-    const p = session.mustCover;
-    if (start > p) {
-      if (session.type === 'move') end -= start - p;
-      start = p;
-    }
-    if (end <= p) {
-      if (session.type === 'move') start += p + 1 - end;
-      end = p + 1;
-    }
-  }
-
-  start = Math.max(0, start);
-  end = Math.min(seqLen, end);
-  if (end - start < minLen) end = Math.min(seqLen, start + minLen);
-
-  return { start, end };
 }
 
 /** Fallback row width used for exactly one render, before the container
@@ -406,7 +336,7 @@ function buildCells(
 
     if (interactive && s.key && editableKeys.has(s.key)) {
       const sel = selections[s.key]!;
-      const live = isDraggingThisKey ? computeDraggedInterval(dragSession!, deltaChars, regionRawSeq(data, sel.region).length) : { start: sel.start, end: sel.end };
+      const live = isDraggingThisKey ? computeDraggedInterval(dragSession!, deltaChars, 0, regionRawSeq(data, sel.region).length) : { start: sel.start, end: sel.end };
       const chars = Array.from(s.text);
       chars.forEach((ch, ci) => {
         const pos = s.startPos + ci;
@@ -431,7 +361,7 @@ function buildCells(
     // Any other stretch of the dragged selection's region the live span has
     // moved onto: split out the covered part and paint it as the primer.
     if (interactive && dragSession && s.region === dragSession.region && !s.key) {
-      const live = computeDraggedInterval(dragSession, deltaChars, regionRawSeq(data, dragSession.region).length);
+      const live = computeDraggedInterval(dragSession, deltaChars, 0, regionRawSeq(data, dragSession.region).length);
       const a = Math.max(live.start, s.startPos) - s.startPos;
       const b = Math.min(live.end, s.startPos + s.text.length) - s.startPos;
       if (b > a) {
@@ -1079,7 +1009,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     if (!sel || !onSelect) return;
 
     const rawSeq = regionRawSeq(data, session.region);
-    const { start, end } = computeDraggedInterval(session, finalDeltaChars, rawSeq.length);
+    const { start, end } = computeDraggedInterval(session, finalDeltaChars, 0, rawSeq.length);
     if (start === sel.start && end === sel.end) return;
 
     const bindingSeq = rawSeq.substring(start, end);

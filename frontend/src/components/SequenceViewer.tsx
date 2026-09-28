@@ -790,19 +790,10 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     }
   } else if (searchKey !== prevSearchKey) {
     setPrevSearchKey(searchKey);
-    // Typing in the literal field resets where Prev/Next sits (back to the
-    // first hit) - deliberately WITHOUT scrolling, so editing one field
-    // doesn't yank the map away from whatever the other search highlighted.
     if (activeMatchIndex !== 0) setActiveMatchIndex(0);
-    setScrollToIdx(-1);
   }
 
   const literalMatches = useMemo(() => computeSearchMatches(data, searchQuery, includeRevComp), [data, searchQuery, includeRevComp]);
-
-  /** Scrolls match idx 0 on an align/rsID hit landing; assigned after
-   * `scrollToMatch` is defined below (the debounced align effect and the
-   * report blocks run before it is). */
-  const scrollToFirstRef = useRef(() => {});
 
   // Debounced like the typing: the DP is cheap but pointless to rerun per
   // keystroke of a half-pasted sequence. Below ~10 bases a local alignment
@@ -814,13 +805,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
       setAlignHit(null);
       return;
     }
-    const timer = setTimeout(() => {
-      setAlignHit(findBestAlignment(data, q));
-      // The binding site lands as match idx 0 - scroll to it once on
-      // landing so it's visible without the user hunting for it (typing
-      // a longer query replaces the hit in kind, so this stays put).
-      scrollToFirstRef.current();
-    }, 300);
+    const timer = setTimeout(() => setAlignHit(findBestAlignment(data, q)), 300);
     return () => clearTimeout(timer);
   }, [data, alignQuery]);
 
@@ -912,27 +897,12 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
    * the genomic-to-local mapping valid at all (see `localGenePos`), and
    * doubles as the "not a custom pasted sequence" check - those have no
    * genomic coordinates. */
-
   const rsLocalPos = useMemo(() => {
     if (!rsVariant || rsFoundInSpecies === null || rsFoundInSpecies !== species) return null;
     if (!data.include_introns) return null;
     if (rsVariant.chrom && data.chrom && rsVariant.chrom !== data.chrom) return null;
     return localGenePos(data, rsVariant.start);
   }, [rsVariant, rsFoundInSpecies, species, data]);
-
-  // Scroll the map to the variant the first time one lands (a stable
-  // key built from the located position, so re-render storms from a
-  // literal query in the other field don't keep re-jumping).
-  const prevRsPlacedKey = useRef<string | null>(null);
-  if (rsLocalPos !== null) {
-    const key = `${data.transcript_id}:${rsLocalPos}`;
-    if (prevRsPlacedKey.current !== key) {
-      prevRsPlacedKey.current = key;
-      scrollToFirstRef.current();
-    }
-  } else {
-    prevRsPlacedKey.current = null;
-  }
 
   // Alleles re-oriented into `gene_seq`'s own strand sense (a minus-strand
   // gene's sequence is reverse-complemented at fetch time, so showing the
@@ -1001,53 +971,31 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   }, [segments, interactive]);
 
   const searchMatches = useMemo<SearchMatch[]>(() => {
-    // Every active search contributes its own highlighting at once: the
-    // alignment hit (if any), the rsID hit, and the literal matches. The
-    // located "where is it" spans (alignment first, then rsID) lead the
-    // ordering so index 0 - what Enter/Next steps to first - is the
-    // alignment's binding site when one is set.
-    const hits: SearchMatch[] = [];
-    if (alignHit) hits.push({ start: alignHit.start, end: alignHit.end, region: alignHit.region, idx: 0 });
-    if (rsLocalPos !== null) hits.push({ start: rsLocalPos, end: rsLocalPos + 1, region: 'gene', idx: 0 });
-    hits.push(...literalMatches.map((m) => ({ ...m, idx: 0 })));
-    return hits.map((m, idx) => ({ ...m, idx }));
+    // Precedence: an explicit alignment result outranks the rsID hit, which
+    // outranks literal matches - each is a single located span meant to take
+    // over the map's focus.
+    if (alignHit) return [{ start: alignHit.start, end: alignHit.end, region: alignHit.region, idx: 0 }];
+    if (rsLocalPos === null) return literalMatches;
+    return [{ start: rsLocalPos, end: rsLocalPos + 1, region: 'gene', idx: 0 }];
   }, [alignHit, rsLocalPos, literalMatches]);
   const activeSearchIdx = searchMatches.length > 0 ? Math.min(activeMatchIndex, searchMatches.length - 1) : -1;
 
   // Scrolling the active match into view is a real effect: it reaches out
   // to the DOM (an external system) rather than deriving React state.
-  // Driven by `scrollToIdx` - set only by an explicit action (Next/Prev/
-  // Enter, clicking the summary's binding-site position, an rsID lookup
-  // landing), never by merely typing - otherwise every keystroke in either
-  // field would yank the map back to a highlight while the user is still
-  // editing the other one.
-  const [scrollToIdx, setScrollToIdx] = useState(-1);
   useEffect(() => {
-    if (scrollToIdx < 0 || !containerRef.current) return;
-    const el = containerRef.current.querySelector(`[data-search-idx="${scrollToIdx}"]`);
+    if (activeSearchIdx < 0 || !containerRef.current) return;
+    const el = containerRef.current.querySelector(`[data-search-idx="${activeSearchIdx}"]`);
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [scrollToIdx, searchMatches]);
-
-  /** Scroll only explicit, never from the searchKey-typing reset. */
-  function scrollToMatch(idx: number) {
-    setScrollToIdx(idx);
-    setActiveMatchIndex(idx);
-  }
-
-  function gotoFirst() {
-    if (searchMatches.length > 0) scrollToMatch(0);
-  }
-
-  scrollToFirstRef.current = gotoFirst;
+  }, [activeSearchIdx, searchMatches]);
 
   function gotoNextMatch() {
     if (searchMatches.length === 0) return;
-    scrollToMatch((activeSearchIdx + 1) % searchMatches.length);
+    setActiveMatchIndex((i) => (Math.min(i, searchMatches.length - 1) + 1) % searchMatches.length);
   }
 
   function gotoPrevMatch() {
     if (searchMatches.length === 0) return;
-    scrollToMatch((activeSearchIdx - 1 + searchMatches.length) % searchMatches.length);
+    setActiveMatchIndex((i) => (Math.min(i, searchMatches.length - 1) - 1 + searchMatches.length) % searchMatches.length);
   }
 
   function commitDrag(session: DragSession, finalDeltaChars: number) {

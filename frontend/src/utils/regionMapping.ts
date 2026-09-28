@@ -30,6 +30,11 @@ export interface Selection {
    * (gene coordinates), the wild-type (template) base and the mutant base
    * the second twin carries instead. The 3' end is locked on `snpPos`. */
   arms?: { snpPos: number; wtBase: string; mutBase: string };
+  /** Set on both allele-detection probes: the SNP base inside the probe
+   * (gene coordinates), the wild-type (template) base and the mutant base
+   * the second probe carries there instead. A drag always keeps `snpPos`
+   * inside the probe. */
+  allele?: { snpPos: number; wtBase: string; mutBase: string };
 }
 
 /** A selection's reading direction - `strand` when set, else inferred. */
@@ -55,6 +60,9 @@ export interface Selections {
   geneForward: Selection | null;
   geneReverse: Selection | null;
   geneProbe: Selection | null;
+  /** The mutant probe of an allele-detection pair - `geneProbe` is then
+   * the wild-type one (both carry `allele`). */
+  geneProbeAlt: Selection | null;
   armsRefPrimer: Selection | null;
   armsAltPrimer: Selection | null;
   armsCommon: Selection | null;
@@ -68,6 +76,7 @@ export const EMPTY_SELECTIONS: Selections = {
   geneForward: null,
   geneReverse: null,
   geneProbe: null,
+  geneProbeAlt: null,
   armsRefPrimer: null,
   armsAltPrimer: null,
   armsCommon: null,

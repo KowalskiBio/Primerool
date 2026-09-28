@@ -18,7 +18,7 @@ const GROUPS: { id: string; title: string; keys: Key[] }[] = [
   { id: 'general', title: 'General pair', keys: ['geneForward', 'geneReverse'] },
   { id: 'junction', title: 'Junction pair', keys: ['juncLeft', 'juncRight'] },
   { id: 'arms', title: 'ARMS', keys: ['armsRefPrimer', 'armsAltPrimer', 'armsCommon'] },
-  { id: 'probe', title: 'TaqMan probe', keys: ['geneProbe'] },
+  { id: 'probe', title: 'TaqMan probe', keys: ['geneProbe', 'geneProbeAlt'] },
 ];
 
 function roleLabel(key: Key, sel: Selection): string {
@@ -26,7 +26,8 @@ function roleLabel(key: Key, sel: Selection): string {
   if (key === 'armsRefPrimer') return `${dir} twin · wild type${sel.arms ? ` (${sel.arms.wtBase})` : ''}`;
   if (key === 'armsAltPrimer') return `${dir} twin · mutant${sel.arms ? ` (${sel.arms.mutBase})` : ''}`;
   if (key === 'armsCommon') return `${dir} common`;
-  if (key === 'geneProbe') return 'Probe';
+  if (key === 'geneProbe') return sel.allele ? `Probe · wild type (${sel.allele.wtBase})` : 'Probe';
+  if (key === 'geneProbeAlt') return `Probe · mutant${sel.allele ? ` (${sel.allele.mutBase})` : ''}`;
   if ((key === 'juncLeft' || key === 'juncRight') && sel.region !== 'spliced') return `${dir} · in the gene (partner crosses the junction)`;
   return dir;
 }
@@ -162,7 +163,7 @@ export default function PrimerSetsPanel({ data, selections, onSelect }: Props) {
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
           {groups.map((g) => {
             const twins = selections.armsRefPrimer;
-            const title = g.id === 'arms' && twins ? `ARMS (${selectionStrand(twins) === 'F' ? '2 F + 1 R' : '1 F + 2 R'})` : g.title;
+            const title = g.id === 'arms' && twins ? `ARMS (${selectionStrand(twins) === 'F' ? '2 F + 1 R' : '1 F + 2 R'})` : g.id === 'probe' && selections.geneProbeAlt ? 'Allele-detection probes' : g.title;
             // The ARMS mutant twin sits exactly where the wild-type twin
             // does, so one twin + the common primer gives the trio's
             // amplicon (identical for both alleles).

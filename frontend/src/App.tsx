@@ -124,7 +124,10 @@ function App() {
 
   /** `null` clears that slot (e.g. removing a set from the primer list). */
   function handleSelect(key: keyof Selections, value: Selection | null) {
-    setSelections((prev) => ({ ...prev, [key]: value }));
+    // A mutant probe only makes sense beside its wild-type allele probe -
+    // replacing that with a general probe (or removing it) drops the pair.
+    const dropsAlleleTwin = key === 'geneProbe' && !value?.allele;
+    setSelections((prev) => ({ ...prev, [key]: value, ...(dropsAlleleTwin ? { geneProbeAlt: null } : {}) }));
   }
 
   const isCustomSequence = sequenceData?.transcript_id === 'custom';

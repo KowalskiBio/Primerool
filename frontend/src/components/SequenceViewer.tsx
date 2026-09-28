@@ -6,7 +6,7 @@ import { cleanDNA, reverseComplement } from '../utils/dna';
 import { lookupVariant, type VariantHit } from '../api/variants';
 import { localGenePos } from '../utils/variantMapping';
 import { baseAtPoint, describeGenePosition, useBaseHover } from './BaseHoverTooltip';
-import { ALL_PICK_KINDS, armsMutantTwin, type PickKind } from '../utils/mapPickMenu';
+import { ALL_PICK_KINDS, alleleMutantProbe, armsMutantTwin, type PickKind } from '../utils/mapPickMenu';
 import { useMapPickMenu } from './useMapPickMenu';
 import { useMapDragSelect } from './useMapDragSelect';
 
@@ -249,6 +249,8 @@ interface DragSession {
   initStart: number;
   initEnd: number;
   region: Selection['region'];
+  /** A base the span must keep covering - an allele probe's SNP. */
+  mustCover?: number;
 }
 
 /** Applies `deltaChars` to a drag session's original bounds, clamping to
@@ -285,6 +287,18 @@ function computeDraggedInterval(session: DragSession, deltaChars: number, seqLen
   if (end > seqLen) {
     if (session.type === 'move') start -= end - seqLen;
     end = seqLen;
+  }
+
+  if (session.mustCover !== undefined) {
+    const p = session.mustCover;
+    if (start > p) {
+      if (session.type === 'move') end -= start - p;
+      start = p;
+    }
+    if (end <= p) {
+      if (session.type === 'move') start += p + 1 - end;
+      end = p + 1;
+    }
   }
 
   start = Math.max(0, start);
@@ -852,9 +866,13 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   /** The prop markers plus the looked-up SNP (deduped by rsid, so a batch
    * modal already marking it doesn't render it twice). */
   const allVariantMarkers = useMemo(() => {
-    if (rsMarker.length === 0) return variantMarkers;
-    return [...variantMarkers.filter((m) => m.rsid !== rsMarker[0].rsid), rsMarker[0]];
-  }, [variantMarkers, rsMarker]);
+    const base = rsMarker.length === 0 ? variantMarkers : [...variantMarkers.filter((m) => m.rsid !== rsMarker[0].rsid), rsMarker[0]];
+    // An allele-detection probe's SNP base, marked like any other variant.
+    const probe = selections.geneProbe;
+    if (!probe?.allele || probe.region !== 'gene') return base;
+    const { snpPos, wtBase, mutBase } = probe.allele;
+    return [...base, { rsid: `${probe.name ?? 'Probe'} SNP`, start: snpPos, end: snpPos + 1, alleles: [wtBase, mutBase] }];
+  }, [variantMarkers, rsMarker, selections.geneProbe]);
 
   const segments = useMemo(() => {
     const up = flankSegments(data.upstream_seq || '', 'up', data, selections);
@@ -916,7 +934,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     // reverse-strand one - inferred from how the pre-drag selection itself
     // relates the two (see `ArmsDesignPanel.tsx`/`ManualDesignPanel.tsx`,
     // which both set this invariant up when a selection is first made).
-    const isReverseStrand = sel.primerSeq !== sel.bindingSeq;
+    const isReverseStrand = selectionStrand(sel) === 'R';
     const primerSeq = isReverseStrand ? reverseComplement(bindingSeq) : bindingSeq;
 
     const next: Selection = { ...sel, start, end, primerSeq, bindingSeq, source: 'manual', analysis: undefined };
@@ -925,6 +943,10 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     // follows the wild-type twin's new 5' end.
     if (session.selKey === 'armsRefPrimer' && next.arms && selections.armsAltPrimer) {
       commitSelection('armsAltPrimer', armsMutantTwin(next, selections.armsAltPrimer.name));
+    }
+    // Likewise the mutant allele probe, which differs only at the SNP.
+    if (session.selKey === 'geneProbe' && next.allele && selections.geneProbeAlt) {
+      commitSelection('geneProbeAlt', alleleMutantProbe(next, selections.geneProbeAlt.name));
     }
   }
 
@@ -981,7 +1003,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    setDragSession({ selKey: key, type, anchorPos: Number(e.currentTarget.dataset.pos), initStart: sel.start, initEnd: sel.end, region: sel.region });
+    setDragSession({ selKey: key, type, anchorPos: Number(e.currentTarget.dataset.pos), initStart: sel.start, initEnd: sel.end, region: sel.region, mustCover: sel.allele?.snpPos });
     setDeltaChars(0);
   }
 

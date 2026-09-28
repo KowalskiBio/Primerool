@@ -34,6 +34,16 @@ export interface ArmsTwinRequest {
   wtBase: string;
 }
 
+/** What an allele-detection probe pick needs from the dialog that asks
+ * which probe base is the SNP and what its mutant allele is
+ * (`AlleleProbeDialog`). */
+export interface AlleleProbeRequest {
+  start: number;
+  end: number;
+  /** The selected gene bases, sense strand. */
+  seq: string;
+}
+
 export interface PickMenuContext {
   data: SequenceData;
   selections: Selections;
@@ -44,6 +54,7 @@ export interface PickMenuContext {
   openBlast: (seq: string) => void;
   openStructures: (seq: string) => void;
   openArmsTwins: (req: ArmsTwinRequest) => void;
+  openAlleleProbe: (req: AlleleProbeRequest) => void;
 }
 
 /** 1-based position from the gene start (negative upstream, no 0) of a
@@ -142,6 +153,34 @@ export function createArmsTwins(ctx: Pick<PickMenuContext, 'data' | 'selections'
   if (common && selectionStrand(common) === req.strand) ctx.clear('armsCommon');
   ctx.commit('armsRefPrimer', wt);
   ctx.commit('armsAltPrimer', armsMutantTwin(wt, mutName));
+}
+
+/** The mutant probe for a wild-type allele-detection probe: identical but
+ * for the SNP base, which carries `allele.mutBase`. */
+export function alleleMutantProbe(wt: Selection, name: string | undefined): Selection {
+  const { snpPos, mutBase } = wt.allele!;
+  const i = snpPos - wt.start;
+  const primerSeq = wt.bindingSeq.slice(0, i) + mutBase + wt.bindingSeq.slice(i + 1);
+  return { ...wt, primerSeq, name, analysis: undefined };
+}
+
+/** Creates (or replaces) the wild-type/mutant probe pair from a confirmed
+ * dialog. */
+export function createAlleleProbes(ctx: Pick<PickMenuContext, 'commit'>, req: AlleleProbeRequest, snpPos: number, mutBase: string, wtName: string, mutName: string) {
+  const slice = req.seq.toUpperCase();
+  const wt: Selection = {
+    region: 'gene',
+    start: req.start,
+    end: req.end,
+    primerSeq: slice,
+    bindingSeq: slice,
+    source: 'manual',
+    strand: 'F',
+    name: wtName,
+    allele: { snpPos, wtBase: slice[snpPos - req.start], mutBase },
+  };
+  ctx.commit('geneProbe', wt);
+  ctx.commit('geneProbeAlt', alleleMutantProbe(wt, mutName));
 }
 
 /** Heading + entries for the right-click menu over `ctx.pick`. */
@@ -275,6 +314,28 @@ export function buildPickMenu(ctx: PickMenuContext): { heading: string; entries:
     ];
   }
 
+  function probeSubmenu(): MenuEntry[] {
+    const disabledReason = !inGene ? 'A probe must lie within the gene' : primerLen;
+    const current = selections.geneProbe;
+    const hint = current ? `replaces ${current.allele ? 'the allele probes' : (current.name ?? 'the current probe')}` : undefined;
+    return [
+      {
+        shortcut: 'G',
+        label: 'General',
+        disabledReason,
+        hint,
+        onRun: () => contiguous && ctx.commit('geneProbe', { region: 'gene', start: contiguous.start, end: contiguous.end, primerSeq: seq!, bindingSeq: seq!, source: 'manual', strand: 'F', name: 'Probe' }),
+      },
+      {
+        shortcut: 'A',
+        label: 'Allele detection (wild type / mutant)',
+        disabledReason,
+        hint: hint ?? 'then pick the SNP base',
+        onRun: () => contiguous && ctx.openAlleleProbe({ start: contiguous.start, end: contiguous.end, seq: seq! }),
+      },
+    ];
+  }
+
   const anyPrimer = kinds.size > 0;
   return {
     heading,
@@ -284,12 +345,25 @@ export function buildPickMenu(ctx: PickMenuContext): { heading: string; entries:
       {
         shortcut: 'P',
         label: 'Select as probe',
-        disabledReason: !kinds.has('probe') ? 'Probe picks are not available in this view' : !inGene ? 'A probe must lie within the gene' : primerLen,
-        hint: replaces('geneProbe'),
-        onRun: () => contiguous && ctx.commit('geneProbe', { region: 'gene', start: contiguous.start, end: contiguous.end, primerSeq: seq!, bindingSeq: seq!, source: 'manual', strand: 'F', name: 'Probe' }),
+        disabledReason: !kinds.has('probe') ? 'Probe picks are not available in this view' : null,
+        submenu: probeSubmenu(),
       },
       { shortcut: 'B', label: 'BLAST', disabledReason: seq ? lengthReason(len, LIMITS.blast) : 'Select one continuous stretch (or exactly across a collapsed intron)', onRun: () => seq && ctx.openBlast(seq) },
       { shortcut: 'S', label: 'Secondary structures', disabledReason: seq ? lengthReason(len, LIMITS.structure) : 'Select one continuous stretch (or exactly across a collapsed intron)', onRun: () => seq && ctx.openStructures(seq) },
+    ],
+  };
+}
+
+/** Heading + entries for the right-click menu on a rendered primer/probe
+ * span (no text selection needed): BLAST and secondary structures on the
+ * pick's own sequence. No length gates - a rendered pick already passed
+ * the primer-length limits when it was made. */
+export function buildPrimerMenu(sel: Selection, label: string, openBlast: (seq: string) => void, openStructures: (seq: string) => void): { heading: string; entries: MenuEntry[] } {
+  return {
+    heading: `${label} · ${sel.primerSeq.length} bp`,
+    entries: [
+      { shortcut: 'B', label: 'BLAST', disabledReason: null, onRun: () => openBlast(sel.primerSeq) },
+      { shortcut: 'S', label: 'Secondary structures', disabledReason: null, onRun: () => openStructures(sel.primerSeq) },
     ],
   };
 }

@@ -3,9 +3,10 @@ import type { SequenceData } from '../api/sequence';
 import { analyzePrimer } from '../api/design';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { resolveMapSelection, type MapPick } from '../utils/mapSelection';
-import { buildPickMenu, createArmsTwins, genePosLabel, type ArmsTwinRequest, type PickKind } from '../utils/mapPickMenu';
+import { buildPickMenu, createAlleleProbes, createArmsTwins, genePosLabel, type AlleleProbeRequest, type ArmsTwinRequest, type PickKind } from '../utils/mapPickMenu';
 import SequenceContextMenu from './SequenceContextMenu';
 import ArmsTwinDialog from './ArmsTwinDialog';
+import AlleleProbeDialog from './AlleleProbeDialog';
 import BlastModal from './BlastModal';
 import PrimerStructureModal from './PrimerStructureModal';
 
@@ -29,6 +30,7 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds }: Option
   const [blastSeq, setBlastSeq] = useState<string | null>(null);
   const [structureSeq, setStructureSeq] = useState<string | null>(null);
   const [armsRequest, setArmsRequest] = useState<ArmsTwinRequest | null>(null);
+  const [alleleRequest, setAlleleRequest] = useState<AlleleProbeRequest | null>(null);
 
   /** Sets a primer/probe pick, then fills in its Strider analysis (Tm/GC/
    * hairpin/self-dimer) with a second `onSelect` once it arrives. A parent
@@ -74,6 +76,7 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds }: Option
           openBlast: afterMenu(setBlastSeq),
           openStructures: afterMenu(setStructureSeq),
           openArmsTwins: afterMenu(setArmsRequest),
+          openAlleleProbe: afterMenu(setAlleleRequest),
         })
       : null;
 
@@ -98,10 +101,19 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds }: Option
           setArmsRequest(null);
         }}
       />
+      <AlleleProbeDialog
+        request={alleleRequest}
+        posLabel={(pos) => genePosLabel(data, 'gene', pos)}
+        onCancel={() => setAlleleRequest(null)}
+        onConfirm={(snpPos, mutBase, wtName, mutName) => {
+          if (alleleRequest) createAlleleProbes({ commit: commitSelection }, alleleRequest, snpPos, mutBase, wtName, mutName);
+          setAlleleRequest(null);
+        }}
+      />
       <BlastModal sequence={blastSeq} onClose={() => setBlastSeq(null)} />
       <PrimerStructureModal pair={structureSeq ? { label: `${structureSeq.length} bp selection`, forward: structureSeq } : null} onClose={() => setStructureSeq(null)} />
     </>
   );
 
-  return { onContextMenu, overlay, commitSelection, busy: menu !== null || armsRequest !== null };
+  return { onContextMenu, overlay, commitSelection, busy: menu !== null || armsRequest !== null || alleleRequest !== null };
 }

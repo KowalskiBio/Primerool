@@ -43,7 +43,7 @@ Target: [591, 611). Product size range: (100, 300).
 
 | backend | pairs found | wall time |
 |---|---|---|
-| Primer3Backend | 5 | 1.3s |
-| NativeBackend | 5 | 187.0ms |
+| Primer3Backend | 5 | 1.2s |
+| NativeBackend | 5 | 191.4ms |
 
 Both backends run the identical `pick_pairs` code path; every returned pair from both respects the target-flanking, non-overlap, and product-size constraints (asserted in `design_internal`'s own tests, not re-checked here).

@@ -10,6 +10,11 @@ __pycache__/
 
 .claude/
 
+# Coding-agent local state
+.omo/
+.pi/
+.posit/
+
 # Frontend
 node_modules/
 frontend/node_modules/

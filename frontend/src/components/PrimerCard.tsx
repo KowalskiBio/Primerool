@@ -5,6 +5,7 @@ import { getIdtToken, idtAnalyze, type IdtAnalyzeResponse } from '../api/idt';
 import type { IdtCredentials } from './IdtSettingsPanel';
 import HairpinSvg from './HairpinSvg';
 import DimerAscii from './DimerAscii';
+import StriderStructure from './StriderStructure';
 import Button from './ui/Button';
 
 interface Props {
@@ -69,6 +70,22 @@ export function VariantBox({ label, variant, diagram }: { label: string; variant
       </div>
       {variant.structure_found ? diagram : <div className="text-[13px] italic text-ink-faint">No structure found</div>}
     </div>
+  );
+}
+
+/** Strider-style figures, falling back to the older diagrams. */
+function hairpin(sequence: string, structure: string) {
+  return <StriderStructure sequence={sequence} structure={structure} title="Hairpin" fallback={<HairpinSvg sequence={sequence} structure={structure} />} />;
+}
+function selfDimer(sequence: string, structure: string) {
+  return (
+    <StriderStructure
+      sequence={sequence + sequence}
+      nick={sequence.length}
+      structure={structure}
+      title="Self-dimer"
+      fallback={<DimerAscii seq1={sequence} seq2={sequence} structure={structure} />}
+    />
   );
 }
 
@@ -241,22 +258,22 @@ export default function PrimerCard({ index, primer, name, positionLabel, selecte
               <VariantBox
                 label="Hairpin - with bulges (Strider MFE)"
                 variant={structure.hairpin.with_bulge}
-                diagram={structure.hairpin.with_bulge.structure && <HairpinSvg sequence={primer.sequence} structure={structure.hairpin.with_bulge.structure} />}
+                diagram={structure.hairpin.with_bulge.structure && hairpin(primer.sequence, structure.hairpin.with_bulge.structure)}
               />
               <VariantBox
                 label="Hairpin - no bulge (pure sliding)"
                 variant={structure.hairpin.no_bulge}
-                diagram={structure.hairpin.no_bulge.structure && <HairpinSvg sequence={primer.sequence} structure={structure.hairpin.no_bulge.structure} />}
+                diagram={structure.hairpin.no_bulge.structure && hairpin(primer.sequence, structure.hairpin.no_bulge.structure)}
               />
               <VariantBox
                 label="Self-dimer - with bulges (Strider MFE)"
                 variant={structure.homodimer.with_bulge}
-                diagram={structure.homodimer.with_bulge.structure && <DimerAscii seq1={primer.sequence} seq2={primer.sequence} structure={structure.homodimer.with_bulge.structure} />}
+                diagram={structure.homodimer.with_bulge.structure && selfDimer(primer.sequence, structure.homodimer.with_bulge.structure)}
               />
               <VariantBox
                 label="Self-dimer - no bulge (pure sliding)"
                 variant={structure.homodimer.no_bulge}
-                diagram={structure.homodimer.no_bulge.structure && <DimerAscii seq1={primer.sequence} seq2={primer.sequence} structure={structure.homodimer.no_bulge.structure} />}
+                diagram={structure.homodimer.no_bulge.structure && selfDimer(primer.sequence, structure.homodimer.no_bulge.structure)}
               />
             </div>
           )}

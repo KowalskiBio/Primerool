@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { analyzeStructure, type FullStructureAnalysis, type StructureCandidate } from '../api/structure';
 import HairpinSvg from './HairpinSvg';
 import DimerSvg from './DimerSvg';
+import StriderStructure from './StriderStructure';
 
 interface Props {
   /** The pair to analyze, or `null` to render nothing. Both sequences are
@@ -11,6 +12,25 @@ interface Props {
    * stretch picked from the sequence map's right-click menu. */
   pair: { forward: string; reverse?: string } | null;
 }
+
+/** Strider-style figures, falling back to the older diagrams. */
+function hairpin(sequence: string, structure: string) {
+  return <StriderStructure sequence={sequence} structure={structure} title="Hairpin" fallback={<HairpinSvg sequence={sequence} structure={structure} />} />;
+}
+/** A self-dimer (`seq2` omitted) or the F × R heterodimer. */
+function dimer(seq1: string, structure: string, seq2 = seq1) {
+  return (
+    <StriderStructure
+      sequence={seq1 + seq2}
+      nick={seq1.length}
+      strandNames={seq2 === seq1 ? undefined : HETERODIMER_NAMES}
+      structure={structure}
+      title={seq2 === seq1 ? 'Self-dimer' : 'Heterodimer'}
+      fallback={<DimerSvg seq1={seq1} seq2={seq2} structure={structure} />}
+    />
+  );
+}
+const HETERODIMER_NAMES = ['F', 'R'];
 
 function fmtDg(v: number): string {
   return `${v.toFixed(2)} kcal/mol`;
@@ -70,8 +90,8 @@ function CategorySection({ title, children }: { title: string; children: ReactNo
 /** Up to 5 subopt candidates each for the forward primer's hairpin and
  * self-dimer, the reverse primer's hairpin and self-dimer, and the pair's
  * heterodimer (forward × reverse), all from Strider's own bulge-allowing
- * MFE model. The diagrams are this app's own SVG renderings (`HairpinSvg`/
- * `DimerSvg`), not Oligool's ASCII dimer view. Renders bare (no Modal/
+ * MFE model, drawn in Strider's figure style (`StriderStructure`; the older
+ * `HairpinSvg`/`DimerSvg` diagrams are only the fallback). Renders bare (no Modal/
  * card wrapper) so it can sit inside either `PrimerStructureModal.tsx`
  * (a standalone popup for a primer-segment click) or
  * `AmpliconDetailModal.tsx` (embedded below that amplicon's sequence map). */
@@ -139,10 +159,10 @@ export default function PrimerStructurePanel({ pair }: Props) {
               {pair.reverse ? 'Forward' : 'Selection'}: {pair.forward} <span className="text-ink-faint">({pair.forward.length} bp)</span>
             </p>
             <CategorySection title="Hairpin (Strider MFE)">
-              <CandidateStrip candidates={shownFwd.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.forward} structure={s} />} />
+              <CandidateStrip candidates={shownFwd.hairpin.with_bulge.candidates} diagram={(s) => hairpin(pair.forward, s)} />
             </CategorySection>
             <CategorySection title="Self-dimer (Strider MFE)">
-              <CandidateStrip candidates={shownFwd.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.forward} structure={s} />} wide />
+              <CandidateStrip candidates={shownFwd.homodimer.with_bulge.candidates} diagram={(s) => dimer(pair.forward, s)} wide />
             </CategorySection>
           </div>
           {pair.reverse && shownRev && (
@@ -152,14 +172,14 @@ export default function PrimerStructurePanel({ pair }: Props) {
                   Reverse: {pair.reverse} <span className="text-ink-faint">({pair.reverse.length} bp)</span>
                 </p>
                 <CategorySection title="Hairpin (Strider MFE)">
-                  <CandidateStrip candidates={shownRev.hairpin.with_bulge.candidates} diagram={(s) => <HairpinSvg sequence={pair.reverse!} structure={s} />} />
+                  <CandidateStrip candidates={shownRev.hairpin.with_bulge.candidates} diagram={(s) => hairpin(pair.reverse!, s)} />
                 </CategorySection>
                 <CategorySection title="Self-dimer (Strider MFE)">
-                  <CandidateStrip candidates={shownRev.homodimer.with_bulge.candidates} diagram={(s) => <DimerSvg seq1={pair.reverse!} seq2={pair.reverse!} structure={s} />} wide />
+                  <CandidateStrip candidates={shownRev.homodimer.with_bulge.candidates} diagram={(s) => dimer(pair.reverse!, s)} wide />
                 </CategorySection>
               </div>
               <CategorySection title="Heterodimer - forward × reverse (Strider MFE)">
-                <CandidateStrip candidates={shownFwd.heterodimer?.with_bulge.candidates ?? []} diagram={(s) => <DimerSvg seq1={pair.forward} seq2={pair.reverse!} structure={s} />} wide />
+                <CandidateStrip candidates={shownFwd.heterodimer?.with_bulge.candidates ?? []} diagram={(s) => dimer(pair.forward, s, pair.reverse!)} wide />
               </CategorySection>
             </>
           )}

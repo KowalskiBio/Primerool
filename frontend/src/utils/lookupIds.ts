@@ -26,31 +26,28 @@ async function fetchJson(url: string): Promise<any> {
   return resp.json();
 }
 
-/** NCBI: accession -> Gene uid (+ linked nuccore -> assembly GCF). */
+/** NCBI: accession -> Gene uid (+ gene's chr accession -> assembly GCF). */
 async function resolveNcbi(transcriptId: string, ncbiApiKey: string): Promise<SequenceIds> {
   const keyParam = ncbiApiKey ? `&api_key=${encodeURIComponent(ncbiApiKey)}` : '';
   const base = transcriptId.trim();
 
   // 1. Gene uid from the transcript accession ([accn] works for
   //    NM_/XM_/NR_/XR_ with or without the version suffix).
+  // 2. Assembly: the gene's own esummary carries the chromosome it sits on
+  //    (`genomicinfo.chraccver`, e.g. NC_000015.10); only a chromosome
+  //    accession resolves forward to a reference assembly GCF - the
+  //    transcript's own accession never does (that was the earlier bug:
+  //    chaining nuccore off NM_/XM_ yielded nothing). Any step failing
+  //    just yields no assembly.
   let geneId: string | null = null;
+  let assembly: string | null = null;
   try {
     const esearch = await fetchJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=gene&term=${encodeURIComponent(base)}%5Baccn%5D&retmode=json${keyParam}`);
     geneId = esearch?.esearchresult?.idlist?.[0] ?? null;
-  } catch {
-    geneId = null;
-  }
-
-  // 2. Assembly: accession -> nuccore uid -> (drop version) -> assembly
-  //    uid -> GCF accession. Any step failing just yields no assembly.
-  let assembly: string | null = null;
-  try {
-    const nSearch = await fetchJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=nuccore&term=${encodeURIComponent(base)}%5Baccn%5D&retmode=json${keyParam}`);
-    const uid: string | undefined = nSearch?.esearchresult?.idlist?.[0];
-    if (uid) {
-      const nSumm = await fetchJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=nuccore&id=${uid}&retmode=json${keyParam}`);
-      const accver: string | undefined = nSumm?.result?.[uid]?.accessionversion;
-      const chrAcc = accver?.split('.')[0];
+    if (geneId) {
+      const gSumm = await fetchJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=gene&id=${geneId}&retmode=json${keyParam}`);
+      const chrAccWithVersion: string | undefined = gSumm?.result?.[geneId]?.genomicinfo?.[0]?.chraccver;
+      const chrAcc = chrAccWithVersion?.split('.')[0];
       if (chrAcc) {
         const aSearch = await fetchJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=assembly&term=${encodeURIComponent(chrAcc)}&retmode=json&retmax=5${keyParam}`);
         const uidA: string | undefined = aSearch?.esearchresult?.idlist?.[0];
@@ -61,6 +58,7 @@ async function resolveNcbi(transcriptId: string, ncbiApiKey: string): Promise<Se
       }
     }
   } catch {
+    geneId = geneId ?? null;
     assembly = null;
   }
 

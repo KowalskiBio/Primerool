@@ -10,6 +10,7 @@ import { ALL_PICK_KINDS, alleleMutantProbe, armsMutantTwin, LIMITS, type PickKin
 import { useMapPickMenu } from './useMapPickMenu';
 import { useMapDragSelect } from './useMapDragSelect';
 import { useSessionState } from '../session/sessionContext';
+import { findBestAlignment, type AlignmentHit } from '../utils/localAlign';
 
 interface Segment {
   text: string;
@@ -547,6 +548,27 @@ function computeSearchMatches(data: SequenceData, query: string, includeRevComp:
  * match can land inside any kind of cell: flank, CDS, an already-selected
  * primer, even a single dragged character). Placeholder cells (truncated
  * introns) are left alone - nothing to show inside a collapsed intron. */
+/** Renders an imperfect alignment's traceback rows in the classic
+ * BLAST-style three-line layout - user's query on top, a match midline
+ * (| identical, . aligned-but-different, space for gaps), the map's own
+ * sequence below. Chunked at 80 columns so a long amplicon wraps instead of
+ * forcing a giant horizontal strip. */
+function formatAlignmentRows(hit: AlignmentHit, width = 80): string {
+  const mid: string[] = [];
+  for (let i = 0; i < hit.alignedQuery.length; i++) {
+    const qb = hit.alignedQuery[i];
+    const sb = hit.alignedSubject[i];
+    mid.push(qb === '-' || sb === '-' ? ' ' : qb === sb ? '|' : '.');
+  }
+  const midStr = mid.join('');
+  const out: string[] = [];
+  for (let off = 0; off < hit.alignedQuery.length; off += width) {
+    out.push(`Query    ${hit.alignedQuery.slice(off, off + width)}`, `         ${midStr.slice(off, off + width)}`, `Sequence ${hit.alignedSubject.slice(off, off + width)}`);
+    if (off + width < hit.alignedQuery.length) out.push('');
+  }
+  return out.join('\n');
+}
+
 function applySearchHighlight(cells: Cell[], matches: SearchMatch[], activeIdx: number): Cell[] {
   if (matches.length === 0) return cells;
   const out: Cell[] = [];
@@ -743,6 +765,12 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   const [searchQuery, setSearchQuery] = useSessionState(persistKey ? `${persistKey}.searchQuery` : null, '');
   const [includeRevComp, setIncludeRevComp] = useSessionState(persistKey ? `${persistKey}.includeRevComp` : null, true);
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  // "Align in sequence" - best Smith-Waterman binding site of an arbitrary
+  // pasted primer/amplicon (mismatches/indels tolerated), reusing the same
+  // highlight/scroll pipeline as a literal hit. Cleared alongside the
+  // literal query on sequence change.
+  const [alignQuery, setAlignQuery] = useSessionState(persistKey ? `${persistKey}.alignQuery` : null, '');
+  const [alignHit, setAlignHit] = useState<AlignmentHit | null>(null);
 
   // A newly loaded sequence invalidates any in-progress search, and a
   // changed query/checkbox should always land back on its first hit rather
@@ -756,12 +784,30 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   if (data !== prevData) {
     setPrevData(data);
     if (searchQuery !== '') setSearchQuery('');
+    if (alignQuery !== '') {
+      setAlignQuery('');
+      setAlignHit(null);
+    }
   } else if (searchKey !== prevSearchKey) {
     setPrevSearchKey(searchKey);
     if (activeMatchIndex !== 0) setActiveMatchIndex(0);
   }
 
   const literalMatches = useMemo(() => computeSearchMatches(data, searchQuery, includeRevComp), [data, searchQuery, includeRevComp]);
+
+  // Debounced like the typing: the DP is cheap but pointless to rerun per
+  // keystroke of a half-pasted sequence. Below ~10 bases a local alignment
+  // is noise (any 6-mer "binds" somewhere), so the search stays off - same
+  // threshold the button is disabled at.
+  useEffect(() => {
+    const q = cleanDNA(alignQuery);
+    if (q.length < 10) {
+      setAlignHit(null);
+      return;
+    }
+    const timer = setTimeout(() => setAlignHit(findBestAlignment(data, q)), 300);
+    return () => clearTimeout(timer);
+  }, [data, alignQuery]);
 
   // --- rsID ("rs334") search ----------------------------------------------
   // A query shaped like a bare rsID can never be a meaningful literal
@@ -925,9 +971,13 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   }, [segments, interactive]);
 
   const searchMatches = useMemo<SearchMatch[]>(() => {
+    // Precedence: an explicit alignment result outranks the rsID hit, which
+    // outranks literal matches - each is a single located span meant to take
+    // over the map's focus.
+    if (alignHit) return [{ start: alignHit.start, end: alignHit.end, region: alignHit.region, idx: 0 }];
     if (rsLocalPos === null) return literalMatches;
     return [{ start: rsLocalPos, end: rsLocalPos + 1, region: 'gene', idx: 0 }];
-  }, [rsLocalPos, literalMatches]);
+  }, [alignHit, rsLocalPos, literalMatches]);
   const activeSearchIdx = searchMatches.length > 0 ? Math.min(activeMatchIndex, searchMatches.length - 1) : -1;
 
   // Scrolling the active match into view is a real effect: it reaches out
@@ -1081,7 +1131,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         </p>
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-2 p-3">
+      <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-md border border-line bg-surface-2 p-3">
         <label htmlFor="sequence-search-input" className="text-sm font-medium text-ink-muted">
           Find in sequence:
         </label>
@@ -1138,15 +1188,48 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
               ? 'No matches found'
               : `${activeSearchIdx + 1} of ${searchMatches.length} match${searchMatches.length === 1 ? '' : 'es'}`}
         </span>
+        <span aria-hidden="true" className="mx-1 hidden h-5 w-px bg-line-strong sm:inline-block" />
+        <label htmlFor="sequence-align-input" className="text-sm font-medium text-ink-muted">
+          Align in sequence:
+        </label>
+        <input
+          id="sequence-align-input"
+          type="text"
+          value={alignQuery}
+          onChange={(e) => setAlignQuery(e.target.value)}
+          placeholder="Paste a primer/amplicon - best binding site even with mismatches…"
+          className="h-8 min-w-[220px] flex-1 rounded-md border border-line-strong bg-surface px-3 font-mono text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+        />
+        <button
+          type="button"
+          disabled={cleanDNA(alignQuery).length < 10}
+          onClick={() => setAlignHit(findBestAlignment(data, cleanDNA(alignQuery)))}
+          title="Locate the best local alignment (Smith-Waterman, both strands) of this sequence on the map - needs at least 10 bases"
+          className="h-7 rounded-md border border-transparent bg-accent-solid px-2.5 text-xs font-medium text-white hover:bg-accent-solid-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-50"
+        >
+          Find alignment
+        </button>
+        {alignQuery !== '' && (
+          <button
+            type="button"
+            onClick={() => {
+              setAlignQuery('');
+              setAlignHit(null);
+            }}
+            className="h-7 rounded-md px-2.5 text-xs font-medium text-ink-faint hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* rsID-search result summary - a small panel under the search bar
        * (see the `rsQuery` machinery above). Kept outside the search bar's
        * flex row so a long consequence/clinical-significance list can wrap
        * without stretching the input row. */}
-      {rsQuery && rsLookupCurrent?.status === 'loading' && <p className="-mt-2 mb-3 text-xs text-ink-muted">Looking up {rsQuery}…</p>}
-      {rsQuery && rsLookupCurrent?.status === 'error' && <p className="-mt-2 mb-3 text-xs text-ink-muted">{rsLookupCurrent.message}</p>}
-      {rsVariant && rsFound && (
+      {rsQuery && rsLookupCurrent?.status === 'loading' && !alignHit && <p className="-mt-2 mb-3 text-xs text-ink-muted">Looking up {rsQuery}…</p>}
+      {rsQuery && rsLookupCurrent?.status === 'error' && !alignHit && <p className="-mt-2 mb-3 text-xs text-ink-muted">{rsLookupCurrent.message}</p>}
+      {rsVariant && rsFound && !alignHit && (
         <div className="-mt-2 mb-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="font-mono font-semibold text-ink">{rsVariant.id}</span>
@@ -1175,6 +1258,39 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
                     ? `Outside ${data.transcript_name}'s span (${data.chrom}:${data.gene_start_genomic.toLocaleString()}-${data.gene_end_genomic.toLocaleString()}) - it may still be in the gene, under another transcript.`
                     : 'Highlighted in the sequence below.'}
           </p>
+        </div>
+      )}
+
+      {/* "Align in sequence" result - position/strand/identity on one line,
+       * the pairwise rows themselves when the match is imperfect. Same slot
+       * the rsID summary above uses, and it wins over it (only one summary
+       * shows at a time). */}
+      {alignHit && (
+        <div className="-mt-2 mb-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <span className="font-semibold text-ink">
+              Best binding site:{' '}
+              <span className="font-mono">
+                {alignHit.region === 'up' ? 'upstream flank' : alignHit.region === 'down' ? 'downstream flank' : 'gene'} {alignHit.start + 1}–{alignHit.end}
+              </span>
+            </span>
+            <span className="font-mono">strand {alignHit.strand === '+' ? '+' : '−'}</span>
+            <span>
+              identity{' '}
+              <span className="font-mono">
+                {alignHit.matches}/{alignHit.alignedColumns} ({alignHit.identityPct.toFixed(1)}%)
+              </span>
+            </span>
+            <span>
+              score <span className="font-mono">{alignHit.score}</span>
+            </span>
+          </div>
+          {alignHit.strand === '-' && (
+            <p className="mt-1 text-ink-faint">It matched on the reverse complement - the pasted sequence binds the antisense strand at this spot.</p>
+          )}
+          {alignHit.identityPct < 100 && (
+            <pre className="mt-1.5 overflow-x-auto font-mono text-[11px] leading-snug text-ink">{formatAlignmentRows(alignHit)}</pre>
+          )}
         </div>
       )}
 

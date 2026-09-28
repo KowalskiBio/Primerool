@@ -121,7 +121,7 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
 
   const pickMenu = useMapPickMenu({ data, selections, onSelect, pickKinds: EXON_MAP_PICKS });
   const containerRef = useRef<HTMLDivElement>(null);
-  const dragSelect = useMapDragSelect({ containerRef, onPlainContextMenu: pickMenu.onContextMenu });
+  const dragSelect = useMapDragSelect({ containerRef });
 
   const { handlers: hoverHandlers, tooltip } = useBaseHover(({ pos, base }) => {
     const transcriptLine = `transcript position ${(pos + 1).toLocaleString('en-US')}`;
@@ -146,7 +146,7 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
         className="sequence-viewer max-h-[520px] overflow-y-auto rounded-lg border border-line bg-base p-4 text-sm"
         {...hoverHandlers}
         onMouseDown={dragSelect.onMouseDown}
-        onContextMenu={dragSelect.onContextMenu}
+        onContextMenu={pickMenu.onContextMenu}
       >
         {tooltip}
         {dragSelect.overlay}

@@ -5,7 +5,7 @@ import { mapPrimerToGenomic, selectionStrand } from '../utils/regionMapping';
 import { cleanDNA, reverseComplement } from '../utils/dna';
 import { lookupVariant, type VariantHit } from '../api/variants';
 import { localGenePos } from '../utils/variantMapping';
-import { describeGenePosition, useBaseHover } from './BaseHoverTooltip';
+import { baseAtPoint, describeGenePosition, useBaseHover } from './BaseHoverTooltip';
 import { ALL_PICK_KINDS, armsMutantTwin, type PickKind } from '../utils/mapPickMenu';
 import { useMapPickMenu } from './useMapPickMenu';
 import { useMapDragSelect } from './useMapDragSelect';
@@ -17,13 +17,9 @@ interface Segment {
   /** Present iff these chars belong to (or buffer) an interactively
    * editable primer/probe selection - see `INTERACTIVE_KEYS` below. */
   key?: keyof Selections;
-  /** True for the padding chars carved out on either side of an editable
-   * primer/probe (see `DRAG_BUFFER`) - rendered with the surrounding
-   * region's normal styling until a drag actually grows into them. */
-  isBuffer?: boolean;
   /** What this segment would render as if it weren't highlighted - only
-   * set on editable/buffer segments, used to restore a char's look when a
-   * live drag shrinks the primer away from it. */
+   * set on editable segments, used to restore a char's look when a live
+   * drag moves the primer away from it. */
   fallbackClassName?: string;
   /** Local index (into the rawSeq/gene_seq this segment was sliced from) of
    * its first character - for editable segments this is always in the same
@@ -37,14 +33,6 @@ interface Segment {
   region: 'up' | 'gene' | 'down';
 }
 
-/** Extra characters carved out on each side of an editable primer/probe's
- * highlighted span, sourced from the same chunk of sequence, so a drag can
- * grow the primer without needing to re-render neighboring segments. This
- * is also what bounds how far a single drag gesture can widen/move a
- * primer - dragging further requires picking a new candidate from the
- * design panels instead. */
-const DRAG_BUFFER = 15;
-
 /** Splits `rawSeq` into ordered, non-overlapping segments given a set of
  * (possibly-overlapping-but-pre-sorted) highlight intervals, each in
  * `[0, rawSeq.length)` local coordinates. Shared by both the flank and
@@ -56,12 +44,7 @@ const DRAG_BUFFER = 15;
  * needed because `geneBlockSegments` calls this once per exon/CDS/UTR/
  * intron chunk of `gene_seq`, each starting at a different absolute gene
  * position, but positions must come out in that absolute space to line up
- * with `Selection.start`/`end`.
- *
- * When an interval carries a `key` (i.e. its selection is interactively
- * editable), up to `DRAG_BUFFER` extra characters immediately before/after
- * it are carved out as separate "buffer" segments tagged with the same
- * `key` - see `DRAG_BUFFER`'s doc comment. */
+ * with `Selection.start`/`end`. */
 function sliceWithIntervals(rawSeq: string, intervals: { start: number; end: number; className: string; id?: string; key?: keyof Selections }[], baseClassName: string, baseOffset = 0): Omit<Segment, 'region'>[] {
   if (intervals.length === 0) return [{ text: rawSeq, className: baseClassName, startPos: baseOffset }];
 
@@ -73,24 +56,10 @@ function sliceWithIntervals(rawSeq: string, intervals: { start: number; end: num
     const e = Math.min(rawSeq.length, iv.end);
     if (e <= s) continue;
 
-    if (s > cur) {
-      const bufStart = iv.key ? Math.max(cur, s - DRAG_BUFFER) : s;
-      if (bufStart > cur) segments.push({ text: rawSeq.substring(cur, bufStart), className: baseClassName, startPos: baseOffset + cur });
-      if (iv.key && bufStart < s) {
-        segments.push({ text: rawSeq.substring(bufStart, s), className: baseClassName, key: iv.key, isBuffer: true, fallbackClassName: baseClassName, startPos: baseOffset + bufStart });
-      }
-    }
+    if (s > cur) segments.push({ text: rawSeq.substring(cur, s), className: baseClassName, startPos: baseOffset + cur });
 
     segments.push({ text: rawSeq.substring(s, e), className: iv.className, id: iv.id, key: iv.key, fallbackClassName: iv.key ? baseClassName : undefined, startPos: baseOffset + s });
     cur = e;
-
-    if (iv.key) {
-      const bufEnd = Math.min(rawSeq.length, cur + DRAG_BUFFER);
-      if (bufEnd > cur) {
-        segments.push({ text: rawSeq.substring(cur, bufEnd), className: baseClassName, key: iv.key, isBuffer: true, fallbackClassName: baseClassName, startPos: baseOffset + cur });
-        cur = bufEnd;
-      }
-    }
   }
   if (cur < rawSeq.length) segments.push({ text: rawSeq.substring(cur), className: baseClassName, startPos: baseOffset + cur });
   return segments;
@@ -273,16 +242,17 @@ function regionRawSeq(data: SequenceData, region: Selection['region']): string {
 interface DragSession {
   selKey: keyof Selections;
   type: 'move' | 'left' | 'right';
-  startX: number;
-  charWidth: number;
+  /** Local position of the base the drag grabbed - the drag distance is
+   * the base now under the pointer minus this one, so it follows the
+   * pointer across row wraps, not just along one row. */
+  anchorPos: number;
   initStart: number;
   initEnd: number;
   region: Selection['region'];
 }
 
 /** Applies `deltaChars` to a drag session's original bounds, clamping to
- * the primer/probe's length bounds, the `DRAG_BUFFER` window rendered
- * around the original span, and the sequence's own bounds. Used for both
+ * the primer/probe's length bounds and the sequence's own bounds. Used for both
  * the live preview (every mousemove) and the final commit (mouseup) so
  * they always agree on the same result. */
 function computeDraggedInterval(session: DragSession, deltaChars: number, seqLen: number): { start: number; end: number } {
@@ -308,17 +278,13 @@ function computeDraggedInterval(session: DragSession, deltaChars: number, seqLen
     else if (session.type === 'right') end = start + maxLen;
   }
 
-  const lowBound = Math.max(0, session.initStart - DRAG_BUFFER);
-  const highBound = Math.min(seqLen, session.initEnd + DRAG_BUFFER);
-  if (start < lowBound) {
-    const shift = lowBound - start;
-    start += shift;
-    if (session.type === 'move') end += shift;
+  if (start < 0) {
+    if (session.type === 'move') end -= start;
+    start = 0;
   }
-  if (end > highBound) {
-    const shift = end - highBound;
-    end -= shift;
-    if (session.type === 'move') start -= shift;
+  if (end > seqLen) {
+    if (session.type === 'move') start -= end - seqLen;
+    end = seqLen;
   }
 
   start = Math.max(0, start);
@@ -414,7 +380,7 @@ function buildCells(
 
     const isDraggingThisKey = interactive && dragSession?.selKey === s.key;
 
-    if (interactive && s.key && editableKeys.has(s.key) && !s.isBuffer) {
+    if (interactive && s.key && editableKeys.has(s.key)) {
       const sel = selections[s.key]!;
       const live = isDraggingThisKey ? computeDraggedInterval(dragSession!, deltaChars, regionRawSeq(data, sel.region).length) : { start: sel.start, end: sel.end };
       const chars = Array.from(s.text);
@@ -438,17 +404,18 @@ function buildCells(
       continue;
     }
 
-    if (isDraggingThisKey && s.isBuffer) {
-      const sel = selections[s.key!]!;
-      const live = computeDraggedInterval(dragSession!, deltaChars, regionRawSeq(data, sel.region).length);
-      const chars = Array.from(s.text);
-      chars.forEach((ch, ci) => {
-        const pos = s.startPos + ci;
-        const within = pos >= live.start && pos < live.end;
-        const className = within ? colorClassName(s.key!) : (s.fallbackClassName ?? s.className);
-        cells.push({ text: ch, className, startPos: pos, region: s.region });
-      });
-      continue;
+    // Any other stretch of the dragged selection's region the live span has
+    // moved onto: split out the covered part and paint it as the primer.
+    if (interactive && dragSession && s.region === dragSession.region && !s.key) {
+      const live = computeDraggedInterval(dragSession, deltaChars, regionRawSeq(data, dragSession.region).length);
+      const a = Math.max(live.start, s.startPos) - s.startPos;
+      const b = Math.min(live.end, s.startPos + s.text.length) - s.startPos;
+      if (b > a) {
+        if (a > 0) cells.push({ text: s.text.slice(0, a), className: s.className, id: s.id, startPos: s.startPos, region: s.region });
+        cells.push({ text: s.text.slice(a, b), className: colorClassName(dragSession.selKey), id: a === 0 ? s.id : undefined, startPos: s.startPos + a, region: s.region });
+        if (b < s.text.length) cells.push({ text: s.text.slice(b), className: s.className, startPos: s.startPos + b, region: s.region });
+        continue;
+      }
     }
 
     cells.push({ text: s.text, className: s.className, id: s.id, startPos: s.startPos, region: s.region });
@@ -906,7 +873,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   const editableKeys = useMemo(() => {
     if (!interactive) return new Set<keyof Selections>();
     const keys = new Set<keyof Selections>();
-    for (const s of segments) if (s.key && !s.isBuffer) keys.add(s.key);
+    for (const s of segments) if (s.key) keys.add(s.key);
     return keys;
   }, [segments, interactive]);
 
@@ -968,10 +935,27 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
 
   useEffect(() => {
     if (!dragSession) return;
-    function onMove(e: MouseEvent) {
-      const next = Math.round((e.clientX - dragSession!.startX) / dragSession!.charWidth);
+    let lastX = 0;
+    let lastY = 0;
+    // The base under the pointer, in the dragged selection's own region -
+    // off the sequence (a gutter, a gap, another region) keeps the last
+    // position rather than snapping back.
+    function track() {
+      const hit = baseAtPoint(lastX, lastY);
+      if (!hit || hit.region !== dragSession!.region) return;
+      const next = hit.pos - dragSession!.anchorPos;
       deltaCharsRef.current = next;
       setDeltaChars(next);
+    }
+    function onMove(e: MouseEvent) {
+      lastX = e.clientX;
+      lastY = e.clientY;
+      track();
+    }
+    // Wheel-scrolling the map mid-drag moves the sequence under a still
+    // pointer - re-read it so a primer can be carried past the visible rows.
+    function onScroll() {
+      if (lastX || lastY) track();
     }
     function onUp() {
       commitDrag(dragSession!, deltaCharsRef.current);
@@ -981,22 +965,23 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     }
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('scroll', onScroll, true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragSession]);
 
   function startDrag(e: React.MouseEvent<HTMLSpanElement>, key: keyof Selections, type: 'move' | 'left' | 'right', sel: Selection) {
-    // Left button only - a right-press (or any other button) must fall
-    // through to the container, where it starts the right-drag selection
-    // below instead of moving the primer.
+    // Left button only - any other button must fall through to the
+    // container untouched: a right-click opens the pick menu instead of
+    // moving the primer.
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    const charWidth = e.currentTarget.getBoundingClientRect().width || 8;
-    setDragSession({ selKey: key, type, startX: e.clientX, charWidth, initStart: sel.start, initEnd: sel.end, region: sel.region });
+    setDragSession({ selKey: key, type, anchorPos: Number(e.currentTarget.dataset.pos), initStart: sel.start, initEnd: sel.end, region: sel.region });
     setDeltaChars(0);
   }
 
@@ -1015,7 +1000,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   // the old native `title` on the marker span (which stacked a second,
   // OS-styled tooltip on top of this one).
   const variantByRsid = useMemo(() => new Map(allVariantMarkers.map((m) => [m.rsid, m])), [allVariantMarkers]);
-  const dragSelect = useMapDragSelect({ containerRef, onPlainContextMenu: pickMenu.onContextMenu });
+  const dragSelect = useMapDragSelect({ containerRef });
   const { handlers: hoverHandlers, tooltip } = useBaseHover(({ region, pos, base, variantRsid }) => {
     const local = region === 'up' ? pos - data.upstream_len : region === 'down' ? data.gene_len + pos : pos;
     const m = variantRsid !== undefined ? variantByRsid.get(variantRsid) : undefined;
@@ -1148,7 +1133,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         className="sequence-viewer relative max-h-[520px] overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg border border-line bg-base p-4 text-sm"
         {...hoverHandlers}
         onMouseDown={dragSelect.onMouseDown}
-        onContextMenu={dragSelect.onContextMenu}
+        onContextMenu={pickMenu.onContextMenu}
       >
         {tooltip}
         {dragSelect.overlay}

@@ -6,6 +6,7 @@ import { getSequence } from '../api/sequence';
 import type { Transcript } from '../api/gene';
 import { ApiError } from '../api/client';
 import { parseMultiFasta } from '../utils/fasta';
+import AlignmentView from './AlignmentView';
 import { cleanDNA } from '../utils/dna';
 import ResultsTable from './ResultsTable';
 import Button from './ui/Button';
@@ -219,10 +220,12 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
 
       {alignment && (
         <>
-          <h4 className="mb-2 mt-4 text-sm font-semibold text-ink">Aligned FASTA</h4>
-          <pre className="sequence-viewer max-h-[300px] overflow-y-auto overflow-x-auto rounded-lg border border-line bg-base p-4 text-xs">
-            {alignment}
-          </pre>
+          <h4 className="mb-2 mt-4 text-sm font-semibold text-ink">Alignment</h4>
+          <AlignmentView alignment={alignment} />
+          <details className="mt-2">
+            <summary className="cursor-pointer text-xs font-medium text-ink-muted hover:text-ink">Aligned FASTA</summary>
+            <pre className="sequence-viewer mt-2 max-h-[300px] overflow-auto rounded-lg border border-line bg-base p-4 text-xs">{alignment}</pre>
+          </details>
 
           <div className="mt-4 rounded-md border border-line bg-surface-2 p-4">
             <h4 className="mb-3 text-sm font-semibold text-ink">Design Primers in Conserved Region</h4>

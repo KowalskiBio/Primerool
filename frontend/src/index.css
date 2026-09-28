@@ -60,6 +60,8 @@
   --seq-hit-ring: #b45309;
   --seq-hit-active-bg: #fdba74;
   --seq-hit-active-ring: #9a3412;
+  --aln-mismatch-ink: #b91c1c;
+  --aln-mismatch-bg: #fee2e2;
 
   --exon-label-line: #e4e4e7;
 }
@@ -104,6 +106,8 @@
   --seq-hit-ring: #f59e0b;
   --seq-hit-active-bg: rgba(251, 146, 60, 0.25);
   --seq-hit-active-ring: #fb923c;
+  --aln-mismatch-ink: #fca5a5;
+  --aln-mismatch-bg: rgba(248, 113, 113, 0.2);
 
   --exon-label-line: #26262b;
 }
@@ -203,6 +207,22 @@
   .seq-search-hit-active {
     box-shadow: 0 0 0 2px var(--seq-hit-active-ring);
     background-color: var(--seq-hit-active-bg);
+  }
+
+  /* Alignment view (`AlignmentView`): a base differing from its column's
+     majority, a gap, and the name/number/ruler/match-line furniture. */
+  .aln-mismatch {
+    color: var(--aln-mismatch-ink);
+    background-color: var(--aln-mismatch-bg);
+    font-weight: 700;
+  }
+
+  .aln-gap {
+    color: var(--seq-flank);
+  }
+
+  .aln-meta {
+    color: var(--ink-muted);
   }
 
   .seq-variant-hit {

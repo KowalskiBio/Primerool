@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import { alignSequences, designConserved, type ConservedPair, type ConservedCandidate } from '../api/align';
 import type { SequenceData } from '../api/sequence';
+import { getSequence } from '../api/sequence';
+import type { Transcript } from '../api/gene';
 import { ApiError } from '../api/client';
 import { parseMultiFasta } from '../utils/fasta';
 import { cleanDNA } from '../utils/dna';
@@ -23,13 +25,38 @@ import { fmt } from '../utils/format';
  * remaining budget covers. This ships a plain, functional raw-alignment
  * view instead - real MAFFT output, real conserved-region design against
  * it, just without Oligool's anchor-grid visualization layer. */
-export default function AlignmentPanel({ loadedSequence }: { loadedSequence?: SequenceData | null }) {
+interface Props {
+  loadedSequence?: SequenceData | null;
+  /** All transcripts of the loaded sequence's gene (from the step-2 search)
+   * - enables "compare transcript variants…". Absent on custom pastes, as is
+   * `loadedSequence`. */
+  geneTranscripts?: Transcript[];
+  /** Context needed to fetch a transcript's sequence (`/get_sequence`) for
+   * variant comparison - gene name, species/source, and the view options the
+   * loaded sequence was fetched with, so variants align in the same shape. */
+  geneContext?: {
+    geneName: string;
+    species: string;
+    apiSource: 'ensembl' | 'ncbi';
+    includeIntrons: boolean;
+    includeUtr: boolean;
+    upstreamBp: number;
+    downstreamBp: number;
+  };
+}
+
+export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneContext }: Props) {
   const [fastaText, setFastaText] = useSessionState('align.fastaText', '');
   // When set, the currently loaded sequence (flanks + gene) is prepended to
   // the alignment input as '>loaded query' - e.g. to compare the NCBI-sourced
   // sequence the rest of the app is working against with Ensembl's take on
   // the same transcript pasted below.
   const [includeQuery, setIncludeQuery] = useSessionState('align.includeQuery', false);
+  // When set, every OTHER transcript variant of the same gene is fetched via
+  // `/get_sequence` (same view options as the loaded sequence) and added to
+  // the alignment as its own record, so variants can be compared straight
+  // from the search result - no manual per-transcript FASTA extraction.
+  const [includeVariants, setIncludeVariants] = useSessionState('align.includeVariants', false);
   const [alignment, setAlignment] = useSessionState<string | null>('align.alignment', null);
   const [aligning, setAligning] = useState(false);
   const [alignError, setAlignError] = useState<string | null>(null);
@@ -51,19 +78,53 @@ export default function AlignmentPanel({ loadedSequence }: { loadedSequence?: Se
     setCandidates(null);
     setPairs(null);
     const records = parseMultiFasta(fastaText);
+    const extraRecords: { id: string; seq: string }[] = [];
     if (includeQuery && loadedSequence) {
-      const querySeq = cleanDNA(
-        (loadedSequence.upstream_seq || '') + (loadedSequence.gene_seq || '') + (loadedSequence.downstream_seq || ''),
-      );
-      if (querySeq) records.unshift({ id: 'loaded query', seq: querySeq });
+      const querySeq = cleanDNA((loadedSequence.upstream_seq || '') + (loadedSequence.gene_seq || '') + (loadedSequence.downstream_seq || ''));
+      if (querySeq) extraRecords.push({ id: 'loaded query', seq: querySeq });
     }
-    if (records.length < 2) {
+
+    const variants =
+      includeVariants && geneTranscripts && geneContext && loadedSequence
+        ? geneTranscripts.filter((t) => t.id !== loadedSequence.transcript_id)
+        : [];
+    if (variants.length > 0) {
+      setAligning(true);
+      try {
+        const fetched = await Promise.all(
+          variants.map((t) =>
+            getSequence({
+              gene_name: geneContext!.geneName,
+              transcript_id: t.id,
+              upstream_bp: geneContext!.upstreamBp,
+              downstream_bp: geneContext!.downstreamBp,
+              include_introns: geneContext!.includeIntrons,
+              include_utr: geneContext!.includeUtr,
+              species: geneContext!.species,
+              api_source: geneContext!.apiSource,
+            }),
+          ),
+        );
+        for (const [i, data] of fetched.entries()) {
+          const seq = cleanDNA((data.upstream_seq || '') + (data.gene_seq || '') + (data.downstream_seq || ''));
+          if (seq) extraRecords.push({ id: variants[i].name, seq });
+        }
+      } catch (e) {
+        setAligning(false);
+        setAlignError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
+        return;
+      }
+      setAligning(false);
+    }
+
+    const all = [...extraRecords, ...records];
+    if (all.length < 2) {
       setAlignError('Paste at least two FASTA sequences to align.');
       return;
     }
     setAligning(true);
     try {
-      const res = await alignSequences(records);
+      const res = await alignSequences(all);
       setAlignment(res.alignment);
       // Default the conserved-region range to the full alignment length.
       const firstSeqLen = res.alignment
@@ -125,16 +186,29 @@ export default function AlignmentPanel({ loadedSequence }: { loadedSequence?: Se
       />
 
       {loadedSequence && (
-        <Checkbox
-          className="mb-3"
-          label={
-            <span className="text-sm">
-              Include the loaded sequence as the first entry (<span className="font-mono">&gt;loaded query</span>)
-            </span>
-          }
-          checked={includeQuery}
-          onChange={(e) => setIncludeQuery(e.target.checked)}
-        />
+        <div className="mb-3 flex flex-col gap-1.5">
+          <Checkbox
+            label={
+              <span className="text-sm">
+                Include the loaded sequence as the first entry (<span className="font-mono">&gt;loaded query</span>)
+              </span>
+            }
+            checked={includeQuery}
+            onChange={(e) => setIncludeQuery(e.target.checked)}
+          />
+          {geneTranscripts && geneTranscripts.length > 1 && (
+            <Checkbox
+              label={
+                <span className="text-sm">
+                  Also include the {geneTranscripts.length - 1} other transcript variant{geneTranscripts.length - 1 === 1 ? '' : 's'} of{' '}
+                  <span className="font-medium">{geneContext?.geneName ?? 'this gene'}</span> (each fetched with the same view options)
+                </span>
+              }
+              checked={includeVariants}
+              onChange={(e) => setIncludeVariants(e.target.checked)}
+            />
+          )}
+        </div>
       )}
 
       <Button variant="primary" disabled={aligning} onClick={() => void runAlign()}>

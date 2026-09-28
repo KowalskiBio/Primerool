@@ -11,6 +11,8 @@ import { useMapPickMenu } from './useMapPickMenu';
 import { useMapDragSelect } from './useMapDragSelect';
 import { useSessionState } from '../session/sessionContext';
 import { findBestAlignment, type AlignmentHit } from '../utils/localAlign';
+import { resolveSequenceIds, type SequenceIds } from '../utils/lookupIds';
+import { getNcbiApiKey } from '../api/ncbiApiKey';
 
 interface Segment {
   text: string;
@@ -745,6 +747,25 @@ interface Props {
 
 export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, pickKinds = ALL_PICK_KINDS, variantMarkers = [], species, apiSource, selectedSpecies, persistKey }: Props) {
   const interactive = Boolean(onSelect);
+
+  // External-ID header links (GenBank/Gene/transcript/assembly) - resolved
+  // from the provider's REST API, client-side; see utils/lookupIds.ts.
+  const isCustomSequence = data.transcript_id === 'custom';
+  const [seqIds, setSeqIds] = useState<SequenceIds | null>(null);
+  const idsKey = `${apiSource ?? ''}:${data.transcript_id}`;
+  useEffect(() => {
+    if (isCustomSequence || !apiSource || !data.transcript_id) {
+      setSeqIds(null);
+      return;
+    }
+    let cancelled = false;
+    resolveSequenceIds(apiSource as 'ensembl' | 'ncbi', data.transcript_id, getNcbiApiKey()).then((ids) => {
+      if (!cancelled) setSeqIds(ids);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [idsKey, isCustomSequence]);
   const [dragSession, setDragSession] = useState<DragSession | null>(null);
   const [deltaChars, setDeltaChars] = useState(0);
   // Mirrors `deltaChars`, kept in sync synchronously by `onMove` - read at
@@ -1172,7 +1193,61 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     <div>
       <div className="mb-4 text-sm text-ink-muted">
         <p>
-          <strong className="font-medium text-ink">Transcript:</strong> {data.transcript_name} ({data.transcript_id})
+          <strong className="font-medium text-ink">Transcript:</strong> {data.transcript_name} (
+          {!isCustomSequence && /^N[MRX]_/.test(data.transcript_id) ? (
+            <a
+              href={`https://www.ncbi.nlm.nih.gov/nuccore/${encodeURIComponent(data.transcript_id)}`}
+              target="_blank"
+              rel="noreferrer"
+              title="Open this transcript in GenBank"
+              className="text-accent hover:text-accent-hover hover:underline"
+            >
+              {data.transcript_id}
+            </a>
+          ) : (
+            data.transcript_id
+          )}
+          )
+          {!isCustomSequence && (
+            <>
+              {' · '}
+              <strong className="font-medium text-ink">Gene ID:</strong>{' '}
+              {apiSource === 'ncbi' && seqIds?.geneId ? (
+                <a
+                  href={`https://www.ncbi.nlm.nih.gov/gene/${encodeURIComponent(seqIds.geneId)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open this gene in NCBI Gene"
+                  className="text-accent hover:text-accent-hover hover:underline"
+                >
+                  {seqIds.geneId}
+                </a>
+              ) : seqIds?.geneId ? (
+                seqIds.geneId
+              ) : (
+                '…'
+              )}
+              {' · '}
+              <strong className="font-medium text-ink">Assembly:</strong>{' '}
+              {seqIds?.assembly ? (
+                apiSource === 'ncbi' || /GC[AF]_/.test(seqIds.assembly) ? (
+                  <a
+                    href={`https://www.ncbi.nlm.nih.gov/assembly/${encodeURIComponent(seqIds.assembly)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open this assembly in NCBI Assembly"
+                    className="text-accent hover:text-accent-hover hover:underline"
+                  >
+                    {seqIds.assembly}
+                  </a>
+                ) : (
+                  seqIds.assembly
+                )
+              ) : (
+                '…'
+              )}
+            </>
+          )}
         </p>
         <p>
           <strong className="font-medium text-ink">Mode:</strong> {modeText} · <strong className="font-medium text-ink">Length:</strong> {data.gene_len} bp

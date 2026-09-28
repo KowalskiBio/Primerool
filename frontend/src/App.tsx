@@ -72,6 +72,14 @@ function App() {
   const [sequenceData, setSequenceData] = useSessionState<SequenceData | null>('app.sequenceData', null);
   const [truncateIntrons, setTruncateIntrons] = useSessionState('app.truncateIntrons', true);
   const [storedSelections, setSelections] = useSessionState<Selections>('app.selections', EMPTY_SELECTIONS);
+  // Mirrors of TranscriptPanel's own fetch options (session keys
+  // `transcript.*`) - read-only here, handed to the alignment panel so
+  // "compare transcript variants" fetches each variant in the same view
+  // (introns/UTR/flanks) as the loaded sequence it should line up against.
+  const [includeIntrons] = useSessionState('transcript.includeIntrons', true);
+  const [includeUtr] = useSessionState('transcript.includeUTR', false);
+  const [upFlank] = useSessionState('transcript.upFlank', 200);
+  const [downFlank] = useSessionState('transcript.downFlank', 200);
   // A session saved before a slot existed lacks it - fill it with `null`.
   const selections = useMemo(() => ({ ...EMPTY_SELECTIONS, ...storedSelections }), [storedSelections]);
   // Primer sets are remembered per loaded sequence (gene, transcript and
@@ -375,7 +383,15 @@ function App() {
         )}
 
         <Section step={5} title="Multi-Sequence Alignment (Conserved-Region Primers)" defaultCollapsed persistKey="section.align">
-          <AlignmentPanel loadedSequence={sequenceData} />
+          <AlignmentPanel
+            loadedSequence={sequenceData}
+            geneTranscripts={!isCustomSequence && transcripts.length > 0 ? transcripts : undefined}
+            geneContext={
+              !isCustomSequence
+                ? { geneName, species, apiSource, includeIntrons, includeUtr, upstreamBp: upFlank, downstreamBp: downFlank }
+                : undefined
+            }
+          />
         </Section>
       </main>
 

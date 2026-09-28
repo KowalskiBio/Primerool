@@ -8,13 +8,12 @@ import InputPanel from './components/InputPanel';
 import TranscriptPanel from './components/TranscriptPanel';
 import SequenceFeaturesPanel from './components/SequenceFeaturesPanel';
 import AutoDesignPanel from './components/AutoDesignPanel';
-import ManualDesignPanel from './components/ManualDesignPanel';
 import AlignmentPanel from './components/AlignmentPanel';
-import IdtSettingsPanel, { type IdtCredentials } from './components/IdtSettingsPanel';
 import SessionRestoreDialog from './components/SessionRestoreDialog';
 import SettingsModal, { DEFAULT_THEME_PREFS, type ThemePrefs } from './components/SettingsModal';
 import Button from './components/ui/Button';
 import { useSession, useSessionState } from './session/sessionContext';
+import { EMPTY_IDT_CREDENTIALS, hasIdtCredentials, loadIdtCredentials, saveIdtCredentials, type IdtCredentials } from './utils/idtCredentials';
 import { applyAccentPreset, clearAccentOverrides, DEFAULT_WALLPAPER_OPACITY } from './theme';
 
 function SunIcon() {
@@ -92,33 +91,24 @@ function App() {
     if (setKey === loadedSetKey) savePrimerSets(setKey, selections);
   }, [setKey, loadedSetKey, selections]);
   const [primerMode, setPrimerMode] = useSessionState<'flanking' | 'junction' | 'general' | 'arms'>('app.primerMode', 'flanking');
-  const [ampTarget, setAmpTarget] = useSessionState('app.ampTarget', 150);
-  const [ampDev, setAmpDev] = useSessionState('app.ampDev', 50);
 
-  // IDT OligoAnalyzer credentials - five discrete `localStorage` keys,
-  // matching Oligool's own storage shape exactly (the rewrite plan's
-  // locked-in decision), assembled into one object only here at the point
-  // of use, never persisted server-side.
-  const [idtClientId, setIdtClientId] = useState(() => localStorage.getItem('idt_client_id') || '');
-  const [idtClientSecret, setIdtClientSecret] = useState(() => localStorage.getItem('idt_client_secret') || '');
-  const [idtUsername, setIdtUsername] = useState(() => localStorage.getItem('idt_username') || '');
-  const [idtPassword, setIdtPassword] = useState(() => localStorage.getItem('idt_password') || '');
-  const [idtRegion, setIdtRegion] = useState<'us' | 'eu'>(() => (localStorage.getItem('idt_region') === 'us' ? 'us' : 'eu'));
-
-  const idtCredentials: IdtCredentials = { clientId: idtClientId, clientSecret: idtClientSecret, username: idtUsername, password: idtPassword, region: idtRegion };
-  const hasIdtCredentials = Boolean(idtClientId && idtClientSecret && idtUsername && idtPassword);
+  // IDT OligoAnalyzer credentials - machine-local like the NCBI key, but
+  // encrypted at rest, so they load asynchronously after first render.
+  const [idtCredentials, setIdtCredentials] = useState<IdtCredentials>(EMPTY_IDT_CREDENTIALS);
+  useEffect(() => {
+    let cancelled = false;
+    loadIdtCredentials().then((c) => {
+      if (!cancelled) setIdtCredentials(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const idtReady = hasIdtCredentials(idtCredentials);
 
   function handleIdtCredentialsChange(next: IdtCredentials) {
-    setIdtClientId(next.clientId);
-    localStorage.setItem('idt_client_id', next.clientId);
-    setIdtClientSecret(next.clientSecret);
-    localStorage.setItem('idt_client_secret', next.clientSecret);
-    setIdtUsername(next.username);
-    localStorage.setItem('idt_username', next.username);
-    setIdtPassword(next.password);
-    localStorage.setItem('idt_password', next.password);
-    setIdtRegion(next.region);
-    localStorage.setItem('idt_region', next.region);
+    setIdtCredentials(next);
+    void saveIdtCredentials(next);
   }
 
   function applyTheme(t: 'light' | 'dark') {
@@ -378,31 +368,13 @@ function App() {
               primerMode={primerMode}
               onPrimerModeChange={setPrimerMode}
               onSelect={handleSelect}
-              idtCredentials={hasIdtCredentials ? idtCredentials : undefined}
+              idtCredentials={idtReady ? idtCredentials : undefined}
             />
           </Section>
         )}
 
-        {sequenceData && (
-          <Section step={5} title="Primer Design: Manual" persistKey="section.manual">
-            <ManualDesignPanel
-              data={sequenceData}
-              onSelect={handleSelect}
-              ampTarget={ampTarget}
-              ampDev={ampDev}
-              onAmpTargetChange={setAmpTarget}
-              onAmpDevChange={setAmpDev}
-              idtCredentials={hasIdtCredentials ? idtCredentials : undefined}
-            />
-          </Section>
-        )}
-
-        <Section step={6} title="Multi-Sequence Alignment (Conserved-Region Primers)" defaultCollapsed persistKey="section.align">
+        <Section step={5} title="Multi-Sequence Alignment (Conserved-Region Primers)" defaultCollapsed persistKey="section.align">
           <AlignmentPanel />
-        </Section>
-
-        <Section title="IDT OligoAnalyzer Account" defaultCollapsed>
-          <IdtSettingsPanel credentials={idtCredentials} onChange={handleIdtCredentialsChange} />
         </Section>
       </main>
 
@@ -411,6 +383,8 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         apiKey={ncbiApiKey}
         onApiKeyChange={handleApiKeyChange}
+        idtCredentials={idtCredentials}
+        onIdtCredentialsChange={handleIdtCredentialsChange}
         theme={themePrefs}
         onThemeChange={handleThemePrefsChange}
         onResetTheme={handleResetTheme}

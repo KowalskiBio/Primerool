@@ -5,6 +5,8 @@ import Field from './ui/Field';
 import Modal from './ui/Modal';
 import SegmentedControl from './ui/SegmentedControl';
 import TextInput from './ui/TextInput';
+import IdtSettingsPanel from './IdtSettingsPanel';
+import type { IdtCredentials } from '../utils/idtCredentials';
 
 export interface ThemePrefs {
   wallpaperUrl: string;
@@ -18,6 +20,8 @@ interface Props {
   onClose: () => void;
   apiKey: string;
   onApiKeyChange: (key: string) => void;
+  idtCredentials: IdtCredentials;
+  onIdtCredentialsChange: (next: IdtCredentials) => void;
   theme: ThemePrefs;
   onThemeChange: (next: ThemePrefs) => void;
   /** Clears wallpaper + accent back to the built-in look. */
@@ -27,10 +31,10 @@ interface Props {
 type Tab = 'account' | 'theme';
 
 /** Machine-local settings (per-browser, deliberately outside session files):
- * NCBI API key + theme/wallpaper prefs. A plain controlled form over state
- * owned by App.tsx - no localStorage access here, same contract as
- * `IdtSettingsPanel`. */
-export default function SettingsModal({ open, onClose, apiKey, onApiKeyChange, theme, onThemeChange, onResetTheme }: Props) {
+ * NCBI API key, IDT OligoAnalyzer account and theme/wallpaper prefs. A
+ * plain controlled form over state owned by App.tsx - no storage access
+ * here. */
+export default function SettingsModal({ open, onClose, apiKey, onApiKeyChange, idtCredentials, onIdtCredentialsChange, theme, onThemeChange, onResetTheme }: Props) {
   const [tab, setTab] = useState<Tab>('account');
   const set = (patch: Partial<ThemePrefs>) => onThemeChange({ ...theme, ...patch });
 
@@ -55,31 +59,38 @@ export default function SettingsModal({ open, onClose, apiKey, onApiKeyChange, t
       }
     >
       {tab === 'account' ? (
-        <div className="max-w-md space-y-4">
-          <Field label="NCBI API key" htmlFor="ncbi-api-key">
-            <TextInput
-              id="ncbi-api-key"
-              type="password"
-              autoComplete="off"
-              className="font-mono"
-              value={apiKey}
-              placeholder="Optional - raises NCBI rate limits"
-              onChange={(e) => onApiKeyChange(e.target.value)}
-            />
-          </Field>
-          <p className="text-xs text-ink-faint">
-            Stored only in this browser and sent along with BLAST searches and accession lookups. Without a key NCBI
-            rate-limits requests; with one (free, from your{' '}
-            <a
-              href="https://www.ncbi.nlm.nih.gov/account/settings/"
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent hover:text-accent-hover"
-            >
-              NCBI account settings
-            </a>
-            ) they're noticeably more lenient.
-          </p>
+        <div className="max-w-2xl space-y-8">
+          <div className="max-w-md space-y-4">
+            <Field label="NCBI API key" htmlFor="ncbi-api-key">
+              <TextInput
+                id="ncbi-api-key"
+                type="password"
+                autoComplete="off"
+                className="font-mono"
+                value={apiKey}
+                placeholder="Optional - raises NCBI rate limits"
+                onChange={(e) => onApiKeyChange(e.target.value)}
+              />
+            </Field>
+            <p className="text-xs text-ink-faint">
+              Stored only in this browser and sent along with BLAST searches and accession lookups. Without a key NCBI
+              rate-limits requests; with one (free, from your{' '}
+              <a
+                href="https://www.ncbi.nlm.nih.gov/account/settings/"
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent hover:text-accent-hover"
+              >
+                NCBI account settings
+              </a>
+              ) they're noticeably more lenient.
+            </p>
+          </div>
+
+          <div>
+            <span className="mb-3 block text-sm font-medium text-ink">IDT OligoAnalyzer account</span>
+            <IdtSettingsPanel credentials={idtCredentials} onChange={onIdtCredentialsChange} />
+          </div>
         </div>
       ) : (
         <div className="max-w-2xl space-y-6">

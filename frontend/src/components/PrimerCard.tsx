@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { PrimerAnalysis } from '../api/design';
 import { analyzeStructure, type FullStructureAnalysis, type StructureVariant } from '../api/structure';
-import { getIdtToken, idtAnalyze, type IdtAnalyzeResponse } from '../api/idt';
-import type { IdtCredentials } from './IdtSettingsPanel';
+import { getCachedIdtToken, idtAnalyze, type IdtAnalyzeResponse } from '../api/idt';
+import type { IdtCredentials } from '../utils/idtCredentials';
 import HairpinSvg from './HairpinSvg';
 import DimerAscii from './DimerAscii';
 import StriderStructure from './StriderStructure';
@@ -142,14 +142,14 @@ export default function PrimerCard({ index, primer, name, positionLabel, selecte
     setIdtError(null);
     setIdtLoading(true);
     try {
-      const token = await getIdtToken({
+      const token = await getCachedIdtToken({
         client_id: idtCredentials.clientId,
         client_secret: idtCredentials.clientSecret,
         username: idtCredentials.username,
         password: idtCredentials.password,
         idt_region: idtCredentials.region,
       });
-      const result = await idtAnalyze({ p1_seq: primer.sequence, p2_seq: primer.sequence, token: token.access_token, idt_region: idtCredentials.region });
+      const result = await idtAnalyze({ p1_seq: primer.sequence, p2_seq: primer.sequence, token, idt_region: idtCredentials.region });
       setIdtResult(result);
     } catch (e) {
       setIdtError(e instanceof Error ? e.message : String(e));

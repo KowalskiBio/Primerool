@@ -15,7 +15,7 @@ import TextInput from './ui/TextInput';
 import Select from './ui/Select';
 import Button from './ui/Button';
 import { fmt, yesNo } from '../utils/format';
-import type { IdtCredentials } from './IdtSettingsPanel';
+import type { IdtCredentials } from '../utils/idtCredentials';
 
 type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
 

@@ -22,6 +22,21 @@ export function getIdtToken(req: IdtTokenRequest): Promise<IdtTokenResponse> {
   return postJson<IdtTokenResponse>('/idt/token', req);
 }
 
+/** Last token issued, kept in memory only (gone on reload), so repeated
+ * analyses reuse it instead of sending the password to IDT every click. */
+let cachedToken: { key: string; token: string; expiresAt: number } | null = null;
+
+/** An IDT access token for these credentials, from the in-memory cache
+ * while it has at least a minute left, else freshly requested. */
+export async function getCachedIdtToken(req: IdtTokenRequest): Promise<string> {
+  const key = JSON.stringify(req);
+  if (cachedToken?.key === key && Date.now() < cachedToken.expiresAt) return cachedToken.token;
+  const res = await getIdtToken(req);
+  const lifetimeS = typeof res.expires_in === 'number' ? res.expires_in : 3600;
+  cachedToken = { key, token: res.access_token, expiresAt: Date.now() + (lifetimeS - 60) * 1000 };
+  return res.access_token;
+}
+
 export interface IdtAnalyzeRequest {
   p1_seq: string;
   p2_seq: string;

@@ -15,7 +15,7 @@ import Button from './ui/Button';
 import Checkbox from './ui/Checkbox';
 import Field from './ui/Field';
 import TextInput from './ui/TextInput';
-import type { IdtCredentials } from './IdtSettingsPanel';
+import type { IdtCredentials } from '../utils/idtCredentials';
 import { fmt, yesNo } from '../utils/format';
 
 const PAGE_SIZES = [10, 50, 100] as const;

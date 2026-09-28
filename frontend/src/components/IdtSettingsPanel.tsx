@@ -1,34 +1,21 @@
 import Field from './ui/Field';
 import TextInput from './ui/TextInput';
 import Select from './ui/Select';
-
-export interface IdtCredentials {
-  clientId: string;
-  clientSecret: string;
-  username: string;
-  password: string;
-  region: 'us' | 'eu';
-}
+import type { IdtCredentials } from '../utils/idtCredentials';
 
 interface Props {
   credentials: IdtCredentials;
   onChange: (next: IdtCredentials) => void;
 }
 
-/** IDT OligoAnalyzer credentials - five discrete fields, matching Oligool's
- * own storage shape exactly (per the rewrite plan's locked-in decision):
- * `idt_client_id`/`idt_client_secret`/`idt_username`/`idt_password`/
- * `idt_region` as separate `localStorage` keys (owned by `App.tsx`, which
- * is where the actual `localStorage` reads/writes happen - this component
- * is a plain controlled form over whatever state it's handed). Assembled
- * into one request object only at the point a `/idt/token` call is
- * actually built (`SelectedPrimerInfo`'s "Analyze with IDT" handler).
- * Never sent anywhere except IDT's own token endpoint. */
+/** IDT OligoAnalyzer account fields for the settings modal. A plain
+ * controlled form - storage (encrypted, see `utils/idtCredentials`) is
+ * owned by `App.tsx`. */
 export default function IdtSettingsPanel({ credentials, onChange }: Props) {
   return (
     <div>
       <p className="mb-4 text-xs text-ink-faint">
-        Stored only in this browser (never sent anywhere except IDT's own servers when you click "Analyze with IDT").
+        Stored encrypted in this browser. Used only to sign in to IDT when you click "Analyze with IDT" (relayed through this app's server, which doesn't keep them).
       </p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Client ID">

@@ -3,7 +3,7 @@ import type { SequenceData } from '../api/sequence';
 import { analyzePrimer } from '../api/design';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { resolveMapSelection, type MapPick } from '../utils/mapSelection';
-import { buildPickMenu, createAlleleProbes, createArmsTwins, genePosLabel, type AlleleProbeRequest, type ArmsTwinRequest, type PickKind } from '../utils/mapPickMenu';
+import { buildPickMenu, buildPrimerMenu, createAlleleProbes, createArmsTwins, genePosLabel, type AlleleProbeRequest, type ArmsTwinRequest, type PickKind } from '../utils/mapPickMenu';
 import SequenceContextMenu from './SequenceContextMenu';
 import ArmsTwinDialog from './ArmsTwinDialog';
 import AlleleProbeDialog from './AlleleProbeDialog';
@@ -18,6 +18,22 @@ interface Options {
   pickKinds: readonly PickKind[];
 }
 
+/** Heading labels for the per-pick menu, for picks with no user-given
+ * name - matching the names `buildPickMenu`'s picks get by default. */
+const PICK_LABELS: Record<keyof Selections, string> = {
+  wgaForward: 'WGA-F',
+  wgaReverse: 'WGA-R',
+  juncLeft: 'J-F',
+  juncRight: 'J-R',
+  geneForward: 'F',
+  geneReverse: 'R',
+  geneProbe: 'Probe',
+  geneProbeAlt: 'Mutant probe',
+  armsRefPrimer: 'ARMS WT twin',
+  armsAltPrimer: 'ARMS mutant twin',
+  armsCommon: 'ARMS common primer',
+};
+
 /** The right-click menu over a selected stretch of a sequence map, shared
  * by the genomic map (`SequenceViewer`) and the Exon map
  * (`SplicedSequenceViewer`): spread `onContextMenu` onto the map's scroll
@@ -26,7 +42,7 @@ interface Options {
  * Also owns `commitSelection` - set a pick, then fill in its Strider
  * analysis - which `SequenceViewer`'s drag-resize reuses. */
 export function useMapPickMenu({ data, selections, onSelect, pickKinds }: Options) {
-  const [menu, setMenu] = useState<{ x: number; y: number; target: MapPick | { error: string } } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; target: MapPick | { error: string } | { pickKey: keyof Selections } } | null>(null);
   const [blastSeq, setBlastSeq] = useState<string | null>(null);
   const [structureSeq, setStructureSeq] = useState<string | null>(null);
   const [armsRequest, setArmsRequest] = useState<ArmsTwinRequest | null>(null);
@@ -48,6 +64,16 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds }: Option
   const clear = (key: keyof Selections) => onSelect?.(key, null);
 
   function onContextMenu(e: React.MouseEvent<HTMLElement>) {
+    // A right-click on a rendered primer/probe span opens that pick's own
+    // menu (BLAST / secondary structures on its sequence), regardless of
+    // any text selection.
+    const pickEl = (e.target as HTMLElement).closest<HTMLElement>('[data-pick-key]');
+    const pickKey = pickEl?.dataset.pickKey as keyof Selections | undefined;
+    if (pickKey && selections[pickKey]) {
+      e.preventDefault();
+      setMenu({ x: e.clientX, y: e.clientY, pickKey });
+      return;
+    }
     const target = resolveMapSelection(e.currentTarget);
     if (!target) return; // nothing selected in the map - keep the browser's own menu
     e.preventDefault();
@@ -64,8 +90,20 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds }: Option
     };
   }
 
+  /** The menu over a rendered primer/probe span: BLAST and secondary
+   * structures on the pick's own sequence (see `buildPrimerMenu`). */
+  const primerMenu =
+    menu && 'pickKey' in menu.target && selections[menu.target.pickKey]
+      ? buildPrimerMenu(
+          selections[menu.target.pickKey]!,
+          selections[menu.target.pickKey]!.name ?? PICK_LABELS[menu.target.pickKey],
+          afterMenu((seq: string) => setBlastSeq(seq)),
+          afterMenu((seq: string) => setStructureSeq(seq)),
+        )
+      : null;
+
   const model =
-    menu && !('error' in menu.target)
+    menu && !('error' in menu.target) && !('pickKey' in menu.target)
       ? buildPickMenu({
           data,
           selections,
@@ -86,9 +124,9 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds }: Option
         <SequenceContextMenu
           x={menu.x}
           y={menu.y}
-          heading={model?.heading ?? ''}
+          heading={model?.heading ?? primerMenu?.heading ?? ''}
           error={'error' in menu.target ? menu.target.error : undefined}
-          entries={model?.entries ?? []}
+          entries={model?.entries ?? primerMenu?.entries ?? []}
           onClose={() => setMenu(null)}
         />
       )}

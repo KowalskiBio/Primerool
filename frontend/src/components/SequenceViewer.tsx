@@ -6,7 +6,7 @@ import { cleanDNA, reverseComplement } from '../utils/dna';
 import { lookupVariant, type VariantHit } from '../api/variants';
 import { localGenePos } from '../utils/variantMapping';
 import { baseAtPoint, describeGenePosition, useBaseHover } from './BaseHoverTooltip';
-import { ALL_PICK_KINDS, alleleMutantProbe, armsMutantTwin, type PickKind } from '../utils/mapPickMenu';
+import { ALL_PICK_KINDS, alleleMutantProbe, armsMutantTwin, LIMITS, type PickKind } from '../utils/mapPickMenu';
 import { useMapPickMenu } from './useMapPickMenu';
 import { useMapDragSelect } from './useMapDragSelect';
 import { useSessionState } from '../session/sessionContext';
@@ -223,11 +223,11 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
   return wrapHighlights(seq, 0, data.include_utr ? 'seq-utr' : 'seq-cds');
 }
 
-const PRIMER_LEN_BOUNDS: [number, number] = [18, 25];
-const PROBE_LEN_BOUNDS: [number, number] = [18, 30];
-
-function lenBounds(key: keyof Selections): [number, number] {
-  return key === 'geneProbe' ? PROBE_LEN_BOUNDS : PRIMER_LEN_BOUNDS;
+/** Drag-resizing allows the same lengths as a right-click pick - tighter
+ * bounds snapped any longer pick (e.g. a 35 bp probe) down on its first
+ * edge drag, and it could never be lengthened back. */
+function lenBounds(): readonly [number, number] {
+  return LIMITS.primer;
 }
 
 function colorClassName(key: keyof Selections): string {
@@ -259,7 +259,7 @@ interface DragSession {
  * the live preview (every mousemove) and the final commit (mouseup) so
  * they always agree on the same result. */
 function computeDraggedInterval(session: DragSession, deltaChars: number, seqLen: number): { start: number; end: number } {
-  const [minLen, maxLen] = lenBounds(session.selKey);
+  const [minLen, maxLen] = lenBounds();
   let start = session.initStart;
   let end = session.initEnd;
 
@@ -341,6 +341,12 @@ interface Cell {
   isPlaceholder?: boolean;
   cursorClass?: string;
   onMouseDown?: (e: React.MouseEvent<HTMLSpanElement>) => void;
+  /** Which primer/probe pick these characters render, when they belong to
+   * one - emitted as `data-pick-key` so a right-click on the span can open
+   * that pick's own menu (see `useMapPickMenu`), separate from the
+   * editability `key` implies (a pick also renders read-only outside its
+   * own region, e.g. a junction primer bleeding into the gene block). */
+  pickKey?: keyof Selections;
   /** Which raw sequence `startPos` is local to - see `Segment.region`.
    * Absent on placeholder cells (they don't correspond to real characters
    * a search could land on). */
@@ -410,11 +416,11 @@ function buildCells(
         // first base for a forward twin, the last for a reverse one) drags.
         const locked = sel.arms ? (selectionStrand(sel) === 'F' ? type !== 'left' : type !== 'right') : false;
         if (locked) {
-          cells.push({ text: ch, className, startPos: pos, region: s.region });
+          cells.push({ text: ch, className, startPos: pos, region: s.region, pickKey: s.key });
           return;
         }
         const isEdge = type !== 'move';
-        cells.push({ text: ch, className, startPos: pos, cursorClass: isEdge ? 'cursor-ew-resize' : 'cursor-grab', onMouseDown: (e) => startDrag(e, s.key!, type, sel), region: s.region });
+        cells.push({ text: ch, className, startPos: pos, cursorClass: isEdge ? 'cursor-ew-resize' : 'cursor-grab', onMouseDown: (e) => startDrag(e, s.key!, type, sel), region: s.region, pickKey: s.key });
       });
       continue;
     }
@@ -433,7 +439,7 @@ function buildCells(
       }
     }
 
-    cells.push({ text: s.text, className: s.className, id: s.id, startPos: s.startPos, region: s.region });
+    cells.push({ text: s.text, className: s.className, id: s.id, startPos: s.startPos, region: s.region, pickKey: s.key });
   }
 
   return cells;
@@ -619,6 +625,7 @@ function buildRows(cells: Cell[], lineWidth: number): Row[] {
         region: cell.region,
         cursorClass: cell.cursorClass,
         onMouseDown: cell.onMouseDown,
+        pickKey: cell.pickKey,
         isSearchHit: cell.isSearchHit,
         isActiveSearchHit: cell.isActiveSearchHit,
         searchIdx: cell.searchIdx,
@@ -1200,6 +1207,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
                   data-variant-rsid={p.variantRsid}
                   data-region={p.region}
                   data-pos={p.region ? p.startPos : undefined}
+                  data-pick-key={p.pickKey}
                   onMouseDown={p.onMouseDown}
                 >
                   {p.text}

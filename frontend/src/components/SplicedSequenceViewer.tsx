@@ -10,6 +10,10 @@ interface Span {
   start: number;
   end: number;
   className: string;
+  /** Which pick this span renders, when it belongs to one - emitted as
+   * `data-pick-key` so a right-click on it opens the pick's own menu
+   * (BLAST / secondary structures). */
+  pickKey?: keyof Selections;
 }
 
 interface Piece {
@@ -18,33 +22,37 @@ interface Piece {
   className?: string;
   /** Index into `spliced_exons_seq` of a text piece's first character. */
   start?: number;
+  pickKey?: keyof Selections;
 }
 
 function collectSplicedSpans(data: SequenceData, sel: Selections): Span[] {
   const spans: Span[] = [];
-  const addDirect = (p: Selection | null, className: string) => {
-    if (p && p.region === 'spliced') spans.push({ start: p.start, end: p.end, className });
+  const addDirect = (p: Selection | null, className: string, key: keyof Selections) => {
+    if (p && p.region === 'spliced') spans.push({ start: p.start, end: p.end, className, pickKey: key });
   };
-  addDirect(sel.juncLeft, 'seq-primer');
-  addDirect(sel.juncRight, 'seq-primer');
+  addDirect(sel.juncLeft, 'seq-primer', 'juncLeft');
+  addDirect(sel.juncRight, 'seq-primer', 'juncRight');
   // A junction pair's second primer may sit in the gene instead (e.g. in an
   // intron - see `mapPickMenu`'s junction rule); show whatever part of it
   // lies on exons.
-  for (const p of [sel.juncLeft, sel.juncRight]) {
-    if (p && p.region !== 'spliced') for (const r of genomicToSpliced(p, data)) spans.push({ ...r, className: 'seq-primer' });
+  for (const [p, key] of [
+    [sel.juncLeft, 'juncLeft'],
+    [sel.juncRight, 'juncRight'],
+  ] as const) {
+    if (p && p.region !== 'spliced') for (const r of genomicToSpliced(p, data)) spans.push({ ...r, className: 'seq-primer', pickKey: key });
   }
 
-  const addMapped = (p: Selection | null, className: string) => {
-    for (const r of genomicToSpliced(p, data)) spans.push({ ...r, className });
+  const addMapped = (p: Selection | null, className: string, key: keyof Selections) => {
+    for (const r of genomicToSpliced(p, data)) spans.push({ ...r, className, pickKey: key });
   };
-  addMapped(sel.geneForward, 'seq-primer');
-  addMapped(sel.geneReverse, 'seq-primer');
-  addMapped(sel.geneProbe, 'seq-probe');
-  addMapped(sel.wgaForward, 'seq-primer');
-  addMapped(sel.wgaReverse, 'seq-primer');
-  addMapped(sel.armsRefPrimer, 'seq-primer');
-  addMapped(sel.armsAltPrimer, 'seq-primer');
-  addMapped(sel.armsCommon, 'seq-primer');
+  addMapped(sel.geneForward, 'seq-primer', 'geneForward');
+  addMapped(sel.geneReverse, 'seq-primer', 'geneReverse');
+  addMapped(sel.geneProbe, 'seq-probe', 'geneProbe');
+  addMapped(sel.wgaForward, 'seq-primer', 'wgaForward');
+  addMapped(sel.wgaReverse, 'seq-primer', 'wgaReverse');
+  addMapped(sel.armsRefPrimer, 'seq-primer', 'armsRefPrimer');
+  addMapped(sel.armsAltPrimer, 'seq-primer', 'armsAltPrimer');
+  addMapped(sel.armsCommon, 'seq-primer', 'armsCommon');
 
   return spans.sort((a, b) => a.start - b.start);
 }
@@ -58,7 +66,7 @@ function sliceWithHighlights(spliced: string, a: number, b: number, spans: Span[
     const e = Math.min(b, sp.end);
     if (s > cur) pieces.push({ kind: 'text', text: spliced.substring(cur, s), start: cur });
     if (e > s) {
-      pieces.push({ kind: 'text', text: spliced.substring(s, e), className: sp.className, start: s });
+      pieces.push({ kind: 'text', text: spliced.substring(s, e), className: sp.className, start: s, pickKey: sp.pickKey });
       cur = e;
     }
   }
@@ -156,7 +164,7 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
               {p.text}
             </span>
           ) : (
-            <span key={i} className={p.className} data-region="spliced" data-pos={p.start}>
+            <span key={i} className={p.className} data-region="spliced" data-pos={p.start} data-pick-key={p.pickKey}>
               {p.text}
             </span>
           ),

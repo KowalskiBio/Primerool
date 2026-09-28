@@ -355,6 +355,7 @@ function App() {
               species={isCustomSequence ? undefined : species}
               apiSource={isCustomSequence ? undefined : apiSource}
               selectedSpecies={selectedSpecies}
+              idtCredentials={idtReady ? idtCredentials : undefined}
             />
           </Section>
         )}
@@ -374,7 +375,7 @@ function App() {
         )}
 
         <Section step={5} title="Multi-Sequence Alignment (Conserved-Region Primers)" defaultCollapsed persistKey="section.align">
-          <AlignmentPanel />
+          <AlignmentPanel loadedSequence={sequenceData} />
         </Section>
       </main>
 

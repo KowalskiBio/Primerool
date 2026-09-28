@@ -5,6 +5,7 @@ import SequenceViewer from './SequenceViewer';
 import SplicedSequenceViewer from './SplicedSequenceViewer';
 import FeatureMap from './FeatureMap';
 import PrimerSetsPanel from './PrimerSetsPanel';
+import type { IdtCredentials } from '../utils/idtCredentials';
 import Button from './ui/Button';
 
 type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
@@ -27,9 +28,12 @@ interface Props {
   /** The organism currently selected in the input panel's toggle -
    * forwarded to `SequenceViewer` as an rsID-lookup fallback. */
   selectedSpecies?: string;
+  /** Complete IDT credentials, or undefined - enables the primer sets'
+   * "IDT" Tm button. */
+  idtCredentials?: IdtCredentials;
 }
 
-export default function SequenceFeaturesPanel({ data, selections, truncateIntrons, primerMode, onPrimerModeChange, onClearSelections, onSelect, species, apiSource, selectedSpecies }: Props) {
+export default function SequenceFeaturesPanel({ data, selections, truncateIntrons, primerMode, onPrimerModeChange, onClearSelections, onSelect, species, apiSource, selectedSpecies, idtCredentials }: Props) {
   const [showFeatureMap, setShowFeatureMap] = useSessionState('features.showFeatureMap', false);
   const [showSplicedMap, setShowSplicedMap] = useSessionState('features.showSplicedMap', false);
 
@@ -94,7 +98,7 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
         </div>
       )}
 
-      {onSelect && <PrimerSetsPanel data={data} selections={selections} onSelect={onSelect} />}
+      {onSelect && <PrimerSetsPanel data={data} selections={selections} onSelect={onSelect} idtCredentials={idtCredentials} />}
 
       <div className="mt-4 flex justify-end">
         <Button variant="ghost" size="sm" onClick={onClearSelections}>

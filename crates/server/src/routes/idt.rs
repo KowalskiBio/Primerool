@@ -1,4 +1,4 @@
-//! `POST /idt/token` and `POST /idt/analyze` (Phase 8). Credentials are
+//! `POST /idt/token`, `POST /idt/analyze` (Phase 8) and `POST /idt/tm`. Credentials are
 //! received per-request and forwarded straight to IDT; never logged or
 //! persisted server-side (see `crates/idt`'s own docs on why that crate
 //! has no logging of its own at all).
@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 
 use engine::analyze::{analyze_pair, analyze_primer};
 use engine::backend::ThermoParams;
-use idt::{analyze as idt_analyze, extract_delta_g, get_token, AnalyzeParams, IdtError};
+use idt::{analyze as idt_analyze, analyze_each, extract_delta_g, extract_tm, get_token, AnalyzeParams, IdtError};
 use thermo_core::thermo::{dimer_thermo_subopt, hairpin_thermo, DimerThermo};
 
 use crate::error::AppError;
@@ -187,4 +187,49 @@ pub async fn idt_analyze_route(State(state): State<AppState>, Json(req): Json<Id
             "strider_hetero_dimer_subopt": strider_field("hetero_dimer_subopt"),
         },
     })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct IdtTmRequest {
+    pub sequences: Vec<String>,
+    pub token: String,
+    pub mv_conc: f64,
+    pub mg_conc: f64,
+    pub dntp_conc: f64,
+    pub oligo_conc: f64,
+    pub idt_region: String,
+}
+
+impl Default for IdtTmRequest {
+    /// The app-wide conditions (`ThermoParams::default()`), so IDT's Tm is
+    /// computed under the same salts as the Strider Tm shown beside it.
+    fn default() -> Self {
+        let t = ThermoParams::default();
+        Self { sequences: Vec::new(), token: String::new(), mv_conc: t.mv_conc, mg_conc: t.dv_conc, dntp_conc: t.dntp_conc, oligo_conc: t.dna_conc / 1000.0, idt_region: "eu".to_string() }
+    }
+}
+
+/// IDT's own Tm for each sequence — `{"results": [{"tm": f64 | null,
+/// "error"?: string}]}` in request order. A failed call is reported per
+/// sequence, not as a route error.
+pub async fn idt_tm_route(State(state): State<AppState>, Json(req): Json<IdtTmRequest>) -> Result<Json<Value>, AppError> {
+    if req.sequences.is_empty() || req.sequences.iter().any(|s| s.is_empty()) {
+        return Err(AppError::bad_request("At least one non-empty sequence is required."));
+    }
+    if req.token.is_empty() {
+        return Err(AppError::bad_request("A valid IDT access token is required."));
+    }
+
+    let params = AnalyzeParams { mv_conc: req.mv_conc, mg_conc: req.mg_conc, dntp_conc: req.dntp_conc, oligo_conc: req.oligo_conc, folding_temp: 25.0 };
+    let raw = analyze_each(&state.http_client, &req.token, &req.idt_region, &req.sequences, &params).await;
+    let results: Vec<Value> = raw
+        .iter()
+        .map(|r| match (extract_tm(r), r.get("error").and_then(Value::as_str)) {
+            (Some(tm), _) => json!({ "tm": tm }),
+            (None, Some(err)) => json!({ "tm": null, "error": err }),
+            (None, None) => json!({ "tm": null, "error": "IDT returned no melting temperature." }),
+        })
+        .collect();
+    Ok(Json(json!({ "results": results })))
 }

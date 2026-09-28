@@ -189,9 +189,46 @@ pub async fn analyze(client: &reqwest::Client, token: &str, region: &str, p1_seq
     AnalyzeResult { m1_hairpin, m1_selfdimer, m1_analyze, m2_hairpin, m2_selfdimer, m2_analyze, hetero }
 }
 
+/// IDT's melting temperature (°C) from an `Analyze` result, `None` when
+/// the call failed or the field is missing. Tries the same key spellings
+/// as Oligool's own reader.
+pub fn extract_tm(obj: &Value) -> Option<f64> {
+    const KEYS: [&str; 7] = ["Tm", "MeltingTemperature", "MeltTemp", "tm", "MeltingTemp", "meltingTemperature", "meltTemp"];
+    KEYS.iter().find_map(|k| obj.get(*k)?.as_f64())
+}
+
+/// IDT's `Analyze` alone (Tm, GC, …) for each sequence, results in input
+/// order — one call per sequence instead of [`analyze`]'s seven per pair.
+/// Same 3-in-flight cap and per-call fault tolerance as [`analyze`].
+pub async fn analyze_each(client: &reqwest::Client, token: &str, region: &str, seqs: &[String], params: &AnalyzeParams) -> Vec<Value> {
+    let host = idt_host(region);
+    let semaphore = Arc::new(Semaphore::new(3));
+    let mut tasks = tokio::task::JoinSet::new();
+    for (i, seq) in seqs.iter().enumerate() {
+        let (client, token, seq, params, semaphore) = (client.clone(), token.to_string(), seq.clone(), *params, semaphore.clone());
+        tasks.spawn(async move {
+            let _permit = semaphore.acquire().await.expect("semaphore is never closed");
+            (i, hit_idt(&client, &token, host, "Analyze", &seq, None, &params).await)
+        });
+    }
+    let mut results = vec![Value::Null; seqs.len()];
+    while let Some(joined) = tasks.join_next().await {
+        if let Ok((i, v)) = joined {
+            results[i] = v;
+        }
+    }
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_tm_reads_melt_temp() {
+        assert_eq!(extract_tm(&json!({"MeltTemp": 58.4, "Sequence": "ACGT"})), Some(58.4));
+        assert_eq!(extract_tm(&json!({"error": "IDT Analyze Error: 401"})), None);
+    }
 
     #[test]
     fn idt_host_maps_regions_correctly() {

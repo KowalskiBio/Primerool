@@ -104,3 +104,20 @@ export interface IdtAnalyzeResponse {
 export function idtAnalyze(req: IdtAnalyzeRequest): Promise<IdtAnalyzeResponse> {
   return postJson<IdtAnalyzeResponse>('/idt/analyze', req);
 }
+
+export interface IdtTmRequest {
+  sequences: string[];
+  token: string;
+  idt_region: 'us' | 'eu';
+}
+
+export interface IdtTmResult {
+  tm: number | null;
+  error?: string;
+}
+
+/** IDT's own Tm for each sequence, in request order. Salt/oligo conditions
+ * default server-side to the app-wide ones Strider uses. */
+export function idtTm(req: IdtTmRequest): Promise<{ results: IdtTmResult[] }> {
+  return postJson<{ results: IdtTmResult[] }>('/idt/tm', req);
+}

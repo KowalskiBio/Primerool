@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SequenceData } from '../api/sequence';
 import { analyzePrimer } from '../api/design';
+import { getCachedIdtToken, idtTm, type IdtTmResult } from '../api/idt';
+import type { IdtCredentials } from '../utils/idtCredentials';
 import { mapPrimerToGenomic, selectionStrand, type Selection, type Selections } from '../utils/regionMapping';
 import PrimerStructureModal from './PrimerStructureModal';
 import Button from './ui/Button';
@@ -9,6 +11,9 @@ interface Props {
   data: SequenceData;
   selections: Selections;
   onSelect: (key: keyof Selections, value: Selection | null) => void;
+  /** Complete IDT credentials, or undefined (the "IDT" button is then
+   * disabled). */
+  idtCredentials?: IdtCredentials;
 }
 
 type Key = keyof Selections;
@@ -93,6 +98,24 @@ function showInMap(sel: Selection, data: SequenceData) {
   }
 }
 
+/** IDT's Tm, in blue beside Strider's. */
+function IdtTm({ result }: { result: IdtTmResult | 'loading' }) {
+  const base = 'ml-1.5 font-mono text-blue-600 dark:text-blue-400';
+  if (result === 'loading') return <span className={`${base} italic`}>IDT…</span>;
+  if (result.tm == null) {
+    return (
+      <span className={base} title={result.error}>
+        IDT failed
+      </span>
+    );
+  }
+  return (
+    <span className={base} title="IDT OligoAnalyzer Tm (same conditions as Strider)">
+      IDT {result.tm.toFixed(1)}°C
+    </span>
+  );
+}
+
 function NameInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
   const [draft, setDraft] = useState(value);
   const [prev, setPrev] = useState(value);
@@ -125,12 +148,37 @@ function NameInput({ value, onCommit }: { value: string; onCommit: (v: string) =
 
 /** Every primer set made on this sequence - WGA, general and junction
  * pairs, the ARMS set and the probe - side by side, each with its Strider
- * numbers. Names are editable; "Show" jumps the map to the set, and
- * "Structures" opens the pair's hairpins/dimers/heterodimer. Sets persist
+ * numbers. Names are editable; "Show" jumps the map to the set,
+ * "Structures" opens the pair's hairpins/dimers/heterodimer, and "IDT" adds
+ * IDT OligoAnalyzer's Tm (same conditions) beside Strider's. Sets persist
  * per sequence (see `utils/primerSetStore.ts`). */
-export default function PrimerSetsPanel({ data, selections, onSelect }: Props) {
+export default function PrimerSetsPanel({ data, selections, onSelect, idtCredentials }: Props) {
   const [structurePair, setStructurePair] = useState<{ label: string; forward: string; reverse?: string } | null>(null);
   const inFlight = useRef(new Set<string>());
+  // IDT Tm per primer sequence, for this page view only (not persisted).
+  const [idtTms, setIdtTms] = useState<Record<string, IdtTmResult | 'loading'>>({});
+
+  async function fetchIdtTms(seqs: string[]) {
+    if (!idtCredentials) return;
+    const unique = [...new Set(seqs)];
+    const put = (value: (seq: string, i: number) => IdtTmResult | 'loading') =>
+      setIdtTms((prev) => ({ ...prev, ...Object.fromEntries(unique.map((seq, i) => [seq, value(seq, i)])) }));
+    put(() => 'loading');
+    try {
+      const token = await getCachedIdtToken({
+        client_id: idtCredentials.clientId,
+        client_secret: idtCredentials.clientSecret,
+        username: idtCredentials.username,
+        password: idtCredentials.password,
+        idt_region: idtCredentials.region,
+      });
+      const { results } = await idtTm({ sequences: unique, token, idt_region: idtCredentials.region });
+      put((_, i) => results[i] ?? { tm: null, error: 'No result' });
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      put(() => ({ tm: null, error }));
+    }
+  }
 
   // Picks from the design panels arrive without a Strider analysis - fill
   // it in once, so every row shows the same engine's numbers.
@@ -193,6 +241,14 @@ export default function PrimerSetsPanel({ data, selections, onSelect }: Props) {
                     >
                       Structures
                     </Button>
+                    <Button
+                      size="sm"
+                      disabled={!idtCredentials || g.rows.some((r) => idtTms[r.sel.primerSeq] === 'loading')}
+                      title={idtCredentials ? "Tm from IDT OligoAnalyzer, under the same conditions as Strider's" : 'Add your IDT account in Settings (,) to use this'}
+                      onClick={() => fetchIdtTms(g.rows.map((r) => r.sel.primerSeq))}
+                    >
+                      IDT
+                    </Button>
                     <Button size="sm" onClick={() => g.keys.forEach((k) => selections[k] && onSelect(k, null))}>
                       Remove
                     </Button>
@@ -201,6 +257,7 @@ export default function PrimerSetsPanel({ data, selections, onSelect }: Props) {
                 <div className="space-y-2">
                   {g.rows.map(({ key, sel }) => {
                     const a = sel.analysis;
+                    const idt = idtTms[sel.primerSeq];
                     return (
                       <div key={key} className="rounded border border-line bg-base px-2 py-1.5">
                         <div className="flex flex-wrap items-center gap-x-2">
@@ -222,6 +279,7 @@ export default function PrimerSetsPanel({ data, selections, onSelect }: Props) {
                             <>
                               <span>
                                 Tm <span className="font-mono text-ink">{fmt(a.tm, '°C')}</span>
+                                {idt && <IdtTm result={idt} />}
                               </span>
                               <span>
                                 GC <span className="font-mono text-ink">{fmt(a.gc_percent, '%')}</span>

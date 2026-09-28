@@ -1,223 +1,297 @@
-# 🧬 Primerool
+<div align="center">
 
-**Cloud-based primer design tool for any organism.**
+<img src="frontend/public_static/logo.png" alt="Primerool" width="132" />
 
-Primerool is a local web application that lets you search for genes, visualise their genomic structure, and design PCR primers — all from your browser. It fetches data live from **Ensembl** and **NCBI**, so no local genome files are needed. Just run it and start designing.
+# Primerool
 
----
+**Primer & probe design for any organism: from a gene name to checked oligos in minutes.**
 
-## What Can It Do?
+[![Live app](https://img.shields.io/badge/live-primerool.ubch.sci.muni.cz-2563eb?style=for-the-badge&logo=googlechrome&logoColor=white)](https://primerool.ubch.sci.muni.cz/)
 
-### 1. Gene Search & Sequence Retrieval
+[![Rust](https://img.shields.io/badge/Rust-axum-000000?style=flat-square&logo=rust&logoColor=white)](crates/server)
+[![React](https://img.shields.io/badge/React-19-149eca?style=flat-square&logo=react&logoColor=white)](frontend)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?style=flat-square&logo=typescript&logoColor=white)](frontend)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06b6d4?style=flat-square&logo=tailwindcss&logoColor=white)](frontend)
+[![Vite](https://img.shields.io/badge/Vite-7-646cff?style=flat-square&logo=vite&logoColor=white)](frontend)
+[![Tauri](https://img.shields.io/badge/desktop-Tauri-24c8db?style=flat-square&logo=tauri&logoColor=white)](src-tauri)
+[![License: CC0](https://img.shields.io/badge/license-CC0_1.0-lightgrey?style=flat-square)](LICENSE)
 
-Search for any gene by **name** (e.g. *BRCA1*, *AP1*, *mcrA*) or **accession ID** (e.g. *NM_105581.3*). Primerool queries Ensembl or NCBI in real time and returns:
+[**Features**](#-features) · [**Quick start**](#-quick-start) · [**How it works**](#-how-it-works) · [**Architecture**](#-architecture) · [**Development**](#-development)
 
-- All annotated transcripts with exon count and strand info
-- The canonical transcript is auto-selected
-- Genomic DNA (full span with introns) or spliced mRNA (exons only)
-- Optional UTR inclusion
-- Configurable upstream and downstream flanking regions
+<br />
 
-### 2. Multi-Organism Support
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/sequence-map-dark.png" />
+  <img src="docs/images/sequence-map-light.png" alt="The sequence map: exons, UTRs and truncated introns, with a primer pair, a TaqMan probe and junction primers placed on bovine CSN2" width="100%" />
+</picture>
 
-Primerool is not limited to humans. Pick from **6 kingdoms** and **40+ pre-configured species**, or enter any Ensembl-compatible species name:
+</div>
 
-| Kingdom | Example Species |
-|---|---|
-| **Animals** | Human, Mouse, Rat, Zebrafish, Chicken, Pig, Cow, Dog, Cat, Sheep, Rabbit, Macaque, Chimpanzee, Frog, Fruit Fly, *C. elegans* |
-| **Plants** | *Arabidopsis thaliana*, Rice, Maize, Wheat, Tomato, Soybean, Grape, Potato, Barley, Tobacco |
-| **Bacteria** | *E. coli* K-12, *B. subtilis* 168, *S. aureus*, *P. aeruginosa*, *M. tuberculosis*, *S. enterica*, *S. pneumoniae* |
-| **Fungi** | *S. cerevisiae*, *S. pombe*, *A. nidulans*, *N. crassa*, *C. albicans* |
-| **Protists** | *P. falciparum*, *T. brucei*, *L. major*, *D. discoideum*, *T. gondii* |
-| **Viruses** | SARS-CoV-2 |
+<br />
 
-Every kingdom also offers a **Custom** option where you can type in any Ensembl species identifier.
+Primerool fetches genes live from **Ensembl** or **NCBI**, lays them out as an interactive sequence map, and lets you place primers and probes by hand or have them designed for you. Every oligo is checked right away for Tm, GC content, hairpins and dimers by its own native thermodynamics engine, **Strider**. You don't need genome files, a database or an install: open it in a browser.
 
-### 3. Dual Data Source
-
-Choose between two independent APIs:
-
-- **Ensembl REST API** — the default, covers all domains of life
-- **NCBI E-Utilities** — robust fallback; especially useful when Ensembl is slow or unreachable (happens way too often)
-
-Both produce the same downstream output (transcripts, exons, sequences, flanking regions).
-
-### 4. BLAST Integration
-
-If you prefer, you can switch to **FASTA mode**, paste a sequence (or accession ID), and Primerool runs an **NCBI BLAST** search. It returns the top hits with:
-
-- Organism name
-- Gene symbol
-- Accession and identity %
-- A **"Use this"** button that auto-fills the gene search with the matched organism and gene
-
-### 5. Interactive Sequence Visualisation
-
-Once a sequence is loaded, Primerool enabels user to use two interactive views:
-
-- **Feature Map** — a zoomable timeline showing exons, introns, CDS, and UTRs as coloured blocks. Primer binding sites are overlaid when designed.
-- **Sequence Map** — the full nucleotide sequence with colour-coded annotations:
-  - Flanking regions (grey)
-  - UTRs (yellow)
-  - CDS (orange, bold)
-  - Introns (italic, truncated to show length only when in truncated mode)
-  - Primer binding sites (red highlights)
-
-Click any exon in the Feature Map to jump to it in the Sequence Map.
-
-### 6. Five Primer Design Modes
-
-#### WGA (Whole-Genome Amplification)
-Designs primer pairs in the **flanking regions** (upstream + downstream) to amplify the entire gene locus. Uses relaxed GC% (20–80%) and Tm (52–68°C) constraints suited to genomic sequence.
-
-#### Internal (Exon–Exon Junction)
-Designs **splice-spanning primers** that cross exon–exon junctions. Ideal for **qRT-PCR** — ensures that only cDNA (not genomic DNA) is amplified. Configurable overlap (default 6–12 bp) and product size (default 80–220 bp).
-
-#### Design from Sequence (Manual)
-Paste any two sequence regions — one for forward, one for reverse — and Primer3 picks the best primers from each. Supports a **target amplicon length** so you can specify exactly how long the PCR product should be:
-
-| Parameter | Default |
-|---|---|
-| Melting Temperature (Tm) | 57 / 62 / 67 °C (min / opt / max) |
-| Primer Length | 18 / 20 / 25 bp (min / opt / max) |
-| GC Content | 40 – 60 % |
-| Max Primers to Return | 5 |
-| **Target Amplicon Length** | *(optional)* |
-| **Amplicon Deviation** | ± 50 bp |
-
-When a target amplicon length is set, Primer3 constrains the product size range to `[target − deviation, target + deviation]`, giving you control over the exact amplicon size.
-
-#### Probe Design (TaqMan)
-Design **internal oligos (TaqMan-style probes)** from any user-provided sequence region. Probes are designed with higher Tm than flanking primers, as required for hydrolysis probe assays. Configurable via a dedicated **⚙️ Probe Conditions** panel:
-
-| Parameter | Default |
-|---|---|
-| Probe Tm | 65 / 70 / 75 °C (min / opt / max) |
-| Probe Length | 18 / 22 / 30 bp (min / opt / max) |
-| Probe GC Content | 30 – 80 % |
-| Max Probes to Return | 5 |
-
-Each returned probe includes Tm, GC%, length, hairpin ΔG, and homodimer ΔG.
-
-#### Automatic Pairing
-All primer modes return ranked pairs with:
-- Per-primer stats (Tm, GC%, length)
-- Hairpin and self-dimer analysis (ΔG)
-- Heterodimer analysis for each pair
-- A **"Use"** button to highlight the binding site on the sequence map
-
-### 7. Quality Control
-
-Every designed primer is automatically checked for:
-
-- **Hairpin formation** — structure found? ΔG value
-- **Self-dimer (homodimer)** — structure found? ΔG value
-- **Heterodimer** — cross-complementarity between forward and reverse primers
-- **Tm accuracy** — calculated using nearest-neighbour thermodynamics (Primer3 engine)
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>🧬 Any organism</h3>
+      51 preset species across animals, plants, bacteria, fungi, protists and viruses, plus any Ensembl species name. You can also paste an accession or a raw sequence.
+    </td>
+    <td width="33%" valign="top">
+      <h3>🖱️ Direct design</h3>
+      Select bases, right-click and choose what to make. Drag a primer to move it, or drag its end to resize it. Everything is recomputed as you go.
+    </td>
+    <td width="33%" valign="top">
+      <h3>🌡️ Two engines</h3>
+      Strider (native Rust nearest-neighbour + Mathews 2004 folding) or Primer3, with an IDT OligoAnalyzer Tm next to Strider's when you want a second opinion.
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>🔀 Every assay type</h3>
+      General PCR, whole-gene (WGA), exon–exon junction (qRT-PCR), ARMS allele-specific, TaqMan and allele-detection probes.
+    </td>
+    <td valign="top">
+      <h3>🧩 Alignments</h3>
+      MAFFT multiple alignment shown the classic way (numbered rows and a match line), plus primers designed in conserved regions.
+    </td>
+    <td valign="top">
+      <h3>💾 Keeps your work</h3>
+      Primer sets remembered per sequence, sessions saved to a file or autosaved, and light/dark themes with your own accent colour.
+    </td>
+  </tr>
+</table>
 
 ---
 
-## Getting Started
+## ✨ Features
 
-### macOS
+### Find your gene
 
-1. Navigate to the `dist/` folder and double-click the **`Primerool.app`** bundle.
-2. It will instantly launch as a native PyInstaller desktop application with a custom dock icon.
+- **Search by gene name** (e.g. *BRCA1*, *CSN2*) or **accession** (e.g. `NM_001443849.1`). An accession is identified through NCBI BLAST and resolved to its gene.
+- **Ensembl REST or NCBI E-utilities**: switch sources whenever one of them is slow.
+- **Every annotated transcript** is listed, with the canonical one pre-selected. You choose genomic DNA (with introns) or spliced mRNA, with or without UTRs, and with upstream/downstream flanks of any length.
+- **Custom sequences**: paste any sequence and design on it directly.
+- **SNP batch import**: upload a per-variant flanking-sequence report (`.docx`, `[REF/ALT]`-marked) and design flanking primers for every SNP in one go.
 
-**Building for macOS (.app / .dmg):**
-To compile the standalone OS X application yourself:
-1. Run the automated packager:
-   ```bash
-   ./scripts/build_mac.sh
-   ```
-2. This will generate the **`Primerool.app`** bundle and **`Primerool.dmg`** installer in the `dist/` directory.
+### Read the sequence
 
-**Building for Windows (.exe):**
-To generate a standalone Windows executable, you must run the build on a Windows machine:
-1. Run the automated packager:
-   ```batch
-   scripts\build_win.bat
-   ```
-2. *Note: If Python is not installed, the build script will automatically download and install Python 3.12 for you.*
-3. Find the executable output in `dist\Primerool.exe`.
+- **Sequence map**:
+  - CDS, UTRs, flanks and introns in their own colours; introns can be collapsed to their length.
+  - Hover any base for its position in the gene and its genomic coordinate.
+  - **Find in sequence**: a literal search (optionally the reverse complement too) or an **rsID lookup** that pins the SNP on the map.
+  - **Align in sequence**: Smith–Waterman finds where a pasted primer or amplicon binds best, mismatches included.
+- **Feature map**: a zoomable overview of exons, introns, CDS and UTRs, with your primers overlaid.
+- **Exon map**: the spliced transcript exon by exon, for placing junction primers where they cross the splice site.
 
-### Windows
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/exon-map-dark.png" />
+  <img src="docs/images/exon-map-light.png" alt="The exon map with the right-click menu open over a selection, offering general, ARMS and junction primer picks" width="100%" />
+</picture>
 
-1. Double-click **`Run_primerool.bat`**
-2. If Python isn't installed, it's downloaded and installed automatically in the background.
-3. The app installs all dependencies and launches as a native desktop application window.
+### Design primers and probes
 
-### Development / Manual Setup
+**By hand.** Select bases on any map and right-click:
 
-Requires Node.js and Python 3 on your PATH.
+| Pick | What it makes |
+|---|---|
+| **General** | A forward or reverse primer anywhere in the gene |
+| **WGA (flank)** | Primers in the flanks, to amplify the whole locus |
+| **Junction** | A primer spanning an exon–exon junction; its partner may sit anywhere in the gene |
+| **ARMS twins / common** | Allele-specific wild-type/mutant twins with their 3′ end on the SNP, plus the common primer |
+| **Probe: general** | A TaqMan hydrolysis probe |
+| **Probe: allele detection** | A wild-type/mutant probe pair differing only at the SNP |
+| **BLAST · Secondary structures** | For any selection, or any placed primer |
+
+Placed primers and probes can be **dragged to move** or **resized by their ends** on both the sequence map and the exon map. ARMS twins keep their 3′ end locked on the SNP, allele probes can't lose their SNP, and each mutant partner follows its wild-type twin.
+
+**Automatically.** Four design modes rank candidate pairs by penalty, each with Tm, GC%, hairpin, self-dimer and heterodimer checks:
+
+| Mode | For |
+|---|---|
+| **General** | Primers anywhere in the gene, to a target amplicon length |
+| **WGA** | Whole-gene amplification from the flanking regions |
+| **Junction** | cDNA-specific qRT-PCR primers across exon–exon junctions |
+| **SNP/indel** | ARMS-PCR allele-specific primer sets |
+
+### Check every oligo
+
+<table>
+  <tr>
+    <td width="55%" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/structures-dark.png" />
+        <img src="docs/images/structures-light.png" alt="Hairpin structures of a primer, drawn as ranked secondary-structure diagrams with ΔG and Tm" width="100%" />
+      </picture>
+    </td>
+    <td valign="top">
+
+- **Strider**, a plain-Rust DNA thermodynamics core: nearest-neighbour Tm with salt and Mg²⁺/dNTP corrections, hairpin and dimer ΔG, and **ranked suboptimal secondary structures** drawn as diagrams.
+- **Primer3** (vendored C via FFI) as an alternative engine.
+- **IDT OligoAnalyzer**: one click adds IDT's own Tm next to Strider's, under the same conditions. Your IDT credentials are stored **encrypted in your browser** (AES-GCM, non-extractable key).
+- **NCBI BLAST** with identity and query cover for any oligo or region.
+
+    </td>
+  </tr>
+</table>
+
+One set of reaction conditions is used everywhere: design, analysis, structures and IDT. It matches IDT OligoAnalyzer's qPCR preset:
+
+| Na⁺ | Mg²⁺ | dNTPs | Oligo |
+|:---:|:---:|:---:|:---:|
+| 50 mM | 3 mM | 0.8 mM | 0.2 µM |
+
+### Keep track
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/primer-sets-dark.png" />
+  <img src="docs/images/primer-sets-light.png" alt="My primers: a general pair with amplicon size, a junction pair and a TaqMan probe, each with Tm, GC, hairpin and self-dimer" width="100%" />
+</picture>
+
+- **My primers** gathers every set on the loaded sequence: WGA, general and junction pairs, the ARMS set and the probes. Each shows its amplicon size and Strider numbers, and has **Show**, **Structures**, **IDT** and **Remove**. Names are editable.
+- Primer sets are **remembered per sequence**. Load the same gene and transcript again and they're back.
+- **Sessions**: save everything to a `.primerool.json` file, load it later, or pick up an autosave.
+
+### Align and design across sequences
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/alignment-dark.png" />
+  <img src="docs/images/alignment-light.png" alt="A two-sequence alignment with a column ruler, numbered rows, a match line, a highlighted mismatch and gaps" width="100%" />
+</picture>
+
+- Paste **FASTA**, **GenBank** (a whole record or just its numbered sequence lines) or one bare sequence per line. You can also add the loaded sequence, or **every other transcript variant** of the gene, in one click.
+- **MAFFT** aligns them. The result shows the classic way: a column ruler, one numbered row per sequence, a match line, mismatches highlighted and gaps dimmed.
+- **Design primers in a conserved column range**, as individual candidates or as pairs around a target.
+
+---
+
+## 🚀 Quick start
+
+### Use it online
+
+**→ [primerool.ubch.sci.muni.cz](https://primerool.ubch.sci.muni.cz/)**. Nothing to install.
+
+### Run it locally
+
+<details open>
+<summary><b>Prerequisites</b></summary>
+
+| Tool | Why |
+|---|---|
+| [Rust](https://rustup.rs/) (stable) | the server and the thermodynamics engines |
+| A C compiler | builds the vendored Primer3 |
+| [Node.js](https://nodejs.org/) 20.19+ | the frontend (Vite 7) |
+| [MAFFT](https://mafft.cbrc.jp/alignment/software/) *(optional)* | multi-sequence alignment |
+
+</details>
 
 ```bash
-# Clone the repo
-git clone https://github.com/your-username/Primerool.git
+git clone --recurse-submodules https://github.com/KowalskiBio/Primerool.git
 cd Primerool
 
-# One-time setup: creates the Python venv, installs backend deps,
-# and installs frontend deps
-npm run setup
-
-# Start backend + frontend together, with hot reload
-npm run dev
+npm run setup   # cargo build --workspace + frontend npm install
+npm run dev     # Rust API on :5050 + Vite on :5173, with hot reload
 ```
 
-This starts the Flask API on `http://127.0.0.1:5050` and the Vite dev server
-on `http://localhost:5173` (opened automatically), which proxies API calls to
-the backend. Use the `:5173` URL while developing — it's the one with live
-frontend reload.
+Then open **http://localhost:5173**.
+
+### Desktop app
+
+The [Tauri](https://tauri.app/) shell in [`src-tauri/`](src-tauri) runs the same server in-process and opens it in a native window:
+
+```bash
+cargo install tauri-cli
+cargo tauri build     # builds the frontend first, then the native app
+```
 
 ---
 
-## Architecture
+## 🔬 How it works
+
+```mermaid
+flowchart LR
+    A["🔎 Gene name<br/>accession · sequence"] --> B["📥 Ensembl / NCBI<br/>transcripts, exons, flanks"]
+    B --> C["🗺️ Sequence, feature<br/>& exon maps"]
+    C --> D["🖱️ Right-click picks<br/>drag to move / resize"]
+    C --> E["⚙️ Automatic design<br/>General · WGA · Junction · SNP"]
+    D --> F["🌡️ Strider / Primer3<br/>Tm · GC · hairpins · dimers"]
+    E --> F
+    F --> G["🧾 My primers<br/>BLAST · structures · IDT"]
+```
+
+---
+
+## 🏗️ Architecture
+
+The backend is a Rust workspace with one job per crate, and the frontend is a React single-page app. In production, one `axum` binary serves both the API and the built frontend.
+
+```mermaid
+flowchart TB
+    UI["React 19 · TypeScript · Tailwind 4<br/><code>frontend/</code>"] -->|JSON over HTTP| S["axum server<br/><code>crates/server</code>"]
+    T["Tauri desktop shell<br/><code>src-tauri/</code>"] -.->|runs in-process| S
+    S --> E["engine<br/>design · scoring"]
+    E --> TC["thermo-core<br/>Strider thermodynamics"]
+    E --> P3["primer3-ffi → primer3-sys<br/>vendored Primer3 C"]
+    S --> PR["providers<br/>Ensembl · NCBI"]
+    S --> BL["blast<br/>NCBI BLAST"]
+    S --> AL["align<br/>MAFFT"]
+    S --> ID["idt<br/>OligoAnalyzer proxy"]
+    S --> SN["snp-import<br/>.docx SNP reports"]
+```
+
+| Crate | Role |
+|---|---|
+| [`server`](crates/server) | axum HTTP/JSON API: routing, validation and response shaping only |
+| [`engine`](crates/engine) | Dual-backend thermodynamics trait plus the candidate scan / score / rank design algorithms |
+| [`thermo-core`](crates/thermo-core) | **Strider**: plain-Rust Tm, salt corrections, hairpin/dimer ΔG, Mathews 2004 folding |
+| [`primer3-ffi`](crates/primer3-ffi) · [`primer3-sys`](crates/primer3-sys) | Safe wrapper and raw bindings over the vendored Primer3 C library |
+| [`providers`](crates/providers) | `SequenceProvider` trait with Ensembl and NCBI implementations |
+| [`blast`](crates/blast) | NCBI BLAST: submit, poll, fetch, parse |
+| [`align`](crates/align) | MAFFT subprocess wrapper |
+| [`idt`](crates/idt) | IDT OligoAnalyzer OAuth2 proxy; credentials are per-request and never stored |
+| [`snp-import`](crates/snp-import) | Parses per-SNP flanking-sequence `.docx` reports |
+
+<details>
+<summary><b>Repository layout</b></summary>
 
 ```
 Primerool/
-├── src/
-│   ├── app.py                 # Flask application (all routes)
-│   ├── ensembl_api.py         # Ensembl REST API client
-│   ├── ncbi_api.py            # NCBI E-Utilities API client
-│   ├── blast_api.py           # NCBI BLAST integration
-│   ├── primer_flanking.py     # WGA primer design (flanking regions)
-│   ├── primer_junction.py     # Exon-exon junction primer design
-│   ├── primer_internal.py     # Internal primer design
-│   ├── primer_manual.py       # Manual region primer design
-│   ├── primer_utils.py        # Shared Primer3 settings & analysis
-│   ├── templates/
-│   │   └── index.html         # Single-page frontend (vanilla JS)
-│   └── static/
-│       └── logo.png           # Primerool mascot
-├── Run_primerool.command       # macOS launcher
-├── Run_primerool.bat           # Windows launcher
-├── requirements.txt
-└── LICENSE                     # CC0 1.0 Universal
+├── crates/            Rust workspace: server, engine, thermo-core, providers, …
+├── frontend/          React + TypeScript + Tailwind single-page app (Vite)
+├── src-tauri/         Tauri desktop shell
+├── vendor/primer3-py/ Primer3 C sources (git submodule)
+├── scripts/           setup, dev runner, VM deploy, golden-fixture capture
+└── docs/images/       README screenshots
 ```
 
-### Dependencies
-
-| Package | Purpose |
-|---|---|
-| `flask` ≥ 3.0 | Web framework |
-| `primer3-py` ≥ 2.0 | Primer design engine (Primer3 bindings) |
-| `requests` ≥ 2.31 | HTTP client for Ensembl & NCBI APIs |
-
-No database. No genome files. Everything is fetched on-the-fly.
+</details>
 
 ---
 
-## Typical Workflow
+## 🛠️ Development
 
-1. **Select organism** — pick kingdom + species, or enter a custom Ensembl name
-2. **Search gene** — type a gene symbol or accession ID → get transcript list
-3. **Configure sequence** — choose transcript, toggle introns/UTRs, set flanking bp
-4. **View sequence** — explore the feature map and sequence map
-5. **Design primers** — pick a mode (WGA, Junction, Manual, or Probe) → get ranked pairs
-6. **Use primers** — click "Use" to highlight binding sites on the map
+```bash
+cargo test --workspace                     # Rust unit + parity tests
+cargo test -p server --test golden -- --ignored   # replay live API fixtures (network)
+npm --prefix frontend run lint             # ESLint
+npm --prefix frontend run build            # type-check + production build
+```
+
+The golden fixtures in [`scripts/golden/fixtures`](scripts/golden/fixtures) pin the API's responses, so behaviour stays stable across refactors.
+
+**Deploying to a server:** [`scripts/deploy_vm.sh`](scripts/deploy_vm.sh) fast-forwards the checked-out branch, builds the release server and the frontend, backs up the live install, restarts the systemd service, health-checks it, and rolls back automatically if the check fails.
 
 ---
 
-## License
+## 🙏 Acknowledgements
 
-[CC0 1.0 Universal](LICENSE) — public domain. Use freely for any purpose.
+Primerool stands on the shoulders of [Primer3](https://github.com/primer3-org/primer3) and [primer3-py](https://github.com/libnano/primer3-py), [MAFFT](https://mafft.cbrc.jp/alignment/software/), the [Ensembl REST API](https://rest.ensembl.org/), [NCBI E-utilities and BLAST](https://www.ncbi.nlm.nih.gov/), and [IDT OligoAnalyzer](https://www.idtdna.com/pages/tools/oligoanalyzer). Nearest-neighbour parameters follow SantaLucia & Hicks (2004); folding energies follow Mathews *et al.* (2004).
+
+## 📄 License
+
+Released into the public domain under [CC0 1.0 Universal](LICENSE): use it freely, for any purpose.
+
+<div align="center">
+<br />
+<sub>Made for the bench by <b>Vojtěch Rejtar</b> · <a href="https://primerool.ubch.sci.muni.cz/">primerool.ubch.sci.muni.cz</a></sub>
+</div>

@@ -3,8 +3,7 @@ import { useSessionState } from '../session/sessionContext';
 import { searchGene } from '../api/gene';
 import { blastSequence, type BlastHit } from '../api/blast';
 import type { Transcript } from '../api/gene';
-import type { SequenceData } from '../api/sequence';
-import { isAccessionId, cleanDNA } from '../utils/dna';
+import { isAccessionId } from '../utils/dna';
 import { SPECIES_BY_KINGDOM, KINGDOM_LABELS, findKingdomForSpecies, type Kingdom } from '../utils/species';
 import BlastResultsTable from './BlastResultsTable';
 import SnpBatchPanel from './SnpBatchPanel';
@@ -17,7 +16,11 @@ import { controlClasses } from './ui/TextInput';
 
 interface Props {
   onGeneFound: (geneName: string, species: string, apiSource: 'ensembl' | 'ncbi', transcripts: Transcript[]) => void;
-  onCustomSequence: (data: SequenceData) => void;
+  /** Which input the panel shows - owned by App, which also hides the
+   * gene-only sections (transcript, sequence, automatic design) while the
+   * user is in the FASTA/BLAST mode. */
+  inputMode: 'gene' | 'fasta';
+  onInputModeChange: (mode: 'gene' | 'fasta') => void;
   /** Fired whenever the organism toggle's effective species changes
    * (kingdom/species pick, custom-species text, or a BLAST-driven
    * `syncDropdownsToSpecies`) - lets App track "the organism the user is
@@ -25,8 +28,7 @@ interface Props {
   onSpeciesSelectionChange?: (species: string) => void;
 }
 
-export default function InputPanel({ onGeneFound, onCustomSequence, onSpeciesSelectionChange }: Props) {
-  const [inputMode, setInputMode] = useSessionState<'gene' | 'fasta'>('input.inputMode', 'gene');
+export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: setInputMode, onSpeciesSelectionChange }: Props) {
   const [apiSource, setApiSource] = useSessionState<'ensembl' | 'ncbi'>('input.apiSource', 'ncbi');
   const [kingdom, setKingdom] = useSessionState<Kingdom>('input.kingdom', 'animals');
   const [speciesValue, setSpeciesValue] = useSessionState('input.speciesValue', 'homo_sapiens');
@@ -172,44 +174,6 @@ export default function InputPanel({ onGeneFound, onCustomSequence, onSpeciesSel
     void runSearchGene(hit.gene_symbol, species, apiSource);
   }
 
-  function useCustomSequence() {
-    setError(null);
-    const lines = fastaInput.split(/\r?\n/);
-    const seqLines = lines.filter((l) => l.trim() && !l.trim().startsWith('>'));
-    const sequence = cleanDNA(seqLines.join(''));
-
-    if (sequence.length < 20) {
-      setError('Sequence too short (need at least 20 bp). Please paste a valid DNA sequence.');
-      return;
-    }
-
-    const data: SequenceData = {
-      gene_name: 'Custom sequence',
-      transcript_id: 'custom',
-      transcript_name: 'Custom sequence',
-      chrom: '',
-      strand: '+',
-      gene_start_genomic: 0,
-      gene_end_genomic: 0,
-      upstream_len: 0,
-      gene_len: sequence.length,
-      downstream_len: 0,
-      utr5_len: 0,
-      upstream_seq: '',
-      gene_seq: sequence,
-      downstream_seq: '',
-      spliced_seq: sequence,
-      spliced_exons_seq: sequence,
-      junctions: [],
-      annotations: [],
-      include_introns: false,
-      include_utr: false,
-    };
-    setWarning(null);
-    setSuccess(`Custom sequence loaded (${sequence.length} bp). Scroll down to view the sequence and design primers.`);
-    onCustomSequence(data);
-  }
-
   const speciesOptions = SPECIES_BY_KINGDOM[kingdom];
 
   return (
@@ -346,9 +310,6 @@ export default function InputPanel({ onGeneFound, onCustomSequence, onSpeciesSel
           <div className="flex flex-wrap gap-3">
             <Button variant="primary" disabled={blastRunning} onClick={() => void identifySequence()} className="w-full sm:w-auto">
               {blastRunning ? 'Running BLAST…' : 'Identify Sequence (NCBI BLAST)'}
-            </Button>
-            <Button onClick={useCustomSequence} className="w-full sm:w-auto">
-              Use Custom Sequence
             </Button>
             <Button onClick={() => setShowSnpBatch((v) => !v)} className="w-full sm:w-auto">
               {showSnpBatch ? 'Hide SNP batch importer' : 'Import SNP flanking blocks (batch)'}

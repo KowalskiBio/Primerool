@@ -68,6 +68,11 @@ function App() {
   // the user is analyzing can still be found.
   const [selectedSpecies, setSelectedSpecies] = useSessionState('app.selectedSpecies', 'homo_sapiens');
   const [apiSource, setApiSource] = useSessionState<'ensembl' | 'ncbi'>('app.apiSource', 'ncbi');
+  // The input panel's mode. Sections 2-4 (transcript, sequence, automatic
+  // design) belong to the gene search, so they're hidden - not cleared -
+  // while the FASTA/BLAST mode is shown, and come back as they were.
+  const [inputMode, setInputMode] = useSessionState<'gene' | 'fasta'>('input.inputMode', 'gene');
+  const geneMode = inputMode === 'gene';
   const [transcripts, setTranscripts] = useSessionState<Transcript[]>('app.transcripts', []);
   const [sequenceData, setSequenceData] = useSessionState<SequenceData | null>('app.sequenceData', null);
   const [truncateIntrons, setTruncateIntrons] = useSessionState('app.truncateIntrons', true);
@@ -222,11 +227,6 @@ function App() {
     setSequenceData(null);
   }
 
-  function handleCustomSequence(data: SequenceData) {
-    setTranscripts([]);
-    setSequenceData(data);
-  }
-
   /** `null` clears that slot (e.g. removing a set from the primer list). */
   function handleSelect(key: keyof Selections, value: Selection | null) {
     // A mutant probe only makes sense beside its wild-type allele probe -
@@ -332,10 +332,10 @@ function App() {
 
       <main className="mx-auto max-w-[110rem] px-4 py-6 sm:px-6 lg:px-8">
         <Section step={1} title="Input Sequence" persistKey="section.input">
-          <InputPanel onGeneFound={handleGeneFound} onCustomSequence={handleCustomSequence} onSpeciesSelectionChange={setSelectedSpecies} />
+          <InputPanel onGeneFound={handleGeneFound} inputMode={inputMode} onInputModeChange={setInputMode} onSpeciesSelectionChange={setSelectedSpecies} />
         </Section>
 
-        {transcripts.length > 0 && (
+        {geneMode && transcripts.length > 0 && (
           <Section step={2} title="Select Transcript & Configure" persistKey="section.transcript">
             <TranscriptPanel
               key={`${geneName}-${species}-${apiSource}`}
@@ -350,7 +350,7 @@ function App() {
           </Section>
         )}
 
-        {sequenceData && (
+        {geneMode && sequenceData && (
           <Section step={3} title="Sequence & Features" persistKey="section.features">
             <SequenceFeaturesPanel
               data={sequenceData}
@@ -368,7 +368,7 @@ function App() {
           </Section>
         )}
 
-        {sequenceData && !isCustomSequence && (
+        {geneMode && sequenceData && !isCustomSequence && (
           <Section step={4} title="Primer Design: Automatic" persistKey="section.auto">
             <AutoDesignPanel
               data={sequenceData}

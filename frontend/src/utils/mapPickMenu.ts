@@ -11,7 +11,8 @@ export const ALL_PICK_KINDS: readonly PickKind[] = ['wga', 'general', 'junction'
 
 /** Inclusive length limits (bp) per action - loose on purpose: they only
  * rule out selections an action can't sensibly handle. */
-const LIMITS = {
+export const LIMITS = {
+  /** Also bounds resizing a primer/probe by dragging its ends in the map. */
   primer: [10, 60],
   structure: [5, 100],
   blast: [20, 10_000],

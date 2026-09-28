@@ -71,7 +71,7 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds }: Option
     const pickKey = pickEl?.dataset.pickKey as keyof Selections | undefined;
     if (pickKey && selections[pickKey]) {
       e.preventDefault();
-      setMenu({ x: e.clientX, y: e.clientY, pickKey });
+      setMenu({ x: e.clientX, y: e.clientY, target: { pickKey } });
       return;
     }
     const target = resolveMapSelection(e.currentTarget);

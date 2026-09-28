@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import { alignSequences, designConserved, type ConservedPair, type ConservedCandidate } from '../api/align';
+import type { SequenceData } from '../api/sequence';
 import { ApiError } from '../api/client';
 import { parseMultiFasta } from '../utils/fasta';
+import { cleanDNA } from '../utils/dna';
 import ResultsTable from './ResultsTable';
 import Button from './ui/Button';
 import Checkbox from './ui/Checkbox';
@@ -21,8 +23,13 @@ import { fmt } from '../utils/format';
  * remaining budget covers. This ships a plain, functional raw-alignment
  * view instead - real MAFFT output, real conserved-region design against
  * it, just without Oligool's anchor-grid visualization layer. */
-export default function AlignmentPanel() {
+export default function AlignmentPanel({ loadedSequence }: { loadedSequence?: SequenceData | null }) {
   const [fastaText, setFastaText] = useSessionState('align.fastaText', '');
+  // When set, the currently loaded sequence (flanks + gene) is prepended to
+  // the alignment input as '>loaded query' - e.g. to compare the NCBI-sourced
+  // sequence the rest of the app is working against with Ensembl's take on
+  // the same transcript pasted below.
+  const [includeQuery, setIncludeQuery] = useSessionState('align.includeQuery', false);
   const [alignment, setAlignment] = useSessionState<string | null>('align.alignment', null);
   const [aligning, setAligning] = useState(false);
   const [alignError, setAlignError] = useState<string | null>(null);
@@ -44,6 +51,12 @@ export default function AlignmentPanel() {
     setCandidates(null);
     setPairs(null);
     const records = parseMultiFasta(fastaText);
+    if (includeQuery && loadedSequence) {
+      const querySeq = cleanDNA(
+        (loadedSequence.upstream_seq || '') + (loadedSequence.gene_seq || '') + (loadedSequence.downstream_seq || ''),
+      );
+      if (querySeq) records.unshift({ id: 'loaded query', seq: querySeq });
+    }
     if (records.length < 2) {
       setAlignError('Paste at least two FASTA sequences to align.');
       return;
@@ -110,6 +123,19 @@ export default function AlignmentPanel() {
         placeholder={'>seq1\nACGT…\n>seq2\nACGT…'}
         className={`${controlClasses} mb-3 resize-y p-3 font-mono`}
       />
+
+      {loadedSequence && (
+        <Checkbox
+          className="mb-3"
+          label={
+            <span className="text-sm">
+              Include the loaded sequence as the first entry (<span className="font-mono">&gt;loaded query</span>)
+            </span>
+          }
+          checked={includeQuery}
+          onChange={(e) => setIncludeQuery(e.target.checked)}
+        />
+      )}
 
       <Button variant="primary" disabled={aligning} onClick={() => void runAlign()}>
         {aligning ? 'Aligning…' : 'Align Sequences'}

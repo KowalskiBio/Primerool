@@ -16,7 +16,7 @@ async fn run_blast_on_a_tp53_fragment_returns_plausible_hits() {
     let sequence = "CTCAAAAGTCTAGAGCCACCGTCCAGGGAGCAGGTAGCTGCTGGGCTCCGGGGACACTTTGCGTTCGGGCTGGGAGCGTGCTTTCCACGACGGTGACACGCTTCCCTGGATTGGCCAGACTGCCTTCCGGGTCACTGCCATGGAGGAGCCGCAGTCAGATCCTAGCGTCGAGCCCCCTCTGAGTCAGGAAACATTTTCAGACCTATGGAAACTACTTCCTGAAAACAACGTTCTGTCCCCCTTGCCGTCCCAAGCAATGGATGATTTGATGCTGTCCCCGGACGATATTGAACAATGGTT";
     let client = reqwest::Client::new();
 
-    let hits = blast::run_blast(&client, sequence).await.expect("BLAST run should succeed");
+    let hits = blast::run_blast(&client, sequence, None).await.expect("BLAST run should succeed");
     assert!(!hits.is_empty(), "a 400bp human TP53 fragment should return at least one hit against nt");
 
     let top = &hits[0];

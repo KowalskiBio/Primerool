@@ -1,4 +1,5 @@
 import { postJson } from './client';
+import { getNcbiApiKey } from './ncbiApiKey';
 
 // Matches `crates/server/src/routes/blast.rs` (`BlastHitJson` flattens
 // `blast::parse::BlastHit` plus one extra `ensembl_species` field).
@@ -28,5 +29,6 @@ export interface BlastSequenceResponse {
 }
 
 export function blastSequence(sequence: string): Promise<BlastSequenceResponse> {
-  return postJson<BlastSequenceResponse>('/blast_sequence', { sequence });
+  // Server ignores an empty key; mirrors Oligool's `/search` request shape.
+  return postJson<BlastSequenceResponse>('/blast_sequence', { sequence, api_key: getNcbiApiKey() });
 }

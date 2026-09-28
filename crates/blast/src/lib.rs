@@ -39,21 +39,34 @@ pub struct SubmitResult {
     pub rtoe: u64,
 }
 
+/// Append the NCBI API key (E-utilities convention; NCBI BLAST accepts the
+/// same parameter) to a request when one was configured — an absent/`None`
+/// key leaves the request byte-identical to before.
+fn with_api_key<'a>(mut params: Vec<(&'a str, &'a str)>, api_key: Option<&'a str>) -> Vec<(&'a str, &'a str)> {
+    if let Some(key) = api_key {
+        params.push(("api_key", key));
+    }
+    params
+}
+
 /// Submit a BLAST search. Defaults to the 'nt' database for broader
 /// genomic coverage, `hitlist_size=10`, matching `submit_blast`'s Python
 /// defaults exactly.
-pub async fn submit_blast(client: &reqwest::Client, sequence: &str, database: &str, hitlist_size: u32) -> Result<SubmitResult, BlastError> {
+pub async fn submit_blast(client: &reqwest::Client, sequence: &str, database: &str, hitlist_size: u32, api_key: Option<&str>) -> Result<SubmitResult, BlastError> {
     let hitlist_size_s = hitlist_size.to_string();
-    let params = [
-        ("CMD", "Put"),
-        ("PROGRAM", "blastn"),
-        ("DATABASE", database),
-        ("QUERY", sequence),
-        ("HITLIST_SIZE", &hitlist_size_s),
-        ("FORMAT_TYPE", "XML"),
-        ("MEGABLAST", "on"),
-        ("tool", "primeroonline"),
-    ];
+    let params = with_api_key(
+        vec![
+            ("CMD", "Put"),
+            ("PROGRAM", "blastn"),
+            ("DATABASE", database),
+            ("QUERY", sequence),
+            ("HITLIST_SIZE", &hitlist_size_s),
+            ("FORMAT_TYPE", "XML"),
+            ("MEGABLAST", "on"),
+            ("tool", "primeroonline"),
+        ],
+        api_key,
+    );
 
     // POST (not GET) to support long sequences (>2kb), matching Python.
     let resp = client.post(BLAST_URL).form(&params).timeout(Duration::from_secs(30)).send().await?;
@@ -72,7 +85,7 @@ pub async fn submit_blast(client: &reqwest::Client, sequence: &str, database: &s
 /// checks — deliberately does NOT sleep the initial `rtoe` estimate
 /// upfront, so fast completions are caught earlier while still respecting
 /// NCBI's ">=10s between polls" policy, matching the Python comment.
-pub async fn poll_blast(client: &reqwest::Client, rid: &str, max_wait: Duration) -> Result<(), BlastError> {
+pub async fn poll_blast(client: &reqwest::Client, rid: &str, max_wait: Duration, api_key: Option<&str>) -> Result<(), BlastError> {
     let mut elapsed = Duration::ZERO;
     while elapsed < max_wait {
         tokio::time::sleep(POLL_INTERVAL).await;
@@ -80,7 +93,7 @@ pub async fn poll_blast(client: &reqwest::Client, rid: &str, max_wait: Duration)
 
         let resp = client
             .get(BLAST_URL)
-            .query(&[("CMD", "Get"), ("FORMAT_OBJECT", "SearchInfo"), ("RID", rid)])
+            .query(&with_api_key(vec![("CMD", "Get"), ("FORMAT_OBJECT", "SearchInfo"), ("RID", rid)], api_key))
             .timeout(Duration::from_secs(30))
             .send()
             .await?;
@@ -101,10 +114,10 @@ pub async fn poll_blast(client: &reqwest::Client, rid: &str, max_wait: Duration)
 }
 
 /// Retrieve BLAST results in XML format.
-pub async fn get_blast_results(client: &reqwest::Client, rid: &str) -> Result<String, BlastError> {
+pub async fn get_blast_results(client: &reqwest::Client, rid: &str, api_key: Option<&str>) -> Result<String, BlastError> {
     let resp = client
         .get(BLAST_URL)
-        .query(&[("CMD", "Get"), ("FORMAT_TYPE", "XML"), ("RID", rid)])
+        .query(&with_api_key(vec![("CMD", "Get"), ("FORMAT_TYPE", "XML"), ("RID", rid)], api_key))
         .timeout(Duration::from_secs(60))
         .send()
         .await?;
@@ -113,10 +126,10 @@ pub async fn get_blast_results(client: &reqwest::Client, rid: &str) -> Result<St
 
 /// Full BLAST pipeline: submit, poll, retrieve, parse. Blocking (in the
 /// sense of taking a long time) — may take up to ~3 minutes.
-pub async fn run_blast(client: &reqwest::Client, sequence: &str) -> Result<Vec<parse::BlastHit>, BlastError> {
-    let submitted = submit_blast(client, sequence, "nt", 10).await?;
-    poll_blast(client, &submitted.rid, MAX_WAIT).await?;
-    let xml = get_blast_results(client, &submitted.rid).await?;
+pub async fn run_blast(client: &reqwest::Client, sequence: &str, api_key: Option<&str>) -> Result<Vec<parse::BlastHit>, BlastError> {
+    let submitted = submit_blast(client, sequence, "nt", 10, api_key).await?;
+    poll_blast(client, &submitted.rid, MAX_WAIT, api_key).await?;
+    let xml = get_blast_results(client, &submitted.rid, api_key).await?;
     parse::parse_blast_results(&xml)
 }
 

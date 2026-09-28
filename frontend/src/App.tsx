@@ -12,8 +12,10 @@ import ManualDesignPanel from './components/ManualDesignPanel';
 import AlignmentPanel from './components/AlignmentPanel';
 import IdtSettingsPanel, { type IdtCredentials } from './components/IdtSettingsPanel';
 import SessionRestoreDialog from './components/SessionRestoreDialog';
+import SettingsModal, { DEFAULT_THEME_PREFS, type ThemePrefs } from './components/SettingsModal';
 import Button from './components/ui/Button';
 import { useSession, useSessionState } from './session/sessionContext';
+import { applyAccentPreset, clearAccentOverrides, DEFAULT_WALLPAPER_OPACITY } from './theme';
 
 function SunIcon() {
   return (
@@ -43,6 +45,15 @@ function ThemeToggle({ theme, onThemeChange }: { theme: 'light' | 'dark'; onThem
     >
       {dark ? <SunIcon /> : <MoonIcon />}
     </button>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="h-4 w-4">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
   );
 }
 
@@ -116,6 +127,95 @@ function App() {
     document.documentElement.classList.toggle('dark', t === 'dark');
   }
 
+  // Machine-local settings shared with Oligool's storage keys (see
+  // `session.ts`: prefs like these intentionally stay out of session files).
+  const [ncbiApiKey, setNcbiApiKey] = useState(() => localStorage.getItem('ncbi_api_key') || '');
+  const [wallpaperUrl, setWallpaperUrl] = useState(() => localStorage.getItem('wallpaper_url') || '');
+  const [wallpaperOpacity, setWallpaperOpacity] = useState(() => {
+    const v = localStorage.getItem('wallpaper_opacity');
+    return v ? parseInt(v, 10) : DEFAULT_WALLPAPER_OPACITY;
+  });
+  const [accentPreset, setAccentPreset] = useState(() => localStorage.getItem('accent_preset') || '');
+  const [customAccentColor, setCustomAccentColor] = useState(() => localStorage.getItem('custom_accent_color') || '#1d4ed8');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  function handleApiKeyChange(key: string) {
+    setNcbiApiKey(key);
+    const trimmed = key.trim();
+    if (trimmed) localStorage.setItem('ncbi_api_key', trimmed);
+    else localStorage.removeItem('ncbi_api_key');
+  }
+
+  function handleWallpaperChange(url: string) {
+    setWallpaperUrl(url);
+    if (!url) {
+      localStorage.removeItem('wallpaper_url');
+      return;
+    }
+    try {
+      localStorage.setItem('wallpaper_url', url);
+    } catch {
+      // Uploaded images are data URLs; a big one blows the ~5MB quota, in
+      // which case it works for this session but isn't persisted.
+      localStorage.removeItem('wallpaper_url');
+    }
+  }
+
+  function handleWallpaperOpacityChange(opacity: number) {
+    setWallpaperOpacity(opacity);
+    localStorage.setItem('wallpaper_opacity', String(opacity));
+  }
+
+  function handleAccentPresetChange(name: string) {
+    setAccentPreset(name);
+    if (name) localStorage.setItem('accent_preset', name);
+    else localStorage.removeItem('accent_preset');
+  }
+
+  function handleCustomAccentColorChange(hex: string) {
+    setCustomAccentColor(hex);
+    localStorage.setItem('custom_accent_color', hex);
+  }
+
+  const themePrefs: ThemePrefs = { wallpaperUrl, wallpaperOpacity, accentPreset, customAccentColor };
+
+  function handleThemePrefsChange(next: ThemePrefs) {
+    if (next.wallpaperUrl !== wallpaperUrl) handleWallpaperChange(next.wallpaperUrl);
+    if (next.wallpaperOpacity !== wallpaperOpacity) handleWallpaperOpacityChange(next.wallpaperOpacity);
+    if (next.accentPreset !== accentPreset) handleAccentPresetChange(next.accentPreset);
+    if (next.customAccentColor !== customAccentColor) handleCustomAccentColorChange(next.customAccentColor);
+  }
+
+  function handleResetTheme() {
+    handleWallpaperChange('');
+    handleWallpaperOpacityChange(DEFAULT_WALLPAPER_OPACITY);
+    handleAccentPresetChange('');
+    handleCustomAccentColorChange(DEFAULT_THEME_PREFS.customAccentColor);
+  }
+
+  // Applies the `.dark` class and (re)applies accent overrides on mount and
+  // whenever theme/preset change. Overrides are inline root styles, which
+  // win equally over the `:root` and `.dark` blocks in index.css, so they
+  // must be re-applied when the mode flips to pick that mode's shade set.
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    if (accentPreset) applyAccentPreset(accentPreset, theme, customAccentColor);
+    else clearAccentOverrides();
+  }, [theme, accentPreset, customAccentColor]);
+
+  // `,` toggles the settings modal (same shortcut as Oligool), unless the
+  // user is typing in a form field.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== ',' || e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+      setSettingsOpen((open) => !open);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   function handleGeneFound(name: string, sp: string, source: 'ensembl' | 'ncbi', ts: Transcript[]) {
     setGeneName(name);
     setSpecies(sp);
@@ -181,6 +281,15 @@ function App() {
 
   return (
     <div className="min-h-screen">
+      {/* Wallpaper: fixed full-viewport layer behind the app. The root div
+       * paints no background (index.css is transparent), so this shows
+       * through everywhere; surfaces (`bg-surface`) sit opaquely above it. */}
+      {wallpaperUrl && (
+        <div
+          className="pointer-events-none fixed inset-0 z-0"
+          style={{ backgroundImage: `url(${wallpaperUrl})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: wallpaperOpacity / 100 }}
+        />
+      )}
       <header className="sticky top-0 z-20 border-b border-line bg-base">
         <div className="mx-auto flex h-14 max-w-[110rem] items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-baseline gap-2.5">
@@ -211,6 +320,14 @@ function App() {
               Save
             </Button>
             <ThemeToggle theme={theme} onThemeChange={applyTheme} />
+            <button
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Settings"
+              title="Settings (,)"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              <SettingsIcon />
+            </button>
           </div>
         </div>
       </header>
@@ -288,6 +405,16 @@ function App() {
           <IdtSettingsPanel credentials={idtCredentials} onChange={handleIdtCredentialsChange} />
         </Section>
       </main>
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        apiKey={ncbiApiKey}
+        onApiKeyChange={handleApiKeyChange}
+        theme={themePrefs}
+        onThemeChange={handleThemePrefsChange}
+        onResetTheme={handleResetTheme}
+      />
 
       <SessionRestoreDialog
         session={session.pending}

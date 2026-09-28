@@ -17,6 +17,11 @@ use crate::state::AppState;
 #[serde(default)]
 pub struct BlastSequenceRequest {
     pub sequence: String,
+    /// The caller's own NCBI API key (configured in the frontend settings,
+    /// stored only in their browser) — forwarded to NCBI BLAST and the
+    /// E-utilities accession fast-path below to lift NCBI's anonymous
+    /// rate limits. Empty when unset.
+    pub api_key: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -70,6 +75,10 @@ pub async fn blast_sequence(State(state): State<AppState>, Json(req): Json<Blast
         ParsedInput::Accession(a) => (a, true),
         ParsedInput::Sequence(s) => (s, false),
     };
+    let api_key = match req.api_key.trim() {
+        "" => None,
+        key => Some(key),
+    };
 
     // Fast path (ported from `main.py::blast_sequence`): resolve accession
     // IDs directly via NCBI E-utilities. Instant, and the only working
@@ -77,7 +86,7 @@ pub async fn blast_sequence(State(state): State<AppState>, Json(req): Json<Blast
     // blastn/"nt" cannot handle those. On any failure, fall through to
     // the real BLAST run (old behavior).
     if is_accession {
-        match state.ncbi.resolve_accession(&sequence).await {
+        match state.ncbi.resolve_accession_with_key(&sequence, api_key).await {
             Ok(Some(res)) => {
                 let ensembl_species = blast::parse::organism_to_ensembl_species(&res.organism);
                 let hit = blast::parse::BlastHit {
@@ -103,7 +112,7 @@ pub async fn blast_sequence(State(state): State<AppState>, Json(req): Json<Blast
         }
     }
 
-    let hits = blast::run_blast(&state.http_client, &sequence).await?;
+    let hits = blast::run_blast(&state.http_client, &sequence, api_key).await?;
 
     if hits.is_empty() {
         return Err(AppError::not_found("No significant matches found."));

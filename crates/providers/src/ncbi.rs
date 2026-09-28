@@ -83,6 +83,13 @@ impl NcbiProvider {
     /// Direct port of `ncbi_api.py::_get`: rate-limited, single-attempt,
     /// no retry (unlike Ensembl's `_get`).
     async fn get(&self, url: &str, params: &[(&str, &str)], timeout: Duration) -> Result<reqwest::Response, ProviderError> {
+        self.get_with_key(url, params, None, timeout).await
+    }
+
+    /// `get` plus an optional per-request NCBI API key (appended as the
+    /// `api_key` query parameter). All callers go through here with `None`
+    /// except the ones made key-aware by the BLAST sequence route.
+    async fn get_with_key(&self, url: &str, params: &[(&str, &str)], api_key: Option<&str>, timeout: Duration) -> Result<reqwest::Response, ProviderError> {
         {
             let mut last = self.last_request.lock().await;
             let elapsed = last.elapsed();
@@ -92,7 +99,11 @@ impl NcbiProvider {
             *last = Instant::now();
         }
 
-        let resp = self.client.get(url).query(params).timeout(timeout).send().await?;
+        let mut req = self.client.get(url).query(params);
+        if let Some(key) = api_key {
+            req = req.query(&[("api_key", key)]);
+        }
+        let resp = req.timeout(timeout).send().await?;
         let status = resp.status().as_u16();
         if status >= 400 {
             let message = resp.text().await.unwrap_or_default();
@@ -102,7 +113,11 @@ impl NcbiProvider {
     }
 
     async fn get_json(&self, url: &str, params: &[(&str, &str)]) -> Result<Value, ProviderError> {
-        let resp = self.get(url, params, Duration::from_secs(30)).await?;
+        self.get_json_with_key(url, params, None).await
+    }
+
+    async fn get_json_with_key(&self, url: &str, params: &[(&str, &str)], api_key: Option<&str>) -> Result<Value, ProviderError> {
+        let resp = self.get_with_key(url, params, api_key, Duration::from_secs(30)).await?;
         resp.json::<Value>().await.map_err(Into::into)
     }
 
@@ -192,8 +207,12 @@ impl NcbiProvider {
 
     /// Port of `ncbi_api.py::_esearch_ids`.
     async fn esearch_ids(&self, db: &str, term: &str, retmax: usize) -> Result<Vec<String>, ProviderError> {
+        self.esearch_ids_with_key(db, term, retmax, None).await
+    }
+
+    async fn esearch_ids_with_key(&self, db: &str, term: &str, retmax: usize, api_key: Option<&str>) -> Result<Vec<String>, ProviderError> {
         let retmax = retmax.to_string();
-        let esearch = self.get_json(&format!("{EUTILS}/esearch.fcgi"), &[("db", db), ("term", term), ("retmode", "json"), ("retmax", &retmax)]).await?;
+        let esearch = self.get_json_with_key(&format!("{EUTILS}/esearch.fcgi"), &[("db", db), ("term", term), ("retmode", "json"), ("retmax", &retmax)], api_key).await?;
         Ok(esearch["esearchresult"]["idlist"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default())
     }
 
@@ -251,9 +270,16 @@ impl NcbiProvider {
         }
     }
 
-    /// Port of `ncbi_api.py::_elink_protein_to_gene`.
+    /// Port of `ncbi_api.py::_elink_protein_to_gene`. No callers right now
+    /// (the only protein->gene path, `resolve_accession`, runs with a key) —
+    /// kept as the keyless entry point for parity with the other helpers.
+    #[allow(dead_code)]
     async fn elink_protein_to_gene(&self, protein_uid: &str) -> Result<Vec<String>, ProviderError> {
-        let elink = self.get_json(&format!("{EUTILS}/elink.fcgi"), &[("dbfrom", "protein"), ("db", "gene"), ("id", protein_uid), ("retmode", "json")]).await?;
+        self.elink_protein_to_gene_with_key(protein_uid, None).await
+    }
+
+    async fn elink_protein_to_gene_with_key(&self, protein_uid: &str, api_key: Option<&str>) -> Result<Vec<String>, ProviderError> {
+        let elink = self.get_json_with_key(&format!("{EUTILS}/elink.fcgi"), &[("dbfrom", "protein"), ("db", "gene"), ("id", protein_uid), ("retmode", "json")], api_key).await?;
         let mut ids: Vec<String> = Vec::new();
         for linkset in elink["linksets"].as_array().into_iter().flatten() {
             for dbs in linkset["linksetdbs"].as_array().into_iter().flatten() {
@@ -274,23 +300,29 @@ impl NcbiProvider {
     /// Nucleotide accessions (NM_, NR_, XM_, XR_) are indexed in the gene
     /// db; protein accessions go protein-uid -> elink -> gene.
     pub async fn resolve_accession(&self, accession: &str) -> Result<Option<AccessionResolution>, ProviderError> {
+        self.resolve_accession_with_key(accession, None).await
+    }
+
+    /// `resolve_accession` carrying a per-request NCBI API key through to
+    /// every E-utilities round-trip it makes.
+    pub async fn resolve_accession_with_key(&self, accession: &str, api_key: Option<&str>) -> Result<Option<AccessionResolution>, ProviderError> {
         let base = accession.trim().split('.').next().unwrap_or_default();
         if base.is_empty() {
             return Ok(None);
         }
 
-        let mut ids = self.esearch_ids("gene", &format!("{base}[accn]"), 20).await?;
+        let mut ids = self.esearch_ids_with_key("gene", &format!("{base}[accn]"), 20, api_key).await?;
         if ids.is_empty() {
-            let pids = self.esearch_ids("protein", &format!("{base}[accn]"), 20).await?;
+            let pids = self.esearch_ids_with_key("protein", &format!("{base}[accn]"), 20, api_key).await?;
             if let Some(pid) = pids.first() {
-                ids = self.elink_protein_to_gene(pid).await?;
+                ids = self.elink_protein_to_gene_with_key(pid, api_key).await?;
             }
         }
         let Some(gene_id) = ids.into_iter().next() else {
             return Ok(None);
         };
 
-        let esummary = self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "gene"), ("id", &gene_id), ("retmode", "json")]).await?;
+        let esummary = self.get_json_with_key(&format!("{EUTILS}/esummary.fcgi"), &[("db", "gene"), ("id", &gene_id), ("retmode", "json")], api_key).await?;
         let summary = &esummary["result"][&gene_id];
         Ok(Some(AccessionResolution {
             gene_id,

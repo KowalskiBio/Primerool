@@ -131,8 +131,14 @@
 }
 
 @layer base {
+  html {
+    /* The page's own background color; kept transparent so an optional
+     * wallpaper layer (a fixed div rendered by the app) shows through. */
+    @apply bg-base;
+  }
   body {
-    @apply bg-base text-ink font-sans antialiased;
+    background-color: transparent;
+    @apply text-ink font-sans antialiased;
   }
 }
 

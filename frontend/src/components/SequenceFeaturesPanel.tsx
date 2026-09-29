@@ -142,7 +142,7 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
 
       {primerMode === 'junction' && showSplicedMap && (
         <div className="mt-6">
-          <SplicedSequenceViewer key={mapStrand} data={mapData} selections={mapSelections} onSelect={mapOnSelect} />
+          <SplicedSequenceViewer key={mapStrand} data={mapData} selections={mapSelections} onSelect={mapOnSelect} onHide={() => setShowSplicedMap(false)} />
         </div>
       )}
 

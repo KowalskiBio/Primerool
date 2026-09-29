@@ -9,6 +9,7 @@ import { computeDraggedInterval, type DragGeometry } from '../utils/dragInterval
 import { baseAtPoint, describeGenePosition, useBaseHover } from './BaseHoverTooltip';
 import { useMapPickMenu } from './useMapPickMenu';
 import { useMapDragSelect } from './useMapDragSelect';
+import Button from './ui/Button';
 
 interface Span {
   start: number;
@@ -114,6 +115,9 @@ interface Props {
   selections: Selections;
   /** Enables picks from the right-click menu and dragging picks. */
   onSelect?: (key: keyof Selections, value: Selection | null) => void;
+  /** Shows a "Hide exon map" button beside the heading, so the map can be
+   * closed where it is instead of from the toggle above the sequence map. */
+  onHide?: () => void;
 }
 
 /** A selection within one exon stands for the same gene stretch, so every
@@ -121,7 +125,7 @@ interface Props {
  * primers belong in the flanks, which this map doesn't show. */
 const EXON_MAP_PICKS: readonly PickKind[] = ['general', 'junction', 'arms', 'probe'];
 
-export default function SplicedSequenceViewer({ data, selections, onSelect }: Props) {
+export default function SplicedSequenceViewer({ data, selections, onSelect, onHide }: Props) {
   const interactive = Boolean(onSelect);
   const spliced = data.spliced_exons_seq || '';
 
@@ -357,7 +361,14 @@ export default function SplicedSequenceViewer({ data, selections, onSelect }: Pr
 
   return (
     <div>
-      <h3 className="mb-2 text-sm font-semibold text-ink">Spliced exon-only map (for exon-exon junction primers)</h3>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">Spliced exon-only map (for exon-exon junction primers)</h3>
+        {onHide && (
+          <Button size="sm" onClick={onHide}>
+            Hide exon map
+          </Button>
+        )}
+      </div>
       <div className="mb-3 rounded-md border border-line bg-surface-2 p-2 text-sm text-ink-muted">
         Junction positions in the sequence map refer to these sequences. Horizontal bars indicate exon boundaries. Drag a primer or probe to move it, or its end to resize it.
       </div>

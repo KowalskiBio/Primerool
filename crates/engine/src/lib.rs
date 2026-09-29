@@ -15,6 +15,7 @@ pub mod defaults;
 pub mod design_arms;
 pub mod design_flanking;
 pub mod design_from_sequence;
+pub mod design_general;
 pub mod design_internal;
 pub mod design_junction;
 pub mod design_probe;

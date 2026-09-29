@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
-import { designFlanking, designInternal, designJunction, type FlankingOligoResult, type InternalDesignPair, type JunctionPairResult } from '../api/design';
+import { designFlanking, designGeneral, designJunction, type DimerResult, type FlankingOligoResult, type GeneralPairResult, type JunctionPairResult } from '../api/design';
 import { ApiError } from '../api/client';
 import type { Selection, Selections } from '../utils/regionMapping';
-import { rawTupleToInterval } from '../utils/coords';
 import ResultsTable from './ResultsTable';
 import PrimerCard from './PrimerCard';
 import ArmsDesignPanel from './ArmsDesignPanel';
@@ -17,6 +16,14 @@ import { fmt, yesNo } from '../utils/format';
 import type { IdtCredentials } from '../utils/idtCredentials';
 
 type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
+
+/** `design_general::PRODUCT_SIZE_RANGE` on the server. */
+const GENERAL_PRODUCT_RANGE = '100–1000';
+
+/** A structure's ΔG in kcal/mol, or "none" when nothing folds. */
+function structureDg(r: DimerResult): string {
+  return r.structure_found && r.dg !== null ? fmt(r.dg) : 'none';
+}
 
 interface Props {
   data: SequenceData;
@@ -34,14 +41,14 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
   const [overlapMax, setOverlapMax] = useSessionState('auto.overlapMax', 12);
   const [ampliconMin, setAmpliconMin] = useSessionState('auto.ampliconMin', 80);
   const [ampliconMax, setAmpliconMax] = useSessionState('auto.ampliconMax', 220);
-  const [targetStart, setTargetStart] = useSessionState('auto.targetStart', 0);
-  const [targetEnd, setTargetEnd] = useSessionState('auto.targetEnd', 0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flankWindow, setFlankWindow] = useSessionState('auto.flankWindow', '');
   const [flankingResult, setFlankingResult] = useSessionState<{ forward: FlankingOligoResult[]; reverse: FlankingOligoResult[]; pairDg: number | null; pairFound: boolean } | null>('auto.flankingResult', null);
   const [junctionPairs, setJunctionPairs] = useSessionState<JunctionPairResult[] | null>('auto.junctionPairs', null);
-  const [generalPairs, setGeneralPairs] = useSessionState<InternalDesignPair[] | null>('auto.generalPairs', null);
+  // New key: sessions saved before whole-gene design hold target-based
+  // pairs in the old shape under `auto.generalPairs`.
+  const [generalPairs, setGeneralPairs] = useSessionState<GeneralPairResult[] | null>('auto.generalBestPairs', null);
   const [usedWgaFwdSeq, setUsedWgaFwdSeq] = useSessionState<string | null>('auto.usedWgaFwdSeq', null);
   const [usedWgaRevSeq, setUsedWgaRevSeq] = useSessionState<string | null>('auto.usedWgaRevSeq', null);
 
@@ -59,7 +66,7 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
 
   function selectGeneral(which: 'forward' | 'reverse', interval: [number, number], primerSeq: string, source: 'recommended' | 'manual' = 'recommended') {
     const [start, end] = interval;
-    onSelect(which === 'forward' ? 'geneForward' : 'geneReverse', { region: 'gene', start, end, primerSeq, bindingSeq: (data.gene_seq || '').substring(start, end), source });
+    onSelect(which === 'forward' ? 'geneForward' : 'geneReverse', { region: 'gene', start, end, primerSeq, bindingSeq: (data.gene_seq || '').substring(start, end), source, strand: which === 'forward' ? 'F' : 'R' });
   }
 
   async function runFlanking() {
@@ -131,25 +138,21 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
 
   async function runGeneral() {
     setError(null);
-    if (targetEnd <= targetStart) {
-      setError('Target end must be after target start.');
-      return;
-    }
     setLoading(true);
     setFlankingResult(null);
     setJunctionPairs(null);
     try {
-      const res = await designInternal(data.gene_seq, targetStart, targetEnd);
+      const res = await designGeneral(data.gene_seq);
       const pairs = res.primers;
       if (!pairs.length) {
-        setError('No primers found. Try different positions.');
+        setError('No primer pairs found in this gene.');
         setGeneralPairs(null);
         return;
       }
       setGeneralPairs(pairs);
       const first = pairs[0];
-      selectGeneral('forward', rawTupleToInterval(first.left.position, false), first.left.sequence);
-      selectGeneral('reverse', rawTupleToInterval(first.right.position, true), first.right.sequence);
+      selectGeneral('forward', first.left.interval, first.left.sequence);
+      selectGeneral('reverse', first.right.interval, first.right.sequence);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
       setGeneralPairs(null);
@@ -166,7 +169,7 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
         value={primerMode}
         onChange={onPrimerModeChange}
         options={[
-          { value: 'general', label: 'General', title: 'Primers anywhere in the gene' },
+          { value: 'general', label: 'General', title: 'The best primer pair anywhere in the gene' },
           { value: 'flanking', label: 'WGA', title: 'Primers in flanking regions' },
           { value: 'junction', label: 'Junction', title: 'Exon-exon junction primers' },
           { value: 'arms', label: 'SNP/indel', title: 'ARMS-PCR allele-specific primers' },
@@ -176,15 +179,8 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
       {primerMode === 'arms' && <ArmsDesignPanel data={data} species={species} apiSource={apiSource} onSelect={onSelect} idtCredentials={idtCredentials} />}
 
       {primerMode === 'general' && (
-        <div className="mb-6 rounded-md border border-line bg-surface-2 p-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label="Target start (bp, 0-based into gene sequence)">
-              <TextInput type="number" min={0} value={targetStart} onChange={(e) => setTargetStart(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
-            </Field>
-            <Field label="Target end (bp, exclusive)">
-              <TextInput type="number" min={0} value={targetEnd} onChange={(e) => setTargetEnd(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
-            </Field>
-          </div>
+        <div className="mb-6 rounded-md border border-line bg-surface-2 p-3 text-sm text-ink-muted">
+          Searches the whole gene for the best pairs: both primers at the same Tm, with as little hairpin, self-dimer and heterodimer structure as possible, for a {GENERAL_PRODUCT_RANGE} bp product. The best pair is highlighted on the map.
         </div>
       )}
 
@@ -324,18 +320,22 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
               { header: "Left (5'→3')", render: (p) => p.left.sequence, className: 'font-mono text-ink' },
               { header: "Right (5'→3')", render: (p) => p.right.sequence, className: 'font-mono text-ink' },
               { header: 'Product', render: (p) => p.product_size },
+              { header: 'Position', render: (p) => `${p.left.interval[0]}–${p.right.interval[1]}` },
               { header: 'Left Tm', render: (p) => fmt(p.left.tm) },
               { header: 'Right Tm', render: (p) => fmt(p.right.tm) },
-              { header: 'Left GC%', render: (p) => fmt(p.left.gc) },
-              { header: 'Right GC%', render: (p) => fmt(p.right.gc) },
+              { header: 'Left GC%', render: (p) => fmt(p.left.gc_percent) },
+              { header: 'Right GC%', render: (p) => fmt(p.right.gc_percent) },
+              { header: 'Hairpin ΔG (L / R)', render: (p) => `${structureDg(p.left.hairpin)} / ${structureDg(p.right.hairpin)}` },
+              { header: 'Self-dimer ΔG (L / R)', render: (p) => `${structureDg(p.left.homodimer)} / ${structureDg(p.right.homodimer)}` },
+              { header: 'Heterodimer ΔG', render: (p) => structureDg(p.pair_metrics.heterodimer) },
               {
                 header: 'Highlight',
                 render: (p) => (
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={() => selectGeneral('forward', rawTupleToInterval(p.left.position, false), p.left.sequence)}>
+                    <Button size="sm" onClick={() => selectGeneral('forward', p.left.interval, p.left.sequence)}>
                       Use L
                     </Button>
-                    <Button size="sm" onClick={() => selectGeneral('reverse', rawTupleToInterval(p.right.position, true), p.right.sequence)}>
+                    <Button size="sm" onClick={() => selectGeneral('reverse', p.right.interval, p.right.sequence)}>
                       Use R
                     </Button>
                   </div>

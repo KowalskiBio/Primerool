@@ -82,6 +82,37 @@ export function designInternal(sequence: string, target_start: number, target_en
 }
 
 // ---------------------------------------------------------------------
+// /design_primers — general: the best pairs anywhere in the sequence
+// ---------------------------------------------------------------------
+
+export interface GeneralOligoResult extends PrimerAnalysis {
+  /** `[start, end)` into the designed-on sequence (`gene_seq`). */
+  interval: [number, number];
+  /** Normalized `[start, length]`. */
+  position: [number, number];
+}
+
+export interface GeneralPairResult {
+  pair_number: number;
+  left: GeneralOligoResult;
+  right: GeneralOligoResult;
+  product_size: number;
+  pair_metrics: PairAnalysis;
+}
+
+export interface GeneralDesignResponse {
+  mode: 'general';
+  num_pairs: number;
+  primers: GeneralPairResult[];
+}
+
+/** No target or constraints: the server ranks pairs by matched Tm, then
+ * the least hairpin/self-dimer/heterodimer structure. */
+export function designGeneral(sequence: string): Promise<GeneralDesignResponse> {
+  return postJson<GeneralDesignResponse>('/design_primers', { mode: 'general', sequence });
+}
+
+// ---------------------------------------------------------------------
 // /design_primers — exon-exon junction
 // ---------------------------------------------------------------------
 

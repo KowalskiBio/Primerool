@@ -1,7 +1,7 @@
 //! `POST /design_primers`, dispatched on `mode`: exon-exon junction design (`mode=="internal"` +
 //! `junction_pos` present), classic internal `SEQUENCE_TARGET` design
-//! (`mode=="internal"` otherwise), or flanking/WGA design (any other
-//! `mode`).
+//! (`mode=="internal"` otherwise), the best pairs anywhere in the sequence
+//! (`mode=="general"`), or flanking/WGA design (any other `mode`).
 
 use axum::Json;
 use serde::Deserialize;
@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 
 use engine::backend::ThermoParams;
 use engine::backend_native::NativeBackend;
+use engine::analyze::{analyze_pair, analyze_primer};
 use engine::design_flanking::design_primers_for_flanking_regions;
+use engine::design_general::design_best_pairs;
 use engine::design_internal::design_primers_for_region;
 use engine::picker::ScoredCandidate;
 use engine::design_junction::{design_junction_primer_pairs, JunctionError, JunctionParams};
@@ -100,6 +102,9 @@ fn design_primers_sync(req: &DesignPrimersRequest) -> Result<Json<Value>, AppErr
     if mode == "internal" {
         return design_internal_mode(req, &backend);
     }
+    if mode == "general" {
+        return design_general_mode(req, &backend);
+    }
     design_flanking_mode(req, &backend)
 }
 
@@ -145,6 +150,47 @@ fn design_internal_mode(req: &DesignPrimersRequest, backend: &dyn engine::backen
         "mode": "internal",
         "num_pairs": primer_pairs.len(),
         "primers": primer_pairs,
+    })))
+}
+
+/// The best pairs anywhere in `sequence`, no target needed. Each primer
+/// carries the full QC (hairpin, self-dimer) and each pair its
+/// heterodimer, in the junction mode's shape; `interval` is `[start, end)`
+/// into `sequence`.
+fn design_general_mode(req: &DesignPrimersRequest, backend: &dyn engine::backend::ThermoBackend) -> Result<Json<Value>, AppError> {
+    let template = clean_template(&req.sequence);
+    if template.is_empty() {
+        return Err(AppError::bad_request("No sequence provided"));
+    }
+    let thermo = ThermoParams::default();
+    let result = design_best_pairs(backend, &template, thermo);
+    if result.pairs.is_empty() {
+        return Err(AppError::not_found(format!("No primer pairs found in this sequence ({}).", result.explain)));
+    }
+
+    let pairs_json: Vec<Value> = result
+        .pairs
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let side = |o: &ScoredCandidate| {
+                let interval = [o.candidate.start as i32, o.candidate.end as i32];
+                analysis_json_with(&analyze_primer(backend, &o.sequence, thermo), [("interval", json!(interval)), ("position", json!(normalized_tuple(interval)))])
+            };
+            json!({
+                "pair_number": i + 1,
+                "left": side(&p.left),
+                "right": side(&p.right),
+                "product_size": p.product_size,
+                "pair_metrics": analyze_pair(backend, &p.left.sequence, &p.right.sequence, thermo),
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "mode": "general",
+        "num_pairs": pairs_json.len(),
+        "primers": pairs_json,
     })))
 }
 

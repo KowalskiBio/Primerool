@@ -109,7 +109,7 @@ Placed primers and probes can be **dragged to move** or **resized by their ends*
 
 | Mode | For |
 |---|---|
-| **General** | Primers anywhere in the gene, to a target amplicon length |
+| **General** | The best pair anywhere in the gene, no input needed: matched Tm, least hairpin/dimer structure |
 | **WGA** | Whole-gene amplification from the flanking regions |
 | **Junction** | cDNA-specific qRT-PCR primers across exon–exon junctions |
 | **SNP/indel** | ARMS-PCR allele-specific primer sets |

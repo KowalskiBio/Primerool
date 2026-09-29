@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
-import { designFlanking, designGeneral, designJunction, type DimerResult, type FlankingOligoResult, type GeneralPairResult, type JunctionPairResult } from '../api/design';
+import { designFlanking, designGeneral, designJunction, type DimerResult, type FlankingOligoResult, type GeneralPairResult, type GeneralPrimerRegion, type JunctionPairResult } from '../api/design';
 import { ApiError } from '../api/client';
 import type { Selection, Selections } from '../utils/regionMapping';
 import ResultsTable from './ResultsTable';
 import PrimerCard from './PrimerCard';
 import ArmsDesignPanel from './ArmsDesignPanel';
+import GeneralPrimerPreview from './GeneralPrimerPreview';
+import { generalSelection } from '../utils/generalSelection';
 import SegmentedControl from './ui/SegmentedControl';
 import Field from './ui/Field';
 import TextInput from './ui/TextInput';
@@ -19,6 +21,18 @@ type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
 
 /** `design_general::PRODUCT_SIZE_RANGE` on the server. */
 const GENERAL_PRODUCT_RANGE = '100–1000';
+
+/** A primer sequence kept on one line, with its preview button. */
+function PrimerCell({ sequence, onShow }: { sequence: string; onShow: () => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="whitespace-nowrap font-mono text-ink">{sequence}</span>
+      <Button size="sm" onClick={onShow} title="See where this primer lands on the sequence map">
+        Show
+      </Button>
+    </div>
+  );
+}
 
 /** A structure's ΔG in kcal/mol, or "none" when nothing folds. */
 function structureDg(r: DimerResult): string {
@@ -33,9 +47,11 @@ interface Props {
   onPrimerModeChange: (mode: PrimerMode) => void;
   onSelect: (key: keyof Selections, value: Selection) => void;
   idtCredentials?: IdtCredentials;
+  /** The sequence map's intron truncation, reused by the primer preview. */
+  truncateIntrons: boolean;
 }
 
-export default function AutoDesignPanel({ data, species, apiSource, primerMode, onPrimerModeChange, onSelect, idtCredentials }: Props) {
+export default function AutoDesignPanel({ data, species, apiSource, primerMode, onPrimerModeChange, onSelect, idtCredentials, truncateIntrons }: Props) {
   const [junctionPos, setJunctionPos] = useSessionState('auto.junctionPos', '');
   const [overlapMin, setOverlapMin] = useSessionState('auto.overlapMin', 6);
   const [overlapMax, setOverlapMax] = useSessionState('auto.overlapMax', 12);
@@ -49,6 +65,13 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
   // New key: sessions saved before whole-gene design hold target-based
   // pairs in the old shape under `auto.generalPairs`.
   const [generalPairs, setGeneralPairs] = useSessionState<GeneralPairResult[] | null>('auto.generalBestPairs', null);
+  const [generalRegion, setGeneralRegion] = useSessionState<GeneralPrimerRegion>('auto.generalRegion', 'any');
+  const [preview, setPreview] = useState<{ pair: GeneralPairResult; side: 'left' | 'right' } | null>(null);
+  // Exon vs intron only means something on the genomic sequence; a
+  // spliced one is all exon, so the choice is hidden and ignored there.
+  const exonIntervals = (data.annotations || []).filter((a) => a.type === 'exon').map((a): [number, number] => [a.start, a.end]);
+  const canChooseRegion = data.include_introns && exonIntervals.length > 0;
+  const effectiveRegion: GeneralPrimerRegion = canChooseRegion ? generalRegion : 'any';
   const [usedWgaFwdSeq, setUsedWgaFwdSeq] = useSessionState<string | null>('auto.usedWgaFwdSeq', null);
   const [usedWgaRevSeq, setUsedWgaRevSeq] = useSessionState<string | null>('auto.usedWgaRevSeq', null);
 
@@ -64,9 +87,8 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
     onSelect(which === 'left' ? 'juncLeft' : 'juncRight', { region: 'spliced', start, end, primerSeq, bindingSeq: spliced.substring(start, end), source });
   }
 
-  function selectGeneral(which: 'forward' | 'reverse', interval: [number, number], primerSeq: string, source: 'recommended' | 'manual' = 'recommended') {
-    const [start, end] = interval;
-    onSelect(which === 'forward' ? 'geneForward' : 'geneReverse', { region: 'gene', start, end, primerSeq, bindingSeq: (data.gene_seq || '').substring(start, end), source, strand: which === 'forward' ? 'F' : 'R' });
+  function selectGeneral(which: 'forward' | 'reverse', interval: [number, number], primerSeq: string) {
+    onSelect(which === 'forward' ? 'geneForward' : 'geneReverse', generalSelection(data, which === 'forward' ? 'left' : 'right', interval, primerSeq));
   }
 
   async function runFlanking() {
@@ -142,7 +164,7 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
     setFlankingResult(null);
     setJunctionPairs(null);
     try {
-      const res = await designGeneral(data.gene_seq);
+      const res = await designGeneral(data.gene_seq, effectiveRegion, effectiveRegion === 'any' ? [] : exonIntervals);
       const pairs = res.primers;
       if (!pairs.length) {
         setError('No primer pairs found in this gene.');
@@ -180,7 +202,23 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
 
       {primerMode === 'general' && (
         <div className="mb-6 rounded-md border border-line bg-surface-2 p-3 text-sm text-ink-muted">
-          Searches the whole gene for the best pairs: both primers at the same Tm, with as little hairpin, self-dimer and heterodimer structure as possible, for a {GENERAL_PRODUCT_RANGE} bp product. The best pair is highlighted on the map.
+          {canChooseRegion && (
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <span className="font-medium text-ink">Primers in</span>
+              <SegmentedControl
+                size="sm"
+                ariaLabel="Where the primers may sit"
+                value={generalRegion}
+                onChange={setGeneralRegion}
+                options={[
+                  { value: 'exon', label: 'Exons', title: 'Both primers inside exons - they also match the transcript' },
+                  { value: 'intron', label: 'Introns', title: 'Both primers inside introns - genomic DNA only' },
+                  { value: 'any', label: "Don't care", title: 'Anywhere in the gene' },
+                ]}
+              />
+            </div>
+          )}
+          Searches the {effectiveRegion === 'exon' ? 'exons' : effectiveRegion === 'intron' ? 'introns' : 'whole gene'} for the best pairs: both primers at the same Tm, with as little hairpin, self-dimer and heterodimer structure as possible, for a {GENERAL_PRODUCT_RANGE} bp amplicon. The best pair is highlighted on the map.
         </div>
       )}
 
@@ -316,20 +354,19 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
             rows={generalPairs}
             keyOf={(p, i) => `g-${i}-${p.left.sequence}`}
             columns={[
-              { header: '#', render: (_p, i) => i + 1 },
-              { header: "Left (5'→3')", render: (p) => p.left.sequence, className: 'font-mono text-ink' },
-              { header: "Right (5'→3')", render: (p) => p.right.sequence, className: 'font-mono text-ink' },
-              { header: 'Product', render: (p) => p.product_size },
-              { header: 'Position', render: (p) => `${p.left.interval[0]}–${p.right.interval[1]}` },
-              { header: 'Left Tm', render: (p) => fmt(p.left.tm) },
-              { header: 'Right Tm', render: (p) => fmt(p.right.tm) },
-              { header: 'Left GC%', render: (p) => fmt(p.left.gc_percent) },
-              { header: 'Right GC%', render: (p) => fmt(p.right.gc_percent) },
+              { header: '#', render: (_p, i) => i + 1, width: '2.5rem' },
+              { header: "Left (5'→3')", render: (p) => <PrimerCell sequence={p.left.sequence} onShow={() => setPreview({ pair: p, side: 'left' })} />, width: '15rem' },
+              { header: "Right (5'→3')", render: (p) => <PrimerCell sequence={p.right.sequence} onShow={() => setPreview({ pair: p, side: 'right' })} />, width: '15rem' },
+              { header: 'Amplicon', render: (p) => `${p.product_size} bp`, width: '5.5rem' },
+              { header: 'Position', render: (p) => `${p.left.interval[0]}–${p.right.interval[1]}`, width: '7.5rem', className: 'whitespace-nowrap tabular-nums' },
+              { header: 'Tm L / R', render: (p) => `${fmt(p.left.tm)} / ${fmt(p.right.tm)}`, width: '5rem' },
+              { header: 'GC% L / R', render: (p) => `${fmt(p.left.gc_percent)} / ${fmt(p.right.gc_percent)}`, width: '5rem' },
               { header: 'Hairpin ΔG (L / R)', render: (p) => `${structureDg(p.left.hairpin)} / ${structureDg(p.right.hairpin)}` },
               { header: 'Self-dimer ΔG (L / R)', render: (p) => `${structureDg(p.left.homodimer)} / ${structureDg(p.right.homodimer)}` },
               { header: 'Heterodimer ΔG', render: (p) => structureDg(p.pair_metrics.heterodimer) },
               {
                 header: 'Highlight',
+                width: '8.5rem',
                 render: (p) => (
                   <div className="flex gap-2">
                     <Button size="sm" onClick={() => selectGeneral('forward', p.left.interval, p.left.sequence)}>
@@ -345,6 +382,8 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
           />
         </div>
       )}
+
+      <GeneralPrimerPreview data={data} preview={preview} truncateIntrons={truncateIntrons} onClose={() => setPreview(null)} />
 
       {primerMode === 'junction' && junctionPairs && (
         <div className="mt-6">

@@ -11,7 +11,7 @@ use engine::backend::ThermoParams;
 use engine::backend_native::NativeBackend;
 use engine::analyze::{analyze_pair, analyze_primer};
 use engine::design_flanking::design_primers_for_flanking_regions;
-use engine::design_general::design_best_pairs;
+use engine::design_general::{design_best_pairs, PrimerRegion};
 use engine::design_internal::design_primers_for_region;
 use engine::picker::ScoredCandidate;
 use engine::design_junction::{design_junction_primer_pairs, JunctionError, JunctionParams};
@@ -40,6 +40,11 @@ pub struct DesignPrimersRequest {
     /// of `upstream_seq`/`downstream_seq` (the bases nearest the target),
     /// instead of the full flank. `None`/absent uses the full flank.
     pub flank_window: Option<i64>,
+    /// General mode only: where the primers may sit - `"exon"`, `"intron"`
+    /// or `"any"` (the default) - judged against `exons`.
+    pub region: Option<String>,
+    /// General mode only: `[start, end)` exon intervals into `sequence`.
+    pub exons: Vec<[i64; 2]>,
 }
 
 impl Default for DesignPrimersRequest {
@@ -60,6 +65,8 @@ impl Default for DesignPrimersRequest {
             upstream_seq: None,
             downstream_seq: None,
             flank_window: None,
+            region: None,
+            exons: Vec::new(),
         }
     }
 }
@@ -162,8 +169,16 @@ fn design_general_mode(req: &DesignPrimersRequest, backend: &dyn engine::backend
     if template.is_empty() {
         return Err(AppError::bad_request("No sequence provided"));
     }
+    let exons: Vec<(usize, usize)> = req.exons.iter().filter(|[s, e]| *s >= 0 && e > s).map(|[s, e]| (*s as usize, *e as usize)).collect();
+    let region = match req.region.as_deref().unwrap_or("any") {
+        "any" => PrimerRegion::Anywhere,
+        "exon" | "intron" if exons.is_empty() => return Err(AppError::bad_request("Exon or intron primers need the gene's exon positions")),
+        "exon" => PrimerRegion::Exons(exons),
+        "intron" => PrimerRegion::Introns(exons),
+        other => return Err(AppError::bad_request(format!("Unknown primer region \"{other}\" (expected exon, intron or any)"))),
+    };
     let thermo = ThermoParams::default();
-    let result = design_best_pairs(backend, &template, thermo);
+    let result = design_best_pairs(backend, &template, &region, thermo);
     if result.pairs.is_empty() {
         return Err(AppError::not_found(format!("No primer pairs found in this sequence ({}).", result.explain)));
     }

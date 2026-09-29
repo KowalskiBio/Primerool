@@ -378,6 +378,7 @@ function App() {
               onPrimerModeChange={setPrimerMode}
               onSelect={handleSelect}
               idtCredentials={idtReady ? idtCredentials : undefined}
+              truncateIntrons={truncateIntrons}
             />
           </Section>
         )}

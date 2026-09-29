@@ -46,6 +46,37 @@ const STRUCTURE_WEIGHT: f64 = 0.25;
 /// strong contenders first.
 const HETERODIMER_POOL: usize = 400;
 
+/// Where in the gene the primers may sit. Exon intervals are `[start,
+/// end)` into the designed-on sequence; the amplicon itself may span
+/// anything in between.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum PrimerRegion {
+    #[default]
+    Anywhere,
+    /// Each primer entirely inside one exon.
+    Exons(Vec<(usize, usize)>),
+    /// Each primer entirely outside every exon.
+    Introns(Vec<(usize, usize)>),
+}
+
+impl PrimerRegion {
+    fn allows(&self, c: &Candidate) -> bool {
+        match self {
+            Self::Anywhere => true,
+            Self::Exons(exons) => exons.iter().any(|&(s, e)| c.start >= s && c.end <= e),
+            Self::Introns(exons) => exons.iter().all(|&(s, e)| c.end <= s || c.start >= e),
+        }
+    }
+
+    fn describe(&self) -> &'static str {
+        match self {
+            Self::Anywhere => "",
+            Self::Exons(_) => " inside an exon",
+            Self::Introns(_) => " inside an intron",
+        }
+    }
+}
+
 fn structure_penalty(r: &DimerResult) -> f64 {
     r.tm.map_or(0.0, |tm| (tm - STRUCTURE_FREE_TM).max(0.0) * STRUCTURE_WEIGHT)
 }
@@ -56,7 +87,7 @@ fn oligo_score(o: &ScoredCandidate) -> f64 {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeneralDesignResult {
-    /// Best first; no two pairs share a primer.
+    /// Best first; no two pairs' forward (or reverse) primers overlap.
     pub pairs: Vec<ScoredPair>,
     /// Why nothing was found, when `pairs` is empty.
     pub explain: String,
@@ -79,7 +110,7 @@ fn pick_per_bin(backend: &dyn ThermoBackend, sequence: &str, candidates: &[Candi
     picked
 }
 
-pub fn design_best_pairs(backend: &dyn ThermoBackend, sequence: &str, thermo: ThermoParams) -> GeneralDesignResult {
+pub fn design_best_pairs(backend: &dyn ThermoBackend, sequence: &str, region: &PrimerRegion, thermo: ThermoParams) -> GeneralDesignResult {
     let sequence = sequence.to_uppercase().replace(' ', "");
     let constraints = CandidateConstraints {
         size: SizeRange { min: DEFAULT_PRIMER_SIZE.min_size as usize, opt: DEFAULT_PRIMER_SIZE.opt_size as usize, max: DEFAULT_PRIMER_SIZE.max_size as usize },
@@ -91,12 +122,15 @@ pub fn design_best_pairs(backend: &dyn ThermoBackend, sequence: &str, thermo: Th
         return GeneralDesignResult { pairs: Vec::new(), explain: format!("sequence is {} bp, shorter than the {min_product} bp minimum product", sequence.len()) };
     }
 
-    let candidates = scan_candidates(&sequence, &constraints);
+    let candidates: Vec<Candidate> = scan_candidates(&sequence, &constraints).into_iter().filter(|c| region.allows(c)).collect();
+    if candidates.is_empty() {
+        return GeneralDesignResult { pairs: Vec::new(), explain: format!("no room for a {}-{} bp primer{}", constraints.size.min, constraints.size.max, region.describe()) };
+    }
     let left = pick_per_bin(backend, &sequence, &candidates, Strand::Forward, &constraints, thermo);
     let right = pick_per_bin(backend, &sequence, &candidates, Strand::Reverse, &constraints, thermo);
     if left.is_empty() || right.is_empty() {
         let side = if left.is_empty() { "forward" } else { "reverse" };
-        return GeneralDesignResult { pairs: Vec::new(), explain: format!("no {side} primer passes the Tm, GC, poly-X, hairpin and self-dimer limits") };
+        return GeneralDesignResult { pairs: Vec::new(), explain: format!("no {side} primer{} passes the Tm, GC, poly-X, hairpin and self-dimer limits", region.describe()) };
     }
 
     // Every left/right combination in product-size range, ranked on the
@@ -136,14 +170,15 @@ pub fn design_best_pairs(backend: &dyn ThermoBackend, sequence: &str, thermo: Th
         .collect();
     scored.sort_by(|a, b| a.penalty.partial_cmp(&b.penalty).unwrap());
 
-    // Distinct alternatives: a pair reusing a primer already returned is
-    // just a shifted copy of a better pair.
+    // Distinct alternatives: a pair whose forward or reverse primer
+    // overlaps one already returned is just a shifted copy of a better pair.
+    let overlaps = |a: &Candidate, b: &Candidate| a.start < b.end && b.start < a.end;
     let mut pairs: Vec<ScoredPair> = Vec::new();
     for p in scored {
         if pairs.len() >= NUM_RETURN {
             break;
         }
-        if pairs.iter().any(|q| q.left.candidate == p.left.candidate || q.right.candidate == p.right.candidate) {
+        if pairs.iter().any(|q| overlaps(&q.left.candidate, &p.left.candidate) || overlaps(&q.right.candidate, &p.right.candidate)) {
             continue;
         }
         pairs.push(p);
@@ -163,7 +198,7 @@ mod tests {
 
     #[test]
     fn finds_ranked_distinct_pairs_without_any_target() {
-        let result = design_best_pairs(&NativeBackend, TEMPLATE, ThermoParams::default());
+        let result = design_best_pairs(&NativeBackend, TEMPLATE, &PrimerRegion::Anywhere, ThermoParams::default());
         assert!(!result.pairs.is_empty(), "{}", result.explain);
         for p in &result.pairs {
             assert!(p.right.candidate.start >= p.left.candidate.end, "primers must not overlap");
@@ -177,14 +212,15 @@ mod tests {
         }
         for (i, a) in result.pairs.iter().enumerate() {
             for b in &result.pairs[i + 1..] {
-                assert!(a.left.candidate != b.left.candidate && a.right.candidate != b.right.candidate, "pairs must not share a primer");
+                let overlap = |x: &Candidate, y: &Candidate| x.start < y.end && y.start < x.end;
+                assert!(!overlap(&a.left.candidate, &b.left.candidate) && !overlap(&a.right.candidate, &b.right.candidate), "pairs must not be shifted copies of each other");
             }
         }
     }
 
     #[test]
     fn best_pair_has_closely_matched_tm() {
-        let result = design_best_pairs(&NativeBackend, TEMPLATE, ThermoParams::default());
+        let result = design_best_pairs(&NativeBackend, TEMPLATE, &PrimerRegion::Anywhere, ThermoParams::default());
         let best = &result.pairs[0];
         assert!((best.left.tm - best.right.tm).abs() < 2.0, "ΔTm {:.2}", (best.left.tm - best.right.tm).abs());
     }
@@ -195,16 +231,43 @@ mod tests {
         // a global top-N pick would never reach it.
         let filler = "A".repeat(5000);
         let seq = format!("{filler}{TEMPLATE}");
-        let result = design_best_pairs(&NativeBackend, &seq, ThermoParams::default());
+        let result = design_best_pairs(&NativeBackend, &seq, &PrimerRegion::Anywhere, ThermoParams::default());
         assert!(!result.pairs.is_empty(), "{}", result.explain);
         // A primer may start up to `max_poly_x` bases into the filler.
         let reach = filler.len() - crate::defaults::DEFAULT_MAX_POLY_X as usize;
         assert!(result.pairs.iter().all(|p| p.left.candidate.start >= reach));
     }
 
+    /// Exons at the two ends of the template, an "intron" in between.
+    const EXONS: [(usize, usize); 2] = [(0, 80), (150, 225)];
+
+    #[test]
+    fn exon_region_keeps_both_primers_inside_exons() {
+        let result = design_best_pairs(&NativeBackend, TEMPLATE, &PrimerRegion::Exons(EXONS.to_vec()), ThermoParams::default());
+        assert!(!result.pairs.is_empty(), "{}", result.explain);
+        let in_exon = |c: &Candidate| EXONS.iter().any(|&(s, e)| c.start >= s && c.end <= e);
+        assert!(result.pairs.iter().all(|p| in_exon(&p.left.candidate) && in_exon(&p.right.candidate)));
+    }
+
+    #[test]
+    fn intron_region_keeps_both_primers_off_the_exons() {
+        let exons = vec![(0, 20), (205, 225)];
+        let result = design_best_pairs(&NativeBackend, TEMPLATE, &PrimerRegion::Introns(exons.clone()), ThermoParams::default());
+        assert!(!result.pairs.is_empty(), "{}", result.explain);
+        let off_exons = |c: &Candidate| exons.iter().all(|&(s, e)| c.end <= s || c.start >= e);
+        assert!(result.pairs.iter().all(|p| off_exons(&p.left.candidate) && off_exons(&p.right.candidate)));
+    }
+
+    #[test]
+    fn region_without_room_for_a_primer_explains_itself() {
+        let result = design_best_pairs(&NativeBackend, TEMPLATE, &PrimerRegion::Exons(vec![(0, 10)]), ThermoParams::default());
+        assert!(result.pairs.is_empty());
+        assert!(result.explain.contains("inside an exon"), "{}", result.explain);
+    }
+
     #[test]
     fn too_short_sequence_explains_itself() {
-        let result = design_best_pairs(&NativeBackend, "ACGTACGTACGTACGTACGTACGT", ThermoParams::default());
+        let result = design_best_pairs(&NativeBackend, "ACGTACGTACGTACGTACGTACGT", &PrimerRegion::Anywhere, ThermoParams::default());
         assert!(result.pairs.is_empty());
         assert!(result.explain.contains("shorter than"), "{}", result.explain);
     }

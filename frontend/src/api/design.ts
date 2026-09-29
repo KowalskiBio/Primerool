@@ -106,10 +106,15 @@ export interface GeneralDesignResponse {
   primers: GeneralPairResult[];
 }
 
+/** Where general primers may sit: each primer inside an exon, inside an
+ * intron, or anywhere. */
+export type GeneralPrimerRegion = 'exon' | 'intron' | 'any';
+
 /** No target or constraints: the server ranks pairs by matched Tm, then
- * the least hairpin/self-dimer/heterodimer structure. */
-export function designGeneral(sequence: string): Promise<GeneralDesignResponse> {
-  return postJson<GeneralDesignResponse>('/design_primers', { mode: 'general', sequence });
+ * the least hairpin/self-dimer/heterodimer structure. `exons` are
+ * `[start, end)` into `sequence`, needed for `'exon'`/`'intron'`. */
+export function designGeneral(sequence: string, region: GeneralPrimerRegion = 'any', exons: [number, number][] = []): Promise<GeneralDesignResponse> {
+  return postJson<GeneralDesignResponse>('/design_primers', { mode: 'general', sequence, region, exons });
 }
 
 // ---------------------------------------------------------------------

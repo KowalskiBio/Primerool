@@ -43,12 +43,13 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
 
   const hasAnnotations = (data.annotations || []).length > 0;
 
-  // The sequence map's strand. Always the genomic plus strand by default;
-  // a minus-strand gene can be switched to its own (minus) strand, where
-  // the mRNA reads left to right. Remembered as the `data` it was chosen
-  // for, so loading another sequence falls back to plus. Only the map
-  // flips - selections are stored in `data`'s own coordinates and are
-  // translated into and out of the flipped view.
+  // The strand the maps (feature, sequence and exon map) are drawn on.
+  // Always the genomic plus strand by default; a minus-strand gene can be
+  // switched to its own (minus) strand, where the mRNA reads left to
+  // right. Remembered as the `data` it was chosen for, so loading another
+  // sequence falls back to plus. Only the maps flip - selections are
+  // stored in `data`'s own coordinates and are translated into and out of
+  // the flipped view.
   const [minusFor, setMinusFor] = useState<SequenceData | null>(null);
   const canFlip = data.strand === '-' && data.transcript_id !== 'custom';
   const mapStrand: '+' | '-' = canFlip && minusFor === data ? '-' : '+';
@@ -66,7 +67,7 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
         <>
           {showFeatureMap && (
             <div className="mb-8">
-              <FeatureMap key={`${data.transcript_id}-${data.gene_len}-${data.upstream_len}-${data.downstream_len}`} data={data} selections={selections} />
+              <FeatureMap key={`${data.transcript_id}-${data.gene_len}-${data.upstream_len}-${data.downstream_len}-${mapStrand}`} data={mapData} selections={mapSelections} />
             </div>
           )}
 
@@ -76,12 +77,12 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
               {canFlip && (
                 <SegmentedControl
                   size="sm"
-                  ariaLabel="Strand shown on the sequence map"
+                  ariaLabel="Strand shown on the maps"
                   value={mapStrand}
                   onChange={(v) => setMinusFor(v === '-' ? data : null)}
                   options={[
-                    { value: '+', label: '+ strand', title: 'Show the map on the genomic plus strand' },
-                    { value: '-', label: '− strand', title: `Show the map on the minus strand, where ${data.gene_name} is - its mRNA reads left to right` },
+                    { value: '+', label: '+ strand', title: 'Show the maps on the genomic plus strand' },
+                    { value: '-', label: '− strand', title: `Show the maps on the minus strand, where ${data.gene_name} is - its mRNA reads left to right` },
                   ]}
                 />
               )}
@@ -141,7 +142,7 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
 
       {primerMode === 'junction' && showSplicedMap && (
         <div className="mt-6">
-          <SplicedSequenceViewer data={data} selections={selections} onSelect={onSelect} />
+          <SplicedSequenceViewer key={mapStrand} data={mapData} selections={mapSelections} onSelect={mapOnSelect} />
         </div>
       )}
 

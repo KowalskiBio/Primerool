@@ -1,8 +1,7 @@
-//! Shared Primer3 constraint defaults, ported verbatim from
-//! `primer_utils.py::default_primer3_args()`. Every design module starts
-//! from these and layers overrides on top — kept as one source of truth
-//! here too, for whichever backend (`Primer3Backend` today,
-//! `NativeBackend` in Phase 5) ends up consuming them.
+//! Shared design constraint defaults. Every design module starts from these
+//! and layers overrides on top. Values originally mirrored Primer3's own
+//! settings in the legacy Python app and are kept, so designs stay
+//! comparable to what users know from Primer3.
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PrimerSizeConstraints {
@@ -57,6 +56,12 @@ pub const JUNCTION_DEFAULT_MAX_CANDIDATES: u32 = 25;
 
 pub const DEFAULT_MAX_POLY_X: u32 = 5;
 pub const DEFAULT_MAX_NS_ACCEPTED: u32 = 0;
+
+/// Structure-stability rejections (°C), Primer3's `PRIMER_MAX_HAIRPIN_TH`,
+/// `PRIMER_MAX_SELF_ANY_TH` and `PRIMER_PAIR_MAX_COMPL_ANY_TH` defaults.
+pub const DEFAULT_MAX_HAIRPIN_TM: f64 = 47.0;
+pub const DEFAULT_MAX_SELF_DIMER_TM: f64 = 47.0;
+pub const DEFAULT_MAX_PAIR_DIMER_TM: f64 = 47.0;
 
 /// ARMS-PCR (`design_arms`) constraints — no Python original (new feature);
 /// values follow standard ARMS/MAMA-PCR practice, not a port.

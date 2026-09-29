@@ -3,15 +3,11 @@
 //! persisted server-side (see `crates/idt`'s own docs on why that crate
 //! has no logging of its own at all).
 //!
-//! `/idt/analyze` merges IDT's raw results with a local `engine::analyze`
-//! recompute, using whichever `engine` the request selects (`"strider"`
-//! default, or `"primer3"` — see `crate::routes::select_backend`). When
-//! `engine="strider"`, the response also carries suboptimal-dimer and
-//! dot-bracket structure data straight from `thermo_core::thermo`
+//! `/idt/analyze` merges IDT's raw results with a local Strider
+//! `engine::analyze` recompute, plus suboptimal-dimer and dot-bracket
+//! structure data straight from `thermo_core::thermo`
 //! (`dimer_thermo_subopt`/`hairpin_thermo`) — the piece of Oligool's own
-//! `_run_strider_analysis` (ViennaRNA-style structure enumeration) that a
-//! plain `Primer3Backend` recompute has no equivalent of, since primer3's
-//! `thal()` reports only a single MFE structure with no subopt path.
+//! `_run_strider_analysis` (ViennaRNA-style structure enumeration).
 
 
 use axum::extract::State;
@@ -22,11 +18,11 @@ use serde_json::{json, Value};
 
 use engine::analyze::{analyze_pair, analyze_primer};
 use engine::backend::ThermoParams;
+use engine::backend_native::NativeBackend;
 use idt::{analyze as idt_analyze, analyze_each, extract_delta_g, extract_tm, get_token, AnalyzeParams, IdtError};
 use thermo_core::thermo::{dimer_thermo_subopt, hairpin_thermo, DimerThermo};
 
 use crate::error::AppError;
-use crate::routes::select_backend;
 use crate::state::AppState;
 
 const NATIVE_SUBOPT_COUNT: usize = 5;
@@ -42,13 +38,10 @@ fn dimer_thermo_json(d: &DimerThermo) -> Value {
     })
 }
 
-/// Strider-only enrichment: real suboptimal dimer alignments (self and
-/// hetero) plus each primer's own hairpin structure/Tm, straight from
-/// `thermo_core::thermo` — bypassing the generic `ThermoBackend` trait since
-/// this data has no primer3 equivalent to report instead. `DimerResult`
-/// (shared with `Primer3Backend`) does carry a `structure` field now, but
-/// only ever the single MFE fold; the ranked suboptimal alignments this
-/// route additionally returns have no home there. `None` if the sequence
+/// Strider enrichment: real suboptimal dimer alignments (self and hetero)
+/// plus each primer's own hairpin structure/Tm, straight from
+/// `thermo_core::thermo` — bypassing the generic `ThermoBackend` trait,
+/// whose `DimerResult` only ever carries the single MFE fold. `None` if the sequence
 /// doesn't fold under the requested salt conditions — a normal outcome
 /// (e.g. no self-complementarity at all), not an error.
 fn strider_enrichment(p1_seq: &str, p2_seq: &str, mv_conc: f64, mg_conc: f64, dntp_conc: f64, oligo_conc_um: f64) -> Value {
@@ -113,12 +106,11 @@ pub struct IdtAnalyzeRequest {
     pub dntp_conc: f64,
     pub oligo_conc: f64,
     pub idt_region: String,
-    pub engine: String,
 }
 
 impl Default for IdtAnalyzeRequest {
     fn default() -> Self {
-        Self { p1_seq: String::new(), p2_seq: String::new(), token: String::new(), mv_conc: 50.0, mg_conc: 3.0, dntp_conc: 0.8, oligo_conc: 0.2, idt_region: "eu".to_string(), engine: "strider".to_string() }
+        Self { p1_seq: String::new(), p2_seq: String::new(), token: String::new(), mv_conc: 50.0, mg_conc: 3.0, dntp_conc: 0.8, oligo_conc: 0.2, idt_region: "eu".to_string() }
     }
 }
 
@@ -133,25 +125,15 @@ pub async fn idt_analyze_route(State(state): State<AppState>, Json(req): Json<Id
     let params = AnalyzeParams { mv_conc: req.mv_conc, mg_conc: req.mg_conc, dntp_conc: req.dntp_conc, oligo_conc: req.oligo_conc, folding_temp: 25.0 };
     let idt_result = idt_analyze(&state.http_client, &req.token, &req.idt_region, &req.p1_seq, &req.p2_seq, &params).await;
 
-    // Local recompute for comparison, using primer3's own salt-correction
-    // formula (it already accounts for the Mg2+/dNTP interaction
-    // internally — unlike Oligool's Strider-specific `effective_mg =
-    // max(0, mg_conc - dntp_conc)` pre-subtraction, which is a detail of
-    // *that* formula, not something primer3's `PRIMER_SALT_DIVALENT`/
-    // `PRIMER_DNTP_CONC` pair needs replicated). `oligo_conc` is IDT's
-    // µM convention; primer3's `dna_conc` is nM, hence the ×1000.
+    // Local Strider recompute for comparison. `oligo_conc` is IDT's µM
+    // convention; `ThermoParams::dna_conc` is nM, hence the ×1000.
     let thermo = ThermoParams { mv_conc: req.mv_conc, dv_conc: req.mg_conc, dntp_conc: req.dntp_conc, dna_conc: req.oligo_conc * 1000.0 };
-    let backend = select_backend(&req.engine);
-    let m1_local = analyze_primer(backend.as_ref(), &req.p1_seq, thermo);
-    let m2_local = analyze_primer(backend.as_ref(), &req.p2_seq, thermo);
-    let pair_local = analyze_pair(backend.as_ref(), &req.p1_seq, &req.p2_seq, thermo);
+    let m1_local = analyze_primer(&NativeBackend, &req.p1_seq, thermo);
+    let m2_local = analyze_primer(&NativeBackend, &req.p2_seq, thermo);
+    let pair_local = analyze_pair(&NativeBackend, &req.p1_seq, &req.p2_seq, thermo);
 
-    let strider = if !req.engine.eq_ignore_ascii_case("primer3") {
-        Some(strider_enrichment(&req.p1_seq, &req.p2_seq, req.mv_conc, req.mg_conc, req.dntp_conc, req.oligo_conc))
-    } else {
-        None
-    };
-    let strider_field = |key: &str| strider.as_ref().and_then(|v| v.get(key)).cloned().unwrap_or(Value::Null);
+    let strider = strider_enrichment(&req.p1_seq, &req.p2_seq, req.mv_conc, req.mg_conc, req.dntp_conc, req.oligo_conc);
+    let strider_field = |key: &str| strider.get(key).cloned().unwrap_or(Value::Null);
 
     Ok(Json(json!({
         "m1": {

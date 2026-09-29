@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { dropUnfinished, useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
 import { lookupVariant, searchVariants, type VariantHit } from '../api/variants';
-import { designArms, type ArmsAllelePrimerResult, type ArmsCommonCandidateResult, type DesignArmsResponse, type DesignEngine } from '../api/design';
-import EngineSelect from './EngineSelect';
+import { designArms, type ArmsAllelePrimerResult, type ArmsCommonCandidateResult, type DesignArmsResponse } from '../api/design';
 import { ApiError } from '../api/client';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { normalizedTupleToInterval } from '../utils/coords';
@@ -186,7 +185,6 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
 
   const [mismatchEnabled, setMismatchEnabled] = useSessionState('arms.mismatchEnabled', true);
   const [mismatchOffset, setMismatchOffset] = useSessionState('arms.mismatchOffset', 3);
-  const [engine, setEngine] = useSessionState<DesignEngine>('arms.engine', 'strider');
 
   const [designLoading, setDesignLoading] = useState(false);
   const [designError, setDesignError] = useState<string | null>(null);
@@ -570,7 +568,7 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
   }
 
   /** Designs every selected variant, one request at a time (not
-   * `Promise.all`) - each `/design_arms` call is a CPU-bound primer3 search
+   * `Promise.all`) - each `/design_arms` call is a CPU-bound primer search
    * on the server (`spawn_blocking`), so firing a batch's worth of them
    * concurrently would just queue up behind the same thread pool with no
    * real speedup, for no benefit over sequential requests with visible
@@ -593,7 +591,6 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
           alt_allele: variant.altAllele,
           mismatch_enabled: mismatchEnabled,
           mismatch_offset: mismatchOffset,
-          engine,
         });
         outcomes.push({ variant, response: res });
       } catch (e) {
@@ -772,7 +769,6 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
             <TextInput type="number" min={1} value={mismatchOffset} onChange={(e) => setMismatchOffset(parseInt(e.target.value, 10) || 1)} className="w-32 tabular-nums" />
           </Field>
         )}
-        <EngineSelect value={engine} onChange={setEngine} />
         <Button variant="primary" disabled={designLoading || selectedVariants.length === 0} onClick={() => void runDesign()}>
           {designLoading ? `Designing… (${results.length}/${selectedVariants.length})` : `Design ARMS Primers${selectedVariants.length > 1 ? ` (${selectedVariants.length})` : ''}`}
         </Button>

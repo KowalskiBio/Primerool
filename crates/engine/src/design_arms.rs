@@ -6,14 +6,14 @@
 //! **Scope for this pass**: the allele-specific primer is always the LEFT
 //! primer, its 3'-most base landing exactly on the last base of the
 //! allele (plus strand); the shared common primer is always a RIGHT primer
-//! searched downstream via `choose_primers`. The mirror-image orientation
+//! picked downstream via `picker::pick_oligos`. The mirror-image orientation
 //! (allele-specific RIGHT primer, common LEFT primer) is out of scope for
 //! this pass, matching `design_junction`'s own precedent of scoping itself
 //! to one orientation.
 //!
 //! Closest prior art is `design_junction`: one side is hand-built
-//! (candidate windows enumerated and scored directly, not searched via
-//! `choose_primers`) while the other side is `choose_primers`-searched,
+//! (candidate windows enumerated and scored directly) while the other side
+//! is picked from every downstream window,
 //! then the two are paired by Tm/product-size compatibility. Here the
 //! hand-built side's sequence is additionally constrained to end on a
 //! specific allele base, and — unlike junction mode — is shared by two
@@ -21,11 +21,9 @@
 //! searched pool, so the common primer is searched once and filtered
 //! against both alleles at once.
 
-use primer3_ffi::design::{design_primers, GlobalSettings, SeqArgs};
-use primer3_ffi::Primer3Error;
-
 use crate::analyze::{analyze_pair, analyze_primer, PairAnalysis, PrimerAnalysis};
 use crate::backend::{ThermoBackend, ThermoParams};
+use crate::picker::{in_region, pick_oligos, scan_candidates, Candidate, CandidateConstraints, GcRange, OligoFilters, PenaltyWeights, SizeRange, Strand, TmRange};
 use crate::defaults::{
     default_destabilizing_substitution, ARMS_MAX_TM_DIFF, ARMS_PRIMER_GC, ARMS_PRIMER_TM, DEFAULT_PRIMER_SIZE,
 };
@@ -126,8 +124,6 @@ pub enum ArmsError {
     NoValidPrimerWindow,
     #[error("no common primers found downstream of the variant. {0}")]
     NoCommonPrimersFound(String),
-    #[error(transparent)]
-    Primer3(#[from] Primer3Error),
 }
 
 fn build_allele_primer(
@@ -197,6 +193,10 @@ fn build_allele_primer(
     Ok(ArmsAlleleSpecificPrimer { allele, analysis, interval: [start as i32, end as i32], mismatch_position })
 }
 
+/// How many downstream common-primer candidates are picked before the
+/// allele-Tm compatibility filter.
+const COMMON_POOL: usize = 30;
+
 pub fn design_arms_primers(
     backend: &dyn ThermoBackend,
     template: &str,
@@ -237,43 +237,38 @@ pub fn design_arms_primers(
         return Err(ArmsError::NoCommonPrimersFound("window too small for a common primer".into()));
     }
 
-    // Widen the product-size range used for the actual choose_primers call
-    // (mirrors design_junction's "KEY FIX") — the caller's real
-    // product_min/max is enforced afterward, during candidate filtering.
-    let product_min_actual = (params.product_min - 50).max(50);
-    let product_max_actual = (params.product_max + 300).min(1000);
+    // Only windows that give an in-range product with *both* allele
+    // primers are worth picking from.
+    let common_region_end = common_region_start + common_region_len;
+    let product_ok = |c: &Candidate| {
+        let ok = |left_start: i32| (params.product_min..=params.product_max).contains(&(c.end as i32 - left_start));
+        ok(ref_primer.interval[0]) && ok(alt_primer.interval[0])
+    };
+    // The common primer has to pair with both allele primers, so its Tm
+    // window is centred on theirs (within `ARMS_MAX_TM_DIFF` of each, and
+    // inside the ARMS bounds) rather than on the generic optimum.
+    let ref_tm = ref_primer.analysis.tm.unwrap_or(ARMS_PRIMER_TM.opt_tm);
+    let alt_tm = alt_primer.analysis.tm.unwrap_or(ARMS_PRIMER_TM.opt_tm);
+    let tm_min = ARMS_PRIMER_TM.min_tm.max(ref_tm.max(alt_tm) - ARMS_MAX_TM_DIFF);
+    let tm_max = ARMS_PRIMER_TM.max_tm.min(ref_tm.min(alt_tm) + ARMS_MAX_TM_DIFF);
+    let tm_opt = ((ref_tm + alt_tm) / 2.0).clamp(tm_min.min(tm_max), tm_max.max(tm_min));
+    let constraints = CandidateConstraints {
+        size: SizeRange { min: primer_min, opt: DEFAULT_PRIMER_SIZE.opt_size as usize, max: DEFAULT_PRIMER_SIZE.max_size as usize },
+        tm: TmRange { min: tm_min, opt: tm_opt, max: tm_max },
+        gc: GcRange { min: ARMS_PRIMER_GC.min_gc, max: ARMS_PRIMER_GC.max_gc },
+    };
+    let pool: Vec<Candidate> = in_region(&scan_candidates(&template, &constraints), common_region_start, common_region_end).into_iter().filter(product_ok).collect();
+    let picked = pick_oligos(backend, &template, &pool, Strand::Reverse, &constraints, &OligoFilters::default(), thermo, &PenaltyWeights::default(), COMMON_POOL);
 
-    let mut gs = GlobalSettings::new();
-    gs.set_primer_size(DEFAULT_PRIMER_SIZE.opt_size as i32, DEFAULT_PRIMER_SIZE.min_size as i32, DEFAULT_PRIMER_SIZE.max_size as i32);
-    gs.set_primer_tm(ARMS_PRIMER_TM.opt_tm, ARMS_PRIMER_TM.min_tm, ARMS_PRIMER_TM.max_tm);
-    gs.set_primer_gc(ARMS_PRIMER_GC.min_gc, ARMS_PRIMER_GC.max_gc);
-    gs.set_salt_conc(thermo.mv_conc, thermo.dv_conc, thermo.dntp_conc, thermo.dna_conc);
-    gs.set_num_return(30);
-    gs.set_pick_primers(false, true);
-    gs.set_pick_internal_oligo(false);
-    gs.set_product_size_range(product_min_actual, product_max_actual);
-
-    let mut sa = SeqArgs::new(&template)?;
-    sa.set_included_region(common_region_start as i32, common_region_len as i32);
-    let result = design_primers(&gs, &mut sa)?;
-
-    if result.right_candidates.is_empty() {
-        return Err(ArmsError::NoCommonPrimersFound(result.right_explain.unwrap_or_default()));
+    if picked.oligos.is_empty() {
+        return Err(ArmsError::NoCommonPrimersFound(picked.explain()));
     }
 
-    let ref_tm = ref_primer.analysis.tm.unwrap_or(0.0);
-    let alt_tm = alt_primer.analysis.tm.unwrap_or(0.0);
-
     let mut scored: Vec<(f64, ArmsCommonCandidate)> = Vec::new();
-    for rc in &result.right_candidates {
-        let product_size_ref = rc.end - ref_primer.interval[0];
-        let product_size_alt = rc.end - alt_primer.interval[0];
-        if product_size_ref < params.product_min || product_size_ref > params.product_max {
-            continue;
-        }
-        if product_size_alt < params.product_min || product_size_alt > params.product_max {
-            continue;
-        }
+    for rc in &picked.oligos {
+        let rc_end = rc.candidate.end as i32;
+        let product_size_ref = rc_end - ref_primer.interval[0];
+        let product_size_alt = rc_end - alt_primer.interval[0];
         if (rc.tm - ref_tm).abs() > ARMS_MAX_TM_DIFF || (rc.tm - alt_tm).abs() > ARMS_MAX_TM_DIFF {
             continue;
         }
@@ -281,13 +276,13 @@ pub fn design_arms_primers(
         let right_a = analyze_primer(backend, &rc.sequence, thermo);
         let pair_metrics_ref = analyze_pair(backend, &ref_primer.analysis.sequence, &rc.sequence, thermo);
         let pair_metrics_alt = analyze_pair(backend, &alt_primer.analysis.sequence, &rc.sequence, thermo);
-        let score = (rc.tm - ARMS_PRIMER_TM.opt_tm).abs();
+        let score = rc.penalty;
 
         scored.push((
             score,
             ArmsCommonCandidate {
                 analysis: right_a,
-                interval: [rc.start, rc.end],
+                interval: [rc.candidate.start as i32, rc_end],
                 product_size_ref,
                 product_size_alt,
                 pair_metrics_ref,
@@ -311,7 +306,7 @@ pub fn design_arms_primers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend_primer3::Primer3Backend;
+    use crate::backend_native::NativeBackend;
 
     // A realistic-length synthetic template with the variant well clear of
     // both ends so a full-length primer window and downstream common-primer
@@ -322,7 +317,7 @@ mod tests {
 
     #[test]
     fn finds_allele_specific_and_common_primers_around_a_realistic_snp() {
-        let backend = Primer3Backend;
+        let backend = NativeBackend;
         let t = template();
         let pos = 200;
         let variant = VariantSite { pos, ref_allele: t[pos..pos + 1].to_string(), alt_allele: "G".to_string() };
@@ -347,7 +342,7 @@ mod tests {
 
     #[test]
     fn rejects_ref_allele_mismatch() {
-        let backend = Primer3Backend;
+        let backend = NativeBackend;
         let t = template();
         let pos = 200;
         // Deliberately wrong ref base.
@@ -359,7 +354,7 @@ mod tests {
 
     #[test]
     fn mismatch_position_lands_inside_primer_and_not_on_the_allele_base() {
-        let backend = Primer3Backend;
+        let backend = NativeBackend;
         let t = template();
         let pos = 200;
         let ref_base = t[pos..pos + 1].to_string();

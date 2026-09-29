@@ -11,7 +11,6 @@ import { cleanDNA } from '../utils/dna';
 import ResultsTable from './ResultsTable';
 import Button from './ui/Button';
 import Checkbox from './ui/Checkbox';
-import EngineSelect from './EngineSelect';
 import Field from './ui/Field';
 import TextInput, { controlClasses } from './ui/TextInput';
 import { fmt } from '../utils/format';
@@ -67,7 +66,6 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
   const [useTarget, setUseTarget] = useSessionState('align.useTarget', false);
   const [targetStart, setTargetStart] = useSessionState('align.targetStart', 0);
   const [targetEnd, setTargetEnd] = useSessionState('align.targetEnd', 0);
-  const [backend, setBackend] = useSessionState<'primer3' | 'strider'>('align.backend', 'strider');
   const [designing, setDesigning] = useState(false);
   const [designError, setDesignError] = useState<string | null>(null);
   const [candidates, setCandidates] = useSessionState<ConservedCandidate[] | null>('align.candidates', null);
@@ -158,7 +156,6 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
         col_end: colEnd,
         target_start: useTarget ? targetStart : undefined,
         target_end: useTarget ? targetEnd : undefined,
-        backend,
       });
       if (res.mode === 'pairs') {
         setPairs(res.pairs);
@@ -256,10 +253,6 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
                 </Field>
               </div>
             )}
-
-            <div className="mb-3">
-              <EngineSelect value={backend} onChange={setBackend} />
-            </div>
 
             <Button variant="primary" disabled={designing} onClick={() => void runDesign()}>
               {designing ? 'Designing…' : 'Design Primers'}

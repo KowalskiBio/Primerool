@@ -21,34 +21,11 @@ pub mod search_variants;
 pub mod sequence;
 
 use engine::analyze::PrimerAnalysis;
-use engine::backend::{ThermoBackend, ThermoParams};
-use engine::backend_native::NativeBackend;
-use engine::backend_primer3::Primer3Backend;
+use engine::backend::ThermoParams;
 use serde::Deserialize;
 use serde_json::Value;
 
 pub(crate) const DEFAULT_SPECIES: &str = "homo_sapiens";
-
-/// Every design route's `engine` request field: `"strider"` (default —
-/// unlike Oligool, whose own default is primer3) selects `thermo-core`'s
-/// from-scratch Rust engine (`NativeBackend` internally; Mathews2004-
-/// parameter-set-accurate for hairpin/dimer Tm — see
-/// `crates/thermo-core/tests/mathews2004_parity.rs` — named "Strider" in
-/// every user-facing surface after Oligool's own engine of the same name,
-/// though it still ranks *candidate* primers differently than primer3, per
-/// `crates/engine/native_vs_primer3_report.md`); `"primer3"` selects the
-/// real primer3 C library via FFI. Anything else (including an
-/// omitted/empty field) falls back to Strider, not primer3 — the inverse of
-/// this app's original default. Boxed rather than generic because each
-/// route's request is only known at runtime, and the `design_*` engine
-/// functions already take `&dyn ThermoBackend`.
-pub(crate) fn select_backend(requested: &str) -> Box<dyn ThermoBackend> {
-    if requested.eq_ignore_ascii_case("primer3") {
-        Box::new(Primer3Backend)
-    } else {
-        Box::new(NativeBackend)
-    }
-}
 
 /// `cond.advanced` in every design route's request body — the same
 /// four-key thermo shape everywhere (`ThermoParams::default()`'s
@@ -85,11 +62,10 @@ pub(crate) fn clean_seq(s: &str) -> String {
     s.trim().to_uppercase().chars().filter(|c| matches!(c, 'A' | 'C' | 'G' | 'T' | 'N')).collect()
 }
 
-/// Primer3's raw, asymmetric oligo-position tuple: `(start, length)` for a
-/// LEFT/internal oligo, `(right_end, length)` for a RIGHT oligo — the
-/// convention `design_internal`/`design_probe`/`design_from_sequence`'s
-/// unified path all serialize untouched (`results.get(f"PRIMER_LEFT_{i}")`
-/// etc. in the Python originals never re-normalizes it). `interval` is the
+/// The raw, asymmetric oligo-position tuple inherited from Primer3's output
+/// format: `(start, length)` for a LEFT/internal oligo, `(right_end,
+/// length)` for a RIGHT oligo — the convention `design_internal`/
+/// `design_probe`/`design_from_sequence`'s unified path serialize. `interval` is the
 /// already-normalized `[start, end)` every `engine` design module reports.
 pub(crate) fn raw_tuple(interval: [i32; 2], is_right: bool) -> [i32; 2] {
     let (start, end) = (interval[0], interval[1]);

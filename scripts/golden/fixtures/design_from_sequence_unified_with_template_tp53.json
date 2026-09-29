@@ -8,8 +8,7 @@
       "fwd_pos": 50,
       "rev_pos": 300,
       "reverse_region": "CACTGAAGACCCAGGTCCAGATGAAGCTCCCAGAATGCCA",
-      "template_seq": "CTCAAAAGTCTAGAGCCACCGTCCAGGGAGCAGGTAGCTGCTGGGCTCCGGGGACACTTTGCGTTCGGGCTGGGAGCGTGCTTTCCACGACGGTGACACGCTTCCCTGGATTGGCCAGACTGCCTTCCGGGTCACTGCCATGGAGGAGCCGCAGTCAGATCCTAGCGTCGAGCCCCCTCTGAGTCAGGAAACATTTTCAGACCTATGGAAACTACTTCCTGAAAACAACGTTCTGTCCCCCTTGCCGTCCCAAGCAATGGATGATTTGATGCTGTCCCCGGACGATATTGAACAATGGTTCACTGAAGACCCAGGTCCAGATGAAGCTCCCAGAATGCCAGAGGCTGCTCCCCCCGTGGCCCCTGCACCAGCAGCTCCTACACCGGCGGCCCCTGCACCAGCCCCCTCCTGGCCCCTGTCATCTTCTGTCCCTTCCCAGAAAACCTACCAGGGCAGCTACGGTTTCCGTCTGGGCTTCTTGCATTCTGGGACAGCCAAGTCTGTGACTTGCACGTACTCCCCTGCCCTCAACAAGATGTTTTGCCAACTGGCCAAGACCTGCCCTGTGCAGCTGTGGGTTGATTCCACACCCCCGCCCGGCACCCGCGTCCGCGCCATGGCCATCTACAAGCAGTCACAGCACATGACGGAGGTTGTGAGGCGCTGCCCCCACCATGAGCGCTGCTCAGATAGCGATGGTCTGGCCCCTCCTCAGCATCTTATCCGAGTGGAAGGAAATTTGCGTGTGGAGTATTTGGATGACAGAAACACTTTTCGACATAGTGTGGTGGTGCCCTATGAGCCGCCTGAGGTTGGCTCTGACTGTACCACCATCCACTACAACTACATGTGTAACAGTTCCTGCATGGGCGGCATGAACCGGAGGCCCATCCTCACCATCATCACACTGGAAGACTCCAGTGGTAATCTACTGGGACGGAACAGCTTTGAGGTGCGTGTTTGTGCCTGTCCTGGGAGAGACCGGCGCACAGAGGAAGAGAATCTCCGCAAGAAAGGGGAGCCTCACCACGAGCTGCCCCCAGGGAGCACTAAGCGAGCACTGCCCAACAACACCAGCTCCTCTCCCCAGCCAAAGAAGAAACCACTGGATGGAGAATATTTCACCCTTCAGGACCAGACCAGCTTTCAAAAAGAAAATTGTTAAAGAGAGCATGAAAATGGTTCTATGACTTTGCCTGATACAGATGCTACTTGACTTACGATGGTGTTACTTCCTGATAAACTCGTCGTAAGTTGAAAATATTATCCGTGGGCGTGAGCGCTTCGAGATGTTCCGAGAGCTGAATGAGGCCTTGGAACTCAAGGATGCCCAGGCTGGGAAGGAGCCAGGGGGGAGCAGGGCTCACTCCAGCCACCTGAAGTCCAAAAAGGGTCAGTCTACCTCCCGCCATAAAAAACTCATGTTCAAGACAGAAGGGCCTGACTCAGACTGACATTCTCCACTTCTTGTTCCCCACTGACAGCCTCCCACCCCCATCTCTCCCTCCCCTGCCATTTTGGGTTTTGGGTCTTTGAACCCTTGCTTGCAATAGGTGTGCGTCAGAAGCACCCAGGACTTCCATTTGCTTTGTCCCGGGGCTCCACTGAACAAGTTGGCCTGCACTGGTGTTTTGTTGTGGGGAGGAGGATGGGGAGTAGGACATACCAGCTTAGATTTTAAGGTTTTTACTGTGAGGGATGTTTGGGAGATGTAAGAAATGTTCTTGCAGTTAAGGGTTAGTTTACAATCAGCCACATTCTAGGTAGGGGCCCACTTCACCGTACTAACCAGGGAAGCTGTCCCTCACTGTTGAATTTTCTCTAACTTCAAGGCCCATATCTGTGAAATGCTGGCATTTGCACCTACCTCACAGAGTGCATTGTGAGGGTTAATGAAATAATGTACATCTGGCCTTGAAACCACCTTTTATTACATGGGGTCTAGAACTTGACCCCCTTGAGGGTGCTTGTTCCCTCTCCCTGTTGGTCGGTGGGTTGGTAGTTTCTACAGTTGGGCAGCTGGTTAGGTAGAGGGAGTTGTCAAGTCTCTGCTGGCCCAGCCAAACCCTGTCTGACAACCTCTTGGTGAACCTTAGTACCTAAAAGGAAATCTCACCCCATCCCACACCCTGGAGGATTTCATCTCTTGTATATGATGATCTGGATCCACCAAGACTTGTTTTATGCTCAGGGTCAATTTCTTTTTTCTTTTTTTTTTTTTTTTTTCTTTTTCTTTGAGACTGGGTCTCGCTTTGTTGCCCAGGCTGGAGTGGAGTGGCGTGATCTTGGCTTACTGCAGCCTTTGCCTCCCCGGCTCGAGCAGTCCTGCCTCAGCCTCCGGAGTAGCTGGGACCACAGGTTCATGCCACCATGGCCAGCCAACTTTTGCATGTTTTGTAGAGATGGGGTCTCACAGTGTTGCCCAGGCTGGTCTCAAACTCCTGGGCTCAGGCGATCCACCTGTCTCAGCCTCCCAGAGTGCTGGGATTACAATTGTGAGCCACCACGTCCAGCTGGAAGGGTCAACATCTTTTACATTCTGCAAGCACATCTGCATTTTCACCCCACCCTTCCCCTCCTTCTCCCTTTTTATATCCCATTTTTATATCGATCTCTTATTTTACAATAAAACTTTGCTGCCA",
-      "engine": "primer3"
+      "template_seq": "CTCAAAAGTCTAGAGCCACCGTCCAGGGAGCAGGTAGCTGCTGGGCTCCGGGGACACTTTGCGTTCGGGCTGGGAGCGTGCTTTCCACGACGGTGACACGCTTCCCTGGATTGGCCAGACTGCCTTCCGGGTCACTGCCATGGAGGAGCCGCAGTCAGATCCTAGCGTCGAGCCCCCTCTGAGTCAGGAAACATTTTCAGACCTATGGAAACTACTTCCTGAAAACAACGTTCTGTCCCCCTTGCCGTCCCAAGCAATGGATGATTTGATGCTGTCCCCGGACGATATTGAACAATGGTTCACTGAAGACCCAGGTCCAGATGAAGCTCCCAGAATGCCAGAGGCTGCTCCCCCCGTGGCCCCTGCACCAGCAGCTCCTACACCGGCGGCCCCTGCACCAGCCCCCTCCTGGCCCCTGTCATCTTCTGTCCCTTCCCAGAAAACCTACCAGGGCAGCTACGGTTTCCGTCTGGGCTTCTTGCATTCTGGGACAGCCAAGTCTGTGACTTGCACGTACTCCCCTGCCCTCAACAAGATGTTTTGCCAACTGGCCAAGACCTGCCCTGTGCAGCTGTGGGTTGATTCCACACCCCCGCCCGGCACCCGCGTCCGCGCCATGGCCATCTACAAGCAGTCACAGCACATGACGGAGGTTGTGAGGCGCTGCCCCCACCATGAGCGCTGCTCAGATAGCGATGGTCTGGCCCCTCCTCAGCATCTTATCCGAGTGGAAGGAAATTTGCGTGTGGAGTATTTGGATGACAGAAACACTTTTCGACATAGTGTGGTGGTGCCCTATGAGCCGCCTGAGGTTGGCTCTGACTGTACCACCATCCACTACAACTACATGTGTAACAGTTCCTGCATGGGCGGCATGAACCGGAGGCCCATCCTCACCATCATCACACTGGAAGACTCCAGTGGTAATCTACTGGGACGGAACAGCTTTGAGGTGCGTGTTTGTGCCTGTCCTGGGAGAGACCGGCGCACAGAGGAAGAGAATCTCCGCAAGAAAGGGGAGCCTCACCACGAGCTGCCCCCAGGGAGCACTAAGCGAGCACTGCCCAACAACACCAGCTCCTCTCCCCAGCCAAAGAAGAAACCACTGGATGGAGAATATTTCACCCTTCAGGACCAGACCAGCTTTCAAAAAGAAAATTGTTAAAGAGAGCATGAAAATGGTTCTATGACTTTGCCTGATACAGATGCTACTTGACTTACGATGGTGTTACTTCCTGATAAACTCGTCGTAAGTTGAAAATATTATCCGTGGGCGTGAGCGCTTCGAGATGTTCCGAGAGCTGAATGAGGCCTTGGAACTCAAGGATGCCCAGGCTGGGAAGGAGCCAGGGGGGAGCAGGGCTCACTCCAGCCACCTGAAGTCCAAAAAGGGTCAGTCTACCTCCCGCCATAAAAAACTCATGTTCAAGACAGAAGGGCCTGACTCAGACTGACATTCTCCACTTCTTGTTCCCCACTGACAGCCTCCCACCCCCATCTCTCCCTCCCCTGCCATTTTGGGTTTTGGGTCTTTGAACCCTTGCTTGCAATAGGTGTGCGTCAGAAGCACCCAGGACTTCCATTTGCTTTGTCCCGGGGCTCCACTGAACAAGTTGGCCTGCACTGGTGTTTTGTTGTGGGGAGGAGGATGGGGAGTAGGACATACCAGCTTAGATTTTAAGGTTTTTACTGTGAGGGATGTTTGGGAGATGTAAGAAATGTTCTTGCAGTTAAGGGTTAGTTTACAATCAGCCACATTCTAGGTAGGGGCCCACTTCACCGTACTAACCAGGGAAGCTGTCCCTCACTGTTGAATTTTCTCTAACTTCAAGGCCCATATCTGTGAAATGCTGGCATTTGCACCTACCTCACAGAGTGCATTGTGAGGGTTAATGAAATAATGTACATCTGGCCTTGAAACCACCTTTTATTACATGGGGTCTAGAACTTGACCCCCTTGAGGGTGCTTGTTCCCTCTCCCTGTTGGTCGGTGGGTTGGTAGTTTCTACAGTTGGGCAGCTGGTTAGGTAGAGGGAGTTGTCAAGTCTCTGCTGGCCCAGCCAAACCCTGTCTGACAACCTCTTGGTGAACCTTAGTACCTAAAAGGAAATCTCACCCCATCCCACACCCTGGAGGATTTCATCTCTTGTATATGATGATCTGGATCCACCAAGACTTGTTTTATGCTCAGGGTCAATTTCTTTTTTCTTTTTTTTTTTTTTTTTTCTTTTTCTTTGAGACTGGGTCTCGCTTTGTTGCCCAGGCTGGAGTGGAGTGGCGTGATCTTGGCTTACTGCAGCCTTTGCCTCCCCGGCTCGAGCAGTCCTGCCTCAGCCTCCGGAGTAGCTGGGACCACAGGTTCATGCCACCATGGCCAGCCAACTTTTGCATGTTTTGTAGAGATGGGGTCTCACAGTGTTGCCCAGGCTGGTCTCAAACTCCTGGGCTCAGGCGATCCACCTGTCTCAGCCTCCCAGAGTGCTGGGATTACAATTGTGAGCCACCACGTCCAGCTGGAAGGGTCAACATCTTTTACATTCTGCAAGCACATCTGCATTTTCACCCCACCCTTCCCCTCCTTCTCCCTTTTTATATCCCATTTTTATATCGATCTCTTATTTTACAATAAAACTTTGCTGCCA"
     },
     "method": "POST",
     "path": "/design_from_sequence"
@@ -19,317 +18,342 @@
       "best_pairs": [
         {
           "forward_coords": [
-            52,
-            20
+            53,
+            18
           ],
-          "forward_seq": "GACACTTTGCGTTCGGGCTG",
-          "forward_tm": 63.1,
+          "forward_seq": "ACACTTTGCGTTCGGGCT",
+          "forward_tm": 66.5,
           "heterodimer": {
-            "dg": -2659.0,
+            "dg": -1.0,
+            "structure": "...............(((........))).........",
             "structure_found": true,
-            "tm": -40.0
+            "tm": -110.6
           },
-          "product_size": 276,
+          "product_size": 283,
           "reverse_coords": [
-            327,
+            335,
             20
           ],
-          "reverse_seq": "AGCTTCATCTGGACCTGGGT",
-          "reverse_tm": 61.2,
-          "score": 1.8497080411540878,
-          "tm_diff": 1.9
-        },
-        {
-          "forward_coords": [
-            52,
-            19
-          ],
-          "forward_seq": "GACACTTTGCGTTCGGGCT",
-          "forward_tm": 61.9,
-          "heterodimer": {
-            "dg": -2478.4,
-            "structure_found": true,
-            "tm": -34.6
-          },
-          "product_size": 276,
-          "reverse_coords": [
-            327,
-            20
-          ],
-          "reverse_seq": "AGCTTCATCTGGACCTGGGT",
-          "reverse_tm": 61.2,
-          "score": 1.879277912837324,
-          "tm_diff": 0.7
+          "reverse_seq": "ATTCTGGGAGCTTCATCTGG",
+          "reverse_tm": 63.0,
+          "score": 12.869932117963296,
+          "tm_diff": 3.5
         },
         {
           "forward_coords": [
             53,
-            19
+            18
           ],
-          "forward_seq": "ACACTTTGCGTTCGGGCTG",
-          "forward_tm": 62.2,
+          "forward_seq": "ACACTTTGCGTTCGGGCT",
+          "forward_tm": 66.5,
           "heterodimer": {
-            "dg": -2659.0,
+            "dg": -1.0,
+            "structure": "...............(((..........))).......",
             "structure_found": true,
-            "tm": -40.0
+            "tm": -110.6
           },
-          "product_size": 275,
+          "product_size": 285,
           "reverse_coords": [
-            327,
+            337,
             20
           ],
-          "reverse_seq": "AGCTTCATCTGGACCTGGGT",
-          "reverse_tm": 61.2,
-          "score": 1.9528026428713474,
-          "tm_diff": 1.0
+          "reverse_seq": "GCATTCTGGGAGCTTCATCT",
+          "reverse_tm": 63.6,
+          "score": 12.869932117963296,
+          "tm_diff": 2.9
         },
         {
           "forward_coords": [
-            52,
-            20
+            53,
+            18
           ],
-          "forward_seq": "GACACTTTGCGTTCGGGCTG",
-          "forward_tm": 63.1,
+          "forward_seq": "ACACTTTGCGTTCGGGCT",
+          "forward_tm": 66.5,
           "heterodimer": {
-            "dg": -3262.8,
+            "dg": 1.4,
+            "structure": "..............(((.........).))........",
             "structure_found": true,
-            "tm": -33.6
+            "tm": -415.6
           },
-          "product_size": 280,
+          "product_size": 272,
           "reverse_coords": [
-            331,
+            324,
             20
           ],
-          "reverse_seq": "TGGGAGCTTCATCTGGACCT",
-          "reverse_tm": 60.9,
-          "score": 2.145810257532787,
+          "reverse_seq": "TTCATCTGGACCTGGGTCTT",
+          "reverse_tm": 64.2,
+          "score": 12.869932117963296,
+          "tm_diff": 2.3
+        },
+        {
+          "forward_coords": [
+            53,
+            18
+          ],
+          "forward_seq": "ACACTTTGCGTTCGGGCT",
+          "forward_tm": 66.5,
+          "heterodimer": {
+            "dg": -1.0,
+            "structure": "...............(((.......)))..........",
+            "structure_found": true,
+            "tm": -110.6
+          },
+          "product_size": 282,
+          "reverse_coords": [
+            334,
+            20
+          ],
+          "reverse_seq": "TTCTGGGAGCTTCATCTGGA",
+          "reverse_tm": 64.3,
+          "score": 12.869932117963296,
           "tm_diff": 2.2
         },
         {
           "forward_coords": [
-            52,
+            53,
+            18
+          ],
+          "forward_seq": "ACACTTTGCGTTCGGGCT",
+          "forward_tm": 66.5,
+          "heterodimer": {
+            "dg": -1.2,
+            "structure": "......(((...........)))...............",
+            "structure_found": true,
+            "tm": -83.5
+          },
+          "product_size": 287,
+          "reverse_coords": [
+            339,
             20
           ],
-          "forward_seq": "GACACTTTGCGTTCGGGCTG",
-          "forward_tm": 63.1,
-          "heterodimer": {
-            "dg": -3262.8,
-            "structure_found": true,
-            "tm": -33.6
-          },
-          "product_size": 281,
-          "reverse_coords": [
-            332,
-            21
-          ],
-          "reverse_seq": "CTGGGAGCTTCATCTGGACCT",
-          "reverse_tm": 61.9,
-          "score": 2.1568583661394314,
-          "tm_diff": 1.2
+          "reverse_seq": "TGGCATTCTGGGAGCTTCAT",
+          "reverse_tm": 65.6,
+          "score": 12.869932117963296,
+          "tm_diff": 0.9
         }
       ],
       "forward_primers": [
         {
           "coords": [
-            52,
-            20
+            53,
+            18
           ],
-          "gc_percent": 60.0,
+          "gc_percent": 55.6,
           "hairpin": {
-            "dg": 0.0,
-            "structure_found": false,
-            "tm": 0.0
+            "dg": -0.7,
+            "structure": ".......((......)).",
+            "structure_found": true,
+            "tm": 31.2
           },
           "homodimer": {
-            "dg": -2475.8,
+            "dg": 0.5,
+            "structure": ".......((...((.((........))...)).)).",
             "structure_found": true,
-            "tm": -27.0
+            "tm": -17.4
           },
-          "length": 20,
-          "sequence": "GACACTTTGCGTTCGGGCTG",
-          "tm": 63.1
-        },
-        {
-          "coords": [
-            52,
-            19
-          ],
-          "gc_percent": 57.9,
-          "hairpin": {
-            "dg": 0.0,
-            "structure_found": false,
-            "tm": 0.0
-          },
-          "homodimer": {
-            "dg": -2205.9,
-            "structure_found": true,
-            "tm": -7.5
-          },
-          "length": 19,
-          "sequence": "GACACTTTGCGTTCGGGCT",
-          "tm": 61.9
+          "length": 18,
+          "sequence": "ACACTTTGCGTTCGGGCT",
+          "tm": 66.5
         },
         {
           "coords": [
             53,
-            19
+            18
           ],
-          "gc_percent": 57.9,
+          "gc_percent": 55.6,
           "hairpin": {
-            "dg": 0.0,
-            "structure_found": false,
-            "tm": 0.0
+            "dg": -0.7,
+            "structure": ".......((......)).",
+            "structure_found": true,
+            "tm": 31.2
           },
           "homodimer": {
-            "dg": -2475.8,
+            "dg": 0.5,
+            "structure": ".......((...((.((........))...)).)).",
             "structure_found": true,
-            "tm": -27.0
+            "tm": -17.4
           },
-          "length": 19,
-          "sequence": "ACACTTTGCGTTCGGGCTG",
-          "tm": 62.2
+          "length": 18,
+          "sequence": "ACACTTTGCGTTCGGGCT",
+          "tm": 66.5
         },
         {
           "coords": [
-            52,
-            20
+            53,
+            18
           ],
-          "gc_percent": 60.0,
+          "gc_percent": 55.6,
           "hairpin": {
-            "dg": 0.0,
-            "structure_found": false,
-            "tm": 0.0
+            "dg": -0.7,
+            "structure": ".......((......)).",
+            "structure_found": true,
+            "tm": 31.2
           },
           "homodimer": {
-            "dg": -2475.8,
+            "dg": 0.5,
+            "structure": ".......((...((.((........))...)).)).",
             "structure_found": true,
-            "tm": -27.0
+            "tm": -17.4
           },
-          "length": 20,
-          "sequence": "GACACTTTGCGTTCGGGCTG",
-          "tm": 63.1
+          "length": 18,
+          "sequence": "ACACTTTGCGTTCGGGCT",
+          "tm": 66.5
         },
         {
           "coords": [
-            52,
-            20
+            53,
+            18
           ],
-          "gc_percent": 60.0,
+          "gc_percent": 55.6,
           "hairpin": {
-            "dg": 0.0,
-            "structure_found": false,
-            "tm": 0.0
+            "dg": -0.7,
+            "structure": ".......((......)).",
+            "structure_found": true,
+            "tm": 31.2
           },
           "homodimer": {
-            "dg": -2475.8,
+            "dg": 0.5,
+            "structure": ".......((...((.((........))...)).)).",
             "structure_found": true,
-            "tm": -27.0
+            "tm": -17.4
           },
-          "length": 20,
-          "sequence": "GACACTTTGCGTTCGGGCTG",
-          "tm": 63.1
+          "length": 18,
+          "sequence": "ACACTTTGCGTTCGGGCT",
+          "tm": 66.5
+        },
+        {
+          "coords": [
+            53,
+            18
+          ],
+          "gc_percent": 55.6,
+          "hairpin": {
+            "dg": -0.7,
+            "structure": ".......((......)).",
+            "structure_found": true,
+            "tm": 31.2
+          },
+          "homodimer": {
+            "dg": 0.5,
+            "structure": ".......((...((.((........))...)).)).",
+            "structure_found": true,
+            "tm": -17.4
+          },
+          "length": 18,
+          "sequence": "ACACTTTGCGTTCGGGCT",
+          "tm": 66.5
         }
       ],
       "reverse_primers": [
         {
           "coords": [
-            327,
+            335,
             20
           ],
-          "gc_percent": 55.0,
+          "gc_percent": 50.0,
           "hairpin": {
-            "dg": 0.0,
-            "structure_found": false,
-            "tm": 0.0
+            "dg": 1.3,
+            "structure": ".......((...))......",
+            "structure_found": true,
+            "tm": -19.7
           },
           "homodimer": {
-            "dg": -4158.5,
+            "dg": -2.1,
+            "structure": "........((((................))))........",
             "structure_found": true,
-            "tm": -4.1
+            "tm": -75.9
           },
           "length": 20,
-          "sequence": "AGCTTCATCTGGACCTGGGT",
-          "tm": 61.2
+          "sequence": "ATTCTGGGAGCTTCATCTGG",
+          "tm": 63.0
         },
         {
           "coords": [
-            327,
+            337,
             20
           ],
-          "gc_percent": 55.0,
+          "gc_percent": 50.0,
           "hairpin": {
-            "dg": 0.0,
-            "structure_found": false,
-            "tm": 0.0
+            "dg": -0.5,
+            "structure": "((.........)).......",
+            "structure_found": true,
+            "tm": 30.5
           },
           "homodimer": {
-            "dg": -4158.5,
+            "dg": -2.1,
+            "structure": "..........((((................))))......",
             "structure_found": true,
-            "tm": -4.1
+            "tm": -75.9
           },
           "length": 20,
-          "sequence": "AGCTTCATCTGGACCTGGGT",
-          "tm": 61.2
+          "sequence": "GCATTCTGGGAGCTTCATCT",
+          "tm": 63.6
         },
         {
           "coords": [
-            327,
+            324,
             20
           ],
-          "gc_percent": 55.0,
+          "gc_percent": 50.0,
           "hairpin": {
-            "dg": 0.0,
-            "structure_found": false,
-            "tm": 0.0
+            "dg": -0.7,
+            "structure": "........(((....)))..",
+            "structure_found": true,
+            "tm": 32.3
           },
           "homodimer": {
-            "dg": -4158.5,
+            "dg": -4.0,
+            "structure": "........((((..((((..........))))..))))..",
             "structure_found": true,
-            "tm": -4.1
+            "tm": 9.7
           },
           "length": 20,
-          "sequence": "AGCTTCATCTGGACCTGGGT",
-          "tm": 61.2
+          "sequence": "TTCATCTGGACCTGGGTCTT",
+          "tm": 64.2
         },
         {
           "coords": [
-            331,
+            334,
             20
           ],
-          "gc_percent": 55.0,
+          "gc_percent": 50.0,
           "hairpin": {
-            "dg": 0.0,
-            "structure_found": false,
-            "tm": 0.0
+            "dg": 0.3,
+            "structure": "...........((.....))",
+            "structure_found": true,
+            "tm": 21.2
           },
           "homodimer": {
-            "dg": -3648.1,
+            "dg": -2.1,
+            "structure": ".......((((................)))).........",
             "structure_found": true,
-            "tm": -11.5
+            "tm": -75.9
           },
           "length": 20,
-          "sequence": "TGGGAGCTTCATCTGGACCT",
-          "tm": 60.9
+          "sequence": "TTCTGGGAGCTTCATCTGGA",
+          "tm": 64.3
         },
         {
           "coords": [
-            332,
-            21
+            339,
+            20
           ],
-          "gc_percent": 57.1,
+          "gc_percent": 50.0,
           "hairpin": {
-            "dg": 0.0,
-            "structure_found": false,
-            "tm": 0.0
+            "dg": -0.6,
+            "structure": "..((.........)).....",
+            "structure_found": true,
+            "tm": 30.6
           },
           "homodimer": {
-            "dg": -3648.1,
+            "dg": 0.1,
+            "structure": "..((..................))................",
             "structure_found": true,
-            "tm": -11.5
+            "tm": -135.3
           },
-          "length": 21,
-          "sequence": "CTGGGAGCTTCATCTGGACCT",
-          "tm": 61.9
+          "length": 20,
+          "sequence": "TGGCATTCTGGGAGCTTCAT",
+          "tm": 65.6
         }
       ]
     },

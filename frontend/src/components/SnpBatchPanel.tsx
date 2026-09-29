@@ -1,11 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
 import { dropUnfinished, useSessionState } from '../session/sessionContext';
 import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
-import { analyzePrimer, designFlanking, type DesignEngine } from '../api/design';
+import { analyzePrimer, designFlanking } from '../api/design';
 import { searchGene } from '../api/gene';
 import { getSequence } from '../api/sequence';
 import { ApiError } from '../api/client';
-import EngineSelect from './EngineSelect';
 import SnpAmpliconMap, { type PlacedAmplicon } from './SnpAmpliconMap';
 import SnpGeneMapModal from './SnpGeneMapModal';
 import PrimerStructureModal from './PrimerStructureModal';
@@ -35,7 +34,7 @@ interface CanonicalCheck {
  * auto-picked candidate structurally satisfies, so those assign here with
  * no conversion) so a manually-repositioned primer, which only has a
  * sequence and a re-analyzed Tm, fits the same field without fabricating
- * the rest of primer3's per-candidate metadata. */
+ * the rest of the picker's per-candidate metadata. */
 interface OligoDisplay {
   sequence: string;
   tm: number | null;
@@ -146,7 +145,7 @@ function buildMergeGroups(blocks: SnpBlock[], maxGapBp: number): SnpBlock[][] {
  * primer sitting on an unrelated listed SNP can silently fail to anneal
  * on the allele it doesn't match) and - if `maxProduct` is set - not
  * producing a longer product than that. Scans `fwdCandidates` outer,
- * `revCandidates` inner, both already primer3-ranked, so the first pair
+ * `revCandidates` inner, both already penalty-ranked, so the first pair
  * satisfying everything is also the best-ranked one that does. Relaxes
  * one constraint at a time when nothing satisfies both (avoid first, kept
  * over length, since an unresolved overlap risks a silent allele dropout
@@ -248,7 +247,6 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [flankWindow, setFlankWindow] = useSessionState('snpBatch.flankWindow', '130');
   const [mergeDistance, setMergeDistance] = useSessionState('snpBatch.mergeDistance', '20');
   const [maxProduct, setMaxProduct] = useSessionState('snpBatch.maxProduct', '');
-  const [engine, setEngine] = useSessionState<DesignEngine>('snpBatch.engine', 'strider');
   const [results, setResults] = useSessionState<Record<string, BatchResult>>('snpBatch.results', {}, dropUnfinished((r) => r.status === 'done' || r.status === 'error'));
   const [running, setRunning] = useState(false);
   const [openGene, setOpenGene] = useState<string | null>(null);
@@ -405,7 +403,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
           downstream = combined.chars.substring(last.position + 1 - combined.start);
         }
 
-        const res = await designFlanking(upstream, downstream, engine, window);
+        const res = await designFlanking(upstream, downstream, window);
         const fwdCandidates = res.primers.forward.primers;
         const revCandidates = res.primers.reverse.primers;
         if (!fwdCandidates.length || !revCandidates.length) {
@@ -819,7 +817,6 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                   className="w-56 tabular-nums"
                 />
               </Field>
-              <EngineSelect value={engine} onChange={setEngine} />
               <Button variant="primary" disabled={running} onClick={() => void runBatch()}>
                 {running ? `Designing… (${doneCount + errorCount}/${blocks.length})` : `Design flanking primers for all ${blocks.length} SNPs`}
               </Button>

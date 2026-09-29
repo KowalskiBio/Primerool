@@ -246,9 +246,8 @@ export default function PrimerCard({ index, primer, name, positionLabel, selecte
        * section, plus an explicit no-bulge ("pure sliding window", the
        * model simpler checkers like IDT's OligoAnalyzer use) counterpart
        * alongside Strider's own bulge-allowing MFE - see
-       * `engine::structure_variant`'s module docs. Fetched fresh via
-       * Strider on selection, independent of which engine designed this
-       * candidate in the first place. */}
+       * `engine::structure_variant`'s module docs. Fetched fresh on
+       * selection. */}
       {selected && (
         <div className="mt-3 border-t border-line pt-3">
           <div className="mb-2 text-[13px] font-medium uppercase tracking-wider text-ink-faint">Structural Analysis</div>

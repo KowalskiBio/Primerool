@@ -1,8 +1,8 @@
-//! `Primer3Backend`: `ThermoBackend` implemented over `primer3-ffi`
-//! (real Primer3 C thermodynamics, validated to 1e-6 against live
-//! `primer3-py` output — see `primer3-ffi/tests/parity.rs`).
+//! Test-only `Primer3Backend`: `ThermoBackend` over `primer3-ffi` (real
+//! Primer3 C thermodynamics). Primerool itself runs on Strider only; this
+//! exists so reference tests can compare Strider against Primer3.
 
-use crate::backend::{DimerResult, ThermoBackend, ThermoParams};
+use engine::backend::{DimerResult, ThermoBackend, ThermoParams};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Primer3Backend;

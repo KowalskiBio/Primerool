@@ -6,7 +6,7 @@ import { postJson } from './client';
 // (documented in the rewrite plan's Phase 6a) — callers must NOT treat
 // "position"/"coords"/"interval" uniformly:
 //   - classic internal mode & `/design_from_sequence`'s `coords`: the raw,
-//     asymmetric primer3 tuple — `[start, length]` for forward/internal
+//     asymmetric tuple (Primer3's output format) — `[start, length]` for forward/internal
 //     oligos, `[right_end, length]` for reverse oligos.
 //   - flanking mode's `position`: *normalized* `[start, length]` (a
 //     separate `position_raw` field carries the raw tuple above).
@@ -24,10 +24,9 @@ export interface DimerResult {
   structure_found: boolean;
   tm: number | null;
   dg: number | null;
-  /** Dot-bracket structure for the single MFE fold — only ever populated by
-   * the Strider engine (`DesignEngine: "strider"`); always `null` from
-   * primer3. For a dimer, defined over the concatenation of the two
-   * strands (self-dimer: the same primer sequence twice). */
+  /** Dot-bracket structure for the single MFE fold, or `null` when nothing
+   * folds. For a dimer, defined over the concatenation of the two strands
+   * (self-dimer: the same primer sequence twice). */
   structure: string | null;
 }
 
@@ -53,15 +52,6 @@ export interface AdvancedThermo {
   max_ns?: number;
 }
 
-/** `"strider"` (default here — Oligool's own default is primer3) uses
- * thermo-core's from-scratch Rust engine, named for Oligool's engine of the
- * same name — now Mathews2004-accurate for hairpin/dimer Tm (matching
- * Oligool's own default `parameter_set="mathews2004-dna"`), though it still
- * ranks *candidate* primers differently than primer3 (see
- * crates/engine/native_vs_primer3_report.md). `"primer3"` uses the real
- * primer3 C library via FFI. */
-export type DesignEngine = 'primer3' | 'strider';
-
 // ---------------------------------------------------------------------
 // /design_primers — classic internal (SEQUENCE_TARGET)
 // ---------------------------------------------------------------------
@@ -70,7 +60,7 @@ export interface InternalDesignSide {
   sequence: string;
   tm: number;
   gc: number;
-  /** Raw primer3 tuple — see module docs. */
+  /** Raw tuple — see module docs. */
   position: [number, number];
 }
 
@@ -88,9 +78,6 @@ export interface InternalDesignResponse {
 }
 
 export function designInternal(sequence: string, target_start: number, target_end: number): Promise<InternalDesignResponse> {
-  // No `engine` param: classic-internal mode (`design_internal_mode` server-side)
-  // never runs analyze_primer/hairpin/dimer QC at all — it's a raw primer3
-  // SEQUENCE_TARGET call with no ThermoBackend involved, so there's nothing to select.
   return postJson<InternalDesignResponse>('/design_primers', { mode: 'internal', sequence, target_start, target_end });
 }
 
@@ -101,7 +88,7 @@ export function designInternal(sequence: string, target_start: number, target_en
 export interface JunctionOligoResult extends PrimerAnalysis {
   /** `[start, end)` into the spliced (exon-only) template. */
   interval: [number, number];
-  /** Normalized `[start, length]` — NOT the raw primer3 tuple, unlike
+  /** Normalized `[start, length]` — NOT the raw tuple, unlike
    * classic-internal/design_from_sequence. */
   position: [number, number];
 }
@@ -132,7 +119,6 @@ export interface JunctionDesignParams {
   junction_left_pad?: number;
   junction_right_pad?: number;
   junction_max_candidates?: number;
-  engine?: DesignEngine;
 }
 
 export function designJunction(params: JunctionDesignParams): Promise<JunctionDesignResponse> {
@@ -156,17 +142,8 @@ export interface FlankingOligoResult extends PrimerAnalysis {
   interval: [number, number];
   /** Normalized `[start, length]`. */
   position: [number, number];
-  /** The raw, asymmetric primer3 tuple for the same oligo. */
+  /** The raw, asymmetric tuple for the same oligo. */
   position_raw: [number, number];
-  primer3: {
-    tm: number;
-    gc_percent: number;
-    /** Always `null` in real server output — a faithfully-preserved
-     * `primer_flanking.py` bug (see `crates/server/src/routes/design_primers.rs`). */
-    self_any: null;
-    self_end: null;
-    hairpin_th: number;
-  };
 }
 
 export interface FlankingDesignResponse {
@@ -178,8 +155,8 @@ export interface FlankingDesignResponse {
   };
 }
 
-export function designFlanking(upstream_seq: string, downstream_seq: string, engine?: DesignEngine, flank_window?: number): Promise<FlankingDesignResponse> {
-  return postJson<FlankingDesignResponse>('/design_primers', { mode: 'flanking', upstream_seq, downstream_seq, engine, flank_window });
+export function designFlanking(upstream_seq: string, downstream_seq: string, flank_window?: number): Promise<FlankingDesignResponse> {
+  return postJson<FlankingDesignResponse>('/design_primers', { mode: 'flanking', upstream_seq, downstream_seq, flank_window });
 }
 
 // ---------------------------------------------------------------------
@@ -202,20 +179,18 @@ export interface FromSequenceConditions {
 export interface DesignFromSequenceRequest {
   forward_region: string;
   reverse_region: string;
-  /** Non-empty triggers the unified `SEQUENCE_PRIMER_PAIR_OK_REGION_LIST`
-   * path; empty/omitted triggers the independent-fallback path (see the
-   * plan's documented pair-ranking caveat on the unified path). */
+  /** Non-empty triggers the unified path (primers placed on this one
+   * template); empty/omitted triggers the independent-fallback path. */
   template_seq?: string;
   fwd_pos?: number;
   rev_pos?: number;
   amplicon_target?: number;
   amplicon_deviation?: number;
   conditions?: FromSequenceConditions;
-  engine?: DesignEngine;
 }
 
 export interface FromSequencePrimerResult extends PrimerAnalysis {
-  /** Present only in the unified path — the raw primer3 tuple. Absent
+  /** Present only in the unified path — the raw tuple. Absent
    * (not null) in the independent-fallback path. */
   coords?: [number, number];
 }
@@ -262,7 +237,7 @@ export interface ProbeConditions {
 }
 
 export interface ProbeResult extends PrimerAnalysis {
-  /** Raw primer3 tuple `[start, length]` — probes are always sense-strand,
+  /** Raw tuple `[start, length]` — probes are always sense-strand,
    * so this coincides with the normalized form. */
   coords: [number, number];
 }
@@ -271,8 +246,8 @@ export interface DesignProbeResponse {
   probes: ProbeResult[];
 }
 
-export function designProbe(probe_region: string, conditions?: ProbeConditions, engine?: DesignEngine): Promise<DesignProbeResponse> {
-  return postJson<DesignProbeResponse>('/design_probe', { probe_region, conditions, engine });
+export function designProbe(probe_region: string, conditions?: ProbeConditions): Promise<DesignProbeResponse> {
+  return postJson<DesignProbeResponse>('/design_probe', { probe_region, conditions });
 }
 
 // ---------------------------------------------------------------------
@@ -312,7 +287,6 @@ export interface DesignArmsRequest {
   product_max?: number;
   max_common_candidates?: number;
   advanced?: AdvancedThermo;
-  engine?: DesignEngine;
 }
 
 export interface DesignArmsResponse {
@@ -336,9 +310,6 @@ export function designArms(req: DesignArmsRequest): Promise<DesignArmsResponse> 
 
 export interface AnalyzePrimerRequest {
   sequence: string;
-  /** Thermo backend; the server treats an omitted field as `'primer3'`
-   * (this route's original behaviour), unlike the design routes. */
-  engine?: DesignEngine;
   mv_conc?: number;
   dv_conc?: number;
   dntp_conc?: number;

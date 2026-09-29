@@ -64,7 +64,7 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds, rsSugges
   function commitSelection(key: keyof Selections, next: Selection) {
     if (!onSelect) return;
     onSelect(key, next);
-    analyzePrimer({ sequence: next.primerSeq, engine: 'strider' }).then(
+    analyzePrimer({ sequence: next.primerSeq }).then(
       (analysis) => onSelect(key, { ...next, analysis }),
       () => onSelect(key, { ...next, analysis: null }),
     );

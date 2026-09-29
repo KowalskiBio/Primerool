@@ -16,10 +16,8 @@ use serde_json::{json, Value};
 
 use engine::backend::ThermoParams;
 use engine::backend_native::NativeBackend;
-use engine::backend_primer3::Primer3Backend;
 use engine::conserved::{design_pairs_in_conserved_region, majority_consensus, parse_aligned_fasta, scan_conserved_region, ConservedError};
 use engine::picker::{CandidateConstraints, GcRange, PenaltyWeights, SizeRange, TmRange};
-use engine::ThermoBackend;
 
 use crate::error::AppError;
 
@@ -31,7 +29,6 @@ pub struct DesignConservedRequest {
     pub col_end: usize,
     pub target_start: Option<usize>,
     pub target_end: Option<usize>,
-    pub backend: String, // "strider" (default) or "primer3"
     pub size_min: u32,
     pub size_opt: u32,
     pub size_max: u32,
@@ -53,7 +50,6 @@ impl Default for DesignConservedRequest {
             col_end: 0,
             target_start: None,
             target_end: None,
-            backend: "strider".to_string(),
             size_min: 18,
             size_opt: 20,
             size_max: 25,
@@ -89,15 +85,14 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
     };
     let thermo = ThermoParams::default();
 
-    // CPU-bound work (candidate scanning/scoring, and for Primer3Backend an
-    // FFI call per candidate) — see `design_probe.rs`'s identical comment
-    // on why this runs via `spawn_blocking`.
+    // CPU-bound candidate scanning/scoring — see `design_probe.rs`'s
+    // identical comment on why this runs via `spawn_blocking`.
     tokio::task::spawn_blocking(move || {
-        let backend: Box<dyn ThermoBackend> = if req.backend.eq_ignore_ascii_case("primer3") { Box::new(Primer3Backend) } else { Box::new(NativeBackend) };
+        let backend = NativeBackend;
 
         if let (Some(target_start), Some(target_end)) = (req.target_start, req.target_end) {
             let pairs = design_pairs_in_conserved_region(
-                backend.as_ref(),
+                &backend,
                 &records,
                 req.col_start,
                 req.col_end,
@@ -119,8 +114,8 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
                 .iter()
                 .map(|p| {
                     json!({
-                        "left": { "sequence": p.left.candidate.sequence(&consensus), "start": p.left.candidate.start, "end": p.left.candidate.end, "tm": p.left.tm, "gc_percent": p.left.gc_percent, "penalty": p.left.penalty },
-                        "right": { "sequence": p.right.candidate.sequence(&consensus), "start": p.right.candidate.start, "end": p.right.candidate.end, "tm": p.right.tm, "gc_percent": p.right.gc_percent, "penalty": p.right.penalty },
+                        "left": { "sequence": p.left.sequence, "start": p.left.candidate.start, "end": p.left.candidate.end, "tm": p.left.tm, "gc_percent": p.left.gc_percent, "penalty": p.left.penalty },
+                        "right": { "sequence": p.right.sequence, "start": p.right.candidate.start, "end": p.right.candidate.end, "tm": p.right.tm, "gc_percent": p.right.gc_percent, "penalty": p.right.penalty },
                         "product_size": p.product_size,
                         "heterodimer": p.heterodimer,
                         "penalty": p.penalty,
@@ -130,7 +125,7 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
 
             Ok(Json(json!({ "mode": "pairs", "consensus_length": consensus.len(), "pairs": pairs_json })))
         } else {
-            let scored = scan_conserved_region(backend.as_ref(), &records, req.col_start, req.col_end, &constraints, thermo, &PenaltyWeights::default(), req.num_return).map_err(map_conserved_error)?;
+            let scored = scan_conserved_region(&backend, &records, req.col_start, req.col_end, &constraints, thermo, &PenaltyWeights::default(), req.num_return).map_err(map_conserved_error)?;
 
             if scored.is_empty() {
                 return Err(AppError::not_found("No candidates found in this conserved region satisfying the given constraints."));
@@ -141,7 +136,7 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
                 .iter()
                 .map(|sc| {
                     json!({
-                        "sequence": sc.candidate.sequence(&consensus),
+                        "sequence": sc.sequence,
                         "start": sc.candidate.start,
                         "end": sc.candidate.end,
                         "tm": sc.tm,

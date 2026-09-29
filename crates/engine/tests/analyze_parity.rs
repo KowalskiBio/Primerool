@@ -14,9 +14,11 @@
 
 use engine::analyze::{analyze_pair, analyze_primer};
 use engine::backend::ThermoParams;
-use engine::backend_primer3::Primer3Backend;
 use engine::defaults::round_or_none;
 use serde::Deserialize;
+
+mod common;
+use common::primer3_backend::Primer3Backend;
 
 /// The corpus's `dg` fields are primer3's raw cal/mol, 1-decimal-rounded at
 /// that scale; re-round after converting so this matches

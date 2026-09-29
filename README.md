@@ -42,8 +42,8 @@ Primerool fetches genes live from **Ensembl** or **NCBI**, lays them out as an i
       Select bases, right-click and choose what to make. Drag a primer to move it, or drag its end to resize it. Everything is recomputed as you go.
     </td>
     <td width="33%" valign="top">
-      <h3>Two engines</h3>
-      Strider (native Rust nearest-neighbour + Mathews 2004 folding) or Primer3, with an IDT OligoAnalyzer Tm next to Strider's when you want a second opinion.
+      <h3>One native engine</h3>
+      Strider (native Rust nearest-neighbour + Mathews 2004 folding) picks and checks every oligo, with an IDT OligoAnalyzer Tm next to Strider's when you want a second opinion.
     </td>
   </tr>
   <tr>
@@ -127,7 +127,7 @@ Placed primers and probes can be **dragged to move** or **resized by their ends*
     <td valign="top">
 
 - **Strider**, a plain-Rust DNA thermodynamics core: nearest-neighbour Tm with salt and Mg²⁺/dNTP corrections, hairpin and dimer ΔG, and **ranked suboptimal secondary structures** drawn as diagrams.
-- **Primer3** (vendored C via FFI) as an alternative engine.
+- **Strider's own picker** scans every candidate window, filters on Tm, GC, poly-X runs, hairpins and dimers, and ranks what's left; no Primer3 needed.
 - **IDT OligoAnalyzer**: one click adds IDT's own Tm next to Strider's, under the same conditions. Your IDT credentials are stored **encrypted in your browser** (AES-GCM, non-extractable key).
 - **NCBI BLAST** with identity and query cover for any oligo or region.
 
@@ -179,7 +179,7 @@ One set of reaction conditions is used everywhere: design, analysis, structures 
 | Tool | Why |
 |---|---|
 | [Rust](https://rustup.rs/) (stable) | the server and the thermodynamics engines |
-| A C compiler | builds the vendored Primer3 |
+| A C compiler *(tests only)* | builds the vendored Primer3 used as a reference in `cargo test --workspace` |
 | [Node.js](https://nodejs.org/) 20.19+ | the frontend (Vite 7) |
 | [MAFFT](https://mafft.cbrc.jp/alignment/software/) *(optional)* | multi-sequence alignment |
 
@@ -189,7 +189,7 @@ One set of reaction conditions is used everywhere: design, analysis, structures 
 git clone --recurse-submodules https://github.com/KowalskiBio/Primerool.git
 cd Primerool
 
-npm run setup   # cargo build --workspace + frontend npm install
+npm run setup   # cargo build (minus the Primer3 reference crates) + frontend npm install
 npm run dev     # Rust API on :5050 + Vite on :5173, with hot reload
 ```
 
@@ -214,7 +214,7 @@ flowchart LR
     B --> C["🗺️ Sequence, feature<br/>& exon maps"]
     C --> D["🖱️ Right-click picks<br/>drag to move / resize"]
     C --> E["⚙️ Automatic design<br/>General · WGA · Junction · SNP"]
-    D --> F["🌡️ Strider / Primer3<br/>Tm · GC · hairpins · dimers"]
+    D --> F["🌡️ Strider<br/>Tm · GC · hairpins · dimers"]
     E --> F
     F --> G["🧾 My primers<br/>BLAST · structures · IDT"]
 ```
@@ -231,7 +231,6 @@ flowchart TB
     T["Tauri desktop shell<br/><code>src-tauri/</code>"] -.->|runs in-process| S
     S --> E["engine<br/>design · scoring"]
     E --> TC["thermo-core<br/>Strider thermodynamics"]
-    E --> P3["primer3-ffi → primer3-sys<br/>vendored Primer3 C"]
     S --> PR["providers<br/>Ensembl · NCBI"]
     S --> BL["blast<br/>NCBI BLAST"]
     S --> AL["align<br/>MAFFT"]
@@ -242,9 +241,9 @@ flowchart TB
 | Crate | Role |
 |---|---|
 | [`server`](crates/server) | axum HTTP/JSON API: routing, validation and response shaping only |
-| [`engine`](crates/engine) | Dual-backend thermodynamics trait plus the candidate scan / score / rank design algorithms |
+| [`engine`](crates/engine) | Design modes plus the Strider picker: candidate scan / filter / score / rank |
 | [`thermo-core`](crates/thermo-core) | **Strider**: plain-Rust Tm, salt corrections, hairpin/dimer ΔG, Mathews 2004 folding |
-| [`primer3-ffi`](crates/primer3-ffi) · [`primer3-sys`](crates/primer3-sys) | Safe wrapper and raw bindings over the vendored Primer3 C library |
+| [`primer3-ffi`](crates/primer3-ffi) · [`primer3-sys`](crates/primer3-sys) | Test-only: bindings to the vendored Primer3, used to compare Strider against it ([ADR 0001](docs/adr/0001-strider-only-engine.md)) |
 | [`providers`](crates/providers) | `SequenceProvider` trait with Ensembl and NCBI implementations |
 | [`blast`](crates/blast) | NCBI BLAST: submit, poll, fetch, parse |
 | [`align`](crates/align) | MAFFT subprocess wrapper |
@@ -259,8 +258,9 @@ Primerool/
 ├── crates/            Rust workspace: server, engine, thermo-core, providers, …
 ├── frontend/          React + TypeScript + Tailwind single-page app (Vite)
 ├── src-tauri/         Tauri desktop shell
-├── vendor/primer3-py/ Primer3 C sources (git submodule)
-├── scripts/           setup, dev runner, VM deploy, golden-fixture capture
+├── vendor/primer3-py/ Primer3 C sources (git submodule, test reference only)
+├── scripts/           setup, dev runner, VM deploy, golden fixtures
+├── docs/adr/          architecture decision records
 └── docs/images/       README screenshots
 ```
 
@@ -285,7 +285,7 @@ The golden fixtures in [`scripts/golden/fixtures`](scripts/golden/fixtures) pin 
 
 ## Acknowledgements
 
-Primerool stands on the shoulders of [Primer3](https://github.com/primer3-org/primer3) and [primer3-py](https://github.com/libnano/primer3-py), [MAFFT](https://mafft.cbrc.jp/alignment/software/), the [Ensembl REST API](https://rest.ensembl.org/), [NCBI E-utilities and BLAST](https://www.ncbi.nlm.nih.gov/), and [IDT OligoAnalyzer](https://www.idtdna.com/pages/tools/oligoanalyzer). Nearest-neighbour parameters follow SantaLucia & Hicks (2004); folding energies follow Mathews *et al.* (2004).
+Primerool stands on the shoulders of [MAFFT](https://mafft.cbrc.jp/alignment/software/), the [Ensembl REST API](https://rest.ensembl.org/), [NCBI E-utilities and BLAST](https://www.ncbi.nlm.nih.gov/), and [IDT OligoAnalyzer](https://www.idtdna.com/pages/tools/oligoanalyzer). Nearest-neighbour parameters follow SantaLucia & Hicks (2004); folding energies follow Mathews *et al.* (2004). [Primer3](https://github.com/primer3-org/primer3) (via [primer3-py](https://github.com/libnano/primer3-py)) set the defaults Strider's picker follows and serves as the reference in its tests.
 
 ## License
 

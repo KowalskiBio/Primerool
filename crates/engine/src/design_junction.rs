@@ -1,16 +1,12 @@
 //! Port of `primer_junction.py::design_junction_primer_pairs`
 //! (exon-exon-junction-spanning primer design).
 //!
-//! Primer3's own picking engine can't express "primer must span this exact
-//! point" directly, so unlike every other design mode this one hand-rolls
-//! candidate generation: enumerate every `(left_overlap, right_overlap)`
-//! combination that produces a valid-length, junction-spanning LEFT primer,
-//! score each by Tm-distance-from-optimum (+ a GC penalty), then pair the
-//! best-scored LEFT candidates against an independently `choose_primers`-
-//! searched pool of RIGHT primers downstream of the junction. Ported
-//! faithfully from the "FIXED VERSION" of `primer_junction.py`, including
-//! its widened internal product-size range (the *matching* step still
-//! filters against the caller's original, unwidened `product_min/max`).
+//! A generic picker can't express "primer must span this exact point", so
+//! this mode hand-rolls LEFT candidate generation: enumerate every
+//! `(left_overlap, right_overlap)` combination that produces a valid-length,
+//! junction-spanning LEFT primer, score each by Tm-distance-from-optimum
+//! (+ a GC penalty), then pair the best-scored LEFT candidates against a
+//! pool of RIGHT primers picked downstream of the junction.
 //!
 //! The Python source's diagnostic `print()` calls and the dead
 //! unconstrained-template self-test (`DIAGNOSTIC: Testing if template can
@@ -18,12 +14,14 @@
 //! confirmed to have no effect on the returned result — dropped, not
 //! ported.
 
-use primer3_ffi::design::{design_primers, GlobalSettings, SeqArgs};
-use primer3_ffi::Primer3Error;
-
 use crate::analyze::{analyze_pair, analyze_primer, PairAnalysis, PrimerAnalysis};
 use crate::backend::{ThermoBackend, ThermoParams};
 use crate::defaults::{DEFAULT_PRIMER_SIZE, DEFAULT_PRIMER_TM, JUNCTION_MAX_TM_DIFF, JUNCTION_PRIMER_GC, JUNCTION_PRIMER_TM};
+use crate::picker::{pick_in_region, CandidateConstraints, GcRange, OligoFilters, SizeRange, Strand, TmRange};
+
+/// How many RIGHT primers downstream of the junction are considered for
+/// pairing.
+const RIGHT_POOL: usize = 20;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct JunctionOligo {
@@ -52,8 +50,6 @@ pub enum JunctionError {
     WindowTooSmallForRightPrimers,
     #[error("No RIGHT primers found in downstream region. {0}")]
     NoRightPrimersFound(String),
-    #[error(transparent)]
-    Primer3(#[from] Primer3Error),
 }
 
 pub struct JunctionParams {
@@ -104,14 +100,6 @@ pub fn design_junction_primer_pairs(
     let primer_min = DEFAULT_PRIMER_SIZE.min_size as i32;
     let primer_max = DEFAULT_PRIMER_SIZE.max_size as i32;
 
-    // "KEY FIX" in the Python source: widen the product-size range used
-    // for the actual choose_primers call well beyond the caller's request,
-    // since the strict range often finds nothing; the caller's original
-    // product_min/product_max is still enforced later, in the manual
-    // LEFT x RIGHT matching step below.
-    let product_min_actual = (params.product_min - 50).max(50);
-    let product_max_actual = (params.product_max + 300).min(1000);
-
     let win_start = clamp(junction_pos - params.left_pad, 0, n_full);
     let win_end = clamp(junction_pos + params.right_pad, 0, n_full);
     let local = &template[win_start as usize..win_end as usize];
@@ -161,22 +149,18 @@ pub fn design_junction_primer_pairs(
         return Err(JunctionError::WindowTooSmallForRightPrimers);
     }
 
-    let mut gs = GlobalSettings::new();
-    gs.set_primer_size(DEFAULT_PRIMER_SIZE.opt_size as i32, primer_min, primer_max);
-    gs.set_primer_tm(JUNCTION_PRIMER_TM.opt_tm, JUNCTION_PRIMER_TM.min_tm, JUNCTION_PRIMER_TM.max_tm);
-    gs.set_primer_gc(JUNCTION_PRIMER_GC.min_gc, JUNCTION_PRIMER_GC.max_gc);
-    gs.set_salt_conc(thermo.mv_conc, thermo.dv_conc, thermo.dntp_conc, thermo.dna_conc);
-    gs.set_num_return(20);
-    gs.set_pick_primers(false, true);
-    gs.set_pick_internal_oligo(false);
-    gs.set_product_size_range(product_min_actual, product_max_actual);
-
-    let mut sa = SeqArgs::new(local)?;
-    sa.set_included_region(right_region_start, right_region_len);
-    let right_result = design_primers(&gs, &mut sa)?;
-
-    if right_result.right_candidates.is_empty() {
-        return Err(JunctionError::NoRightPrimersFound(right_result.right_explain.unwrap_or_default()));
+    let constraints = CandidateConstraints {
+        size: SizeRange { min: primer_min as usize, opt: DEFAULT_PRIMER_SIZE.opt_size as usize, max: primer_max as usize },
+        tm: TmRange { min: JUNCTION_PRIMER_TM.min_tm, opt: JUNCTION_PRIMER_TM.opt_tm, max: JUNCTION_PRIMER_TM.max_tm },
+        gc: GcRange { min: JUNCTION_PRIMER_GC.min_gc, max: JUNCTION_PRIMER_GC.max_gc },
+    };
+    // Only search as far downstream as the longest allowed product reaches
+    // from the latest-starting LEFT candidate, so the RIGHT pool isn't spent
+    // on primers no LEFT could pair with.
+    let right_region_end = (j_local - params.overlap_min + params.product_max).clamp(right_region_start, n);
+    let right = pick_in_region(backend, local, (right_region_start as usize, right_region_end as usize), Strand::Reverse, &constraints, &OligoFilters::default(), thermo, RIGHT_POOL);
+    if right.oligos.is_empty() {
+        return Err(JunctionError::NoRightPrimersFound(right.explain()));
     }
 
     let max_tm_diff = JUNCTION_MAX_TM_DIFF;
@@ -188,11 +172,12 @@ pub fn design_junction_primer_pairs(
         let left_tm = left_a.tm.unwrap_or(0.0);
         let left_interval_full = [win_start + start, win_start + end];
 
-        for rc in &right_result.right_candidates {
+        for rc in &right.oligos {
             if (left_tm - rc.tm).abs() > max_tm_diff {
                 continue;
             }
-            let product_size = rc.end - start;
+            let (rc_start, rc_end) = (rc.candidate.start as i32, rc.candidate.end as i32);
+            let product_size = rc_end - start;
             if product_size < params.product_min || product_size > params.product_max {
                 continue;
             }
@@ -201,7 +186,7 @@ pub fn design_junction_primer_pairs(
                 continue;
             }
 
-            let right_interval_full = [win_start + rc.start, win_start + rc.end];
+            let right_interval_full = [win_start + rc_start, win_start + rc_end];
             let right_a = analyze_primer(backend, &rc.sequence, thermo);
             let pair_metrics = analyze_pair(backend, left_seq, &rc.sequence, thermo);
 
@@ -224,11 +209,11 @@ pub fn design_junction_primer_pairs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend_primer3::Primer3Backend;
+    use crate::backend_native::NativeBackend;
 
     #[test]
     fn finds_junction_spanning_pairs_around_a_realistic_junction() {
-        let backend = Primer3Backend;
+        let backend = NativeBackend;
         let template = "ACGTGACCTGATCGATCGGATCGTAGCTAGCATGCA".repeat(30);
         let junction_pos = template.len() as i32 / 2;
         let params = JunctionParams::default();
@@ -242,7 +227,7 @@ mod tests {
 
     #[test]
     fn rejects_junction_pos_out_of_range() {
-        let backend = Primer3Backend;
+        let backend = NativeBackend;
         let template = "ACGT".repeat(50);
         let result = design_junction_primer_pairs(&backend, &template, 0, &JunctionParams::default(), ThermoParams::default());
         assert!(matches!(result, Err(JunctionError::JunctionPosOutOfRange)));

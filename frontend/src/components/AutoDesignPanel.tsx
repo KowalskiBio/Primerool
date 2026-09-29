@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
-import { designFlanking, designInternal, designJunction, type DesignEngine, type FlankingOligoResult, type InternalDesignPair, type JunctionPairResult } from '../api/design';
-import EngineSelect from './EngineSelect';
+import { designFlanking, designInternal, designJunction, type FlankingOligoResult, type InternalDesignPair, type JunctionPairResult } from '../api/design';
 import { ApiError } from '../api/client';
 import type { Selection, Selections } from '../utils/regionMapping';
 import { rawTupleToInterval } from '../utils/coords';
@@ -39,7 +38,6 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
   const [targetEnd, setTargetEnd] = useSessionState('auto.targetEnd', 0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [engine, setEngine] = useSessionState<DesignEngine>('auto.engine', 'strider');
   const [flankWindow, setFlankWindow] = useSessionState('auto.flankWindow', '');
   const [flankingResult, setFlankingResult] = useSessionState<{ forward: FlankingOligoResult[]; reverse: FlankingOligoResult[]; pairDg: number | null; pairFound: boolean } | null>('auto.flankingResult', null);
   const [junctionPairs, setJunctionPairs] = useSessionState<JunctionPairResult[] | null>('auto.junctionPairs', null);
@@ -71,7 +69,7 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
     setGeneralPairs(null);
     try {
       const window = flankWindow.trim() ? parseInt(flankWindow, 10) : undefined;
-      const res = await designFlanking(data.upstream_seq, data.downstream_seq, engine, window);
+      const res = await designFlanking(data.upstream_seq, data.downstream_seq, window);
       const fwd = res.primers.forward.primers;
       const rev = res.primers.reverse.primers;
       if (!fwd.length || !rev.length) {
@@ -112,7 +110,6 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
         junction_overlap_max: overlapMax,
         amplicon_min: ampliconMin,
         amplicon_max: ampliconMax,
-        engine,
       });
       const pairs = res.primers.pairs;
       if (!pairs.length) {
@@ -237,11 +234,6 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
         </div>
       )}
 
-      {(primerMode === 'flanking' || primerMode === 'junction') && (
-        <div className="mb-4">
-          <EngineSelect value={engine} onChange={setEngine} />
-        </div>
-      )}
 
       {primerMode !== 'arms' && (
         <Button variant="primary" className="mb-4" disabled={loading} onClick={() => void (primerMode === 'flanking' ? runFlanking() : primerMode === 'junction' ? runJunction() : runGeneral())}>

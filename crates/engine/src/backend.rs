@@ -1,6 +1,5 @@
-//! `ThermoBackend` trait: the thermodynamic primitives shared by both
-//! calculation backends. Ported from `primer_utils.py::_thermo_kwargs`'s
-//! parameter shape (`mv_conc`/`dv_conc`/`dntp_conc`/`dna_conc` per call,
+//! `ThermoBackend` trait: the thermodynamic primitives the design engine
+//! needs. Parameter shape (`mv_conc`/`dv_conc`/`dntp_conc`/`dna_conc` per call,
 //! since Primerool's manual design panel lets a user override these via
 //! the "Advanced" conditions panel — they are not fixed per backend
 //! instance).
@@ -28,24 +27,17 @@ pub struct DimerResult {
     pub structure_found: bool,
     pub tm: Option<f64>,
     pub dg: Option<f64>,
-    /// The single MFE dot-bracket structure — `Some` only from
-    /// `NativeBackend` (`thermo-core` computes it as part of the same Tm/ΔG
-    /// walk); always `None` from `Primer3Backend`, whose `thal()` FFI result
-    /// isn't extracted this deep. For a dimer, defined over the
-    /// concatenation `seq1 + seq2` (see `DimerSvg`'s doc comment on the
-    /// frontend). `/idt/analyze`'s own native enrichment computes a ranked
-    /// list of *suboptimal* structures straight from `thermo_core::thermo`
-    /// for the same reason this field can't: `DimerResult` is shared with
-    /// `Primer3Backend` and only ever carries the one MFE fold.
+    /// The single MFE dot-bracket structure, when the backend computes one
+    /// (`NativeBackend` does). For a dimer, defined over the concatenation
+    /// `seq1 + seq2` (see `DimerSvg`'s doc comment on the frontend).
+    /// `/idt/analyze`'s own enrichment computes a ranked list of
+    /// *suboptimal* structures straight from `thermo_core::thermo`; this
+    /// field only ever carries the one MFE fold.
     pub structure: Option<String>,
 }
 
 /// `Sync` is a supertrait, not an afterthought: `engine::picker` scores
-/// candidates in parallel via `rayon`, and both real backends are already
-/// safe to share across threads (`Primer3Backend` serializes FFI calls
-/// behind a global `Mutex`; `NativeBackend` is pure functions over
-/// `thermo-core`) — this bound just makes that a compile-time guarantee
-/// for any future backend too.
+/// candidates in parallel via `rayon`.
 pub trait ThermoBackend: Sync {
     fn calc_tm(&self, seq: &str, params: ThermoParams) -> f64;
     fn calc_hairpin(&self, seq: &str, params: ThermoParams) -> DimerResult;

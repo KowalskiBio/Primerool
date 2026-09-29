@@ -12,12 +12,12 @@
 //! backend-agnostic `picker` pipeline against that consensus exactly as it
 //! would run against any other template. Real IUPAC-ambiguous degenerate
 //! primers are a materially harder problem (`calc_tm`/`calc_hairpin`
-//! neither accept nor meaningfully score non-ACGT bases — primer3's own
-//! thermodynamic core doesn't support them either), so that's left as a
-//! documented limitation, not attempted here.
+//! neither accept nor meaningfully score non-ACGT bases), so that's left as
+//! a documented limitation, not attempted here.
 
 use crate::backend::{ThermoBackend, ThermoParams};
-use crate::picker::{pick_pairs, rank, scan_candidates, score_candidates, CandidateConstraints, PairWeights, PenaltyWeights, ScoredCandidate, ScoredPair};
+use crate::design_internal::MAX_POOL_FOR_PAIRING;
+use crate::picker::{pick_oligos, pick_pairs, scan_candidates, CandidateConstraints, OligoFilters, PairWeights, PenaltyWeights, ScoredCandidate, ScoredPair, Strand};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlignedRecord {
@@ -122,8 +122,7 @@ pub fn majority_consensus(records: &[AlignedRecord], col_start: usize, col_end: 
     Ok(consensus)
 }
 
-/// Runs the existing backend-agnostic `picker` pipeline (`scan_candidates`
-/// -> `score_candidates` -> `rank`) against the majority consensus of a
+/// Runs the `picker` pipeline (`scan_candidates` -> `pick_oligos`) against the majority consensus of a
 /// conserved column range — single-oligo candidates, not pairs (see
 /// [`design_pairs_in_conserved_region`] for pairs).
 #[allow(clippy::too_many_arguments)]
@@ -139,18 +138,13 @@ pub fn scan_conserved_region(
 ) -> Result<Vec<ScoredCandidate>, ConservedError> {
     let consensus = majority_consensus(records, col_start, col_end)?;
     let candidates = scan_candidates(&consensus, constraints);
-    let mut scored = rank(score_candidates(backend, &consensus, &candidates, constraints, thermo, weights));
-    scored.truncate(num_return);
-    Ok(scored)
+    Ok(pick_oligos(backend, &consensus, &candidates, Strand::Forward, constraints, &OligoFilters::default(), thermo, weights, num_return).oligos)
 }
 
 /// Same idea, but pairs a LEFT pool (upstream of `target_start`) against a
 /// RIGHT pool (downstream of `target_end`, both relative to the consensus
 /// string) — the conserved-region analogue of
-/// `design_internal::design_pairs_via_picker`, reusing the same
-/// `pick_pairs` primitive and the same `MAX_POOL_FOR_PAIRING`-style
-/// candidate cap for the same measured reason (see
-/// `design_internal`'s doc comment on `pick_pairs`'s O(|left|×|right|) cost).
+/// `design_internal::design_pairs_via_picker`, with the same pool cap.
 #[allow(clippy::too_many_arguments)]
 pub fn design_pairs_in_conserved_region(
     backend: &dyn ThermoBackend,
@@ -164,27 +158,23 @@ pub fn design_pairs_in_conserved_region(
     thermo: ThermoParams,
     num_return: usize,
 ) -> Result<Vec<ScoredPair>, ConservedError> {
-    const MAX_POOL_FOR_PAIRING: usize = 50;
-
     let consensus = majority_consensus(records, col_start, col_end)?;
     let all_candidates = scan_candidates(&consensus, constraints);
     let left_pool: Vec<_> = all_candidates.iter().copied().filter(|c| c.end <= target_start).collect();
     let right_pool: Vec<_> = all_candidates.iter().copied().filter(|c| c.start >= target_end).collect();
 
     let weights = PenaltyWeights::default();
-    let mut left_scored = rank(score_candidates(backend, &consensus, &left_pool, constraints, thermo, &weights));
-    let mut right_scored = rank(score_candidates(backend, &consensus, &right_pool, constraints, thermo, &weights));
-    left_scored.truncate(MAX_POOL_FOR_PAIRING);
-    right_scored.truncate(MAX_POOL_FOR_PAIRING);
+    let filters = OligoFilters::default();
+    let left = pick_oligos(backend, &consensus, &left_pool, Strand::Forward, constraints, &filters, thermo, &weights, MAX_POOL_FOR_PAIRING);
+    let right = pick_oligos(backend, &consensus, &right_pool, Strand::Reverse, constraints, &filters, thermo, &weights, MAX_POOL_FOR_PAIRING);
 
-    Ok(pick_pairs(backend, &consensus, &left_scored, &right_scored, product_size_range, thermo, &PairWeights::default(), num_return))
+    Ok(pick_pairs(backend, &left.oligos, &right.oligos, product_size_range, thermo, &PairWeights::default(), num_return).pairs)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend_native::NativeBackend;
-    use crate::backend_primer3::Primer3Backend;
     use crate::picker::{GcRange, SizeRange, TmRange};
 
     fn rec(id: &str, seq: &str) -> AlignedRecord {
@@ -240,7 +230,7 @@ mod tests {
     fn scan_conserved_region_finds_bounds_respecting_candidates() {
         let base = "ACGTGACCTGATCGATCGGATCGTAGCTAGCATGCACCTGATCGATCGGATCGTAGCTAGCATGCA";
         let records = vec![rec("a", base), rec("b", base), rec("c", base)];
-        let backend = Primer3Backend;
+        let backend = NativeBackend;
         let result = scan_conserved_region(&backend, &records, 0, base.len(), &constraints(), ThermoParams::default(), &PenaltyWeights::default(), 5).unwrap();
         assert!(!result.is_empty());
         for sc in &result {
@@ -250,18 +240,16 @@ mod tests {
     }
 
     #[test]
-    fn design_pairs_in_conserved_region_works_with_both_backends() {
+    fn design_pairs_in_conserved_region_finds_flanking_pairs() {
         let base = "ACGTGACCTGATCGATCGGATCGTAGCTAGCATGCACCTGATCGATCGGATCGTAGCTAGCATGCAGGACTTAGTGCCTAGCTTGCCGAATATCATGGTGCACTCTCAGTACAATCTGCTCTGATGCCGCATAGTTAAGCCA";
         let records = vec![rec("a", base), rec("b", base)];
         let target_start = base.len() / 2;
         let target_end = target_start + 10;
 
-        for backend in [&Primer3Backend as &dyn ThermoBackend, &NativeBackend as &dyn ThermoBackend] {
-            let pairs = design_pairs_in_conserved_region(backend, &records, 0, base.len(), target_start, target_end, &constraints(), (60, 130), ThermoParams::default(), 5).unwrap();
-            assert!(!pairs.is_empty());
-            for p in &pairs {
-                assert!(p.right.candidate.start >= p.left.candidate.end);
-            }
+        let pairs = design_pairs_in_conserved_region(&NativeBackend, &records, 0, base.len(), target_start, target_end, &constraints(), (60, 130), ThermoParams::default(), 5).unwrap();
+        assert!(!pairs.is_empty());
+        for p in &pairs {
+            assert!(p.right.candidate.start >= p.left.candidate.end);
         }
     }
 }

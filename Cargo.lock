@@ -3502,7 +3502,6 @@ dependencies = [
  "blast",
  "engine",
  "idt",
- "primer3-ffi",
  "providers",
  "regex",
  "reqwest 0.12.28",

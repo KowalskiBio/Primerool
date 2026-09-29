@@ -1,36 +1,19 @@
-//! Port of `main.py`'s `/design_from_sequence` handler.
+//! Primer design from user-supplied regions (`/design_from_sequence`).
 //!
-//! Two distinct algorithms, both preserved exactly as Python has them:
+//! - **Unified** (`template_seq` provided): LEFT primers picked inside the
+//!   forward region and RIGHT primers inside the reverse region of the one
+//!   template (`-1` on either side means "anywhere"), then paired by
+//!   `picker::pick_pairs`; `score` is the pair penalty.
 //!
-//! - **Unified** (`template_seq` provided): one `choose_primers` call
-//!   against the full template, pinning LEFT/RIGHT to the caller's regions
-//!   via `SEQUENCE_PRIMER_PAIR_OK_REGION_LIST` (`-1` on either side means
-//!   "anywhere", primer3's own convention). Pair ranking/`score` comes
-//!   straight from primer3's own `PRIMER_PAIR_i_PENALTY`.
-//!
-//!   **Known gap, not silently hidden**: `primer3-ffi`'s
-//!   `SEQUENCE_PRIMER_PAIR_OK_REGION_LIST` binding has a documented,
-//!   unresolved pair-*ranking* discrepancy against real `primer3-py` (see
-//!   `primer3-ffi/tests/design_parity.rs`'s `ok_region_list_matches_primer3_py`,
-//!   `#[ignore]`d with the full investigation inline) — candidate
-//!   generation is confirmed correct, but this mode may return the right
-//!   pairs in a different order than the Python app would for the exact
-//!   same request. Flagged here as a caveat on `design_from_sequence`'s
-//!   unified path specifically, not fixed by this port (root cause is in
-//!   the FFI binding, not this module's logic).
-//!
-//! - **Independent fallback** (no `template_seq`, marked
-//!   deprecated/fallback in the Python source but still live code):
-//!   forward/reverse regions designed as two separate one-sided
-//!   `choose_primers` calls, then manually cross-paired and scored by
+//! - **Independent fallback** (no `template_seq`): forward/reverse regions
+//!   picked as two separate sequences, then cross-paired and scored by
 //!   `tm_diff + max(0, het_dg + 10) * 0.1`.
-
-use primer3_ffi::design::{design_primers, GlobalSettings, SeqArgs};
-use primer3_ffi::Primer3Error;
 
 use crate::analyze::{analyze_pair, analyze_primer, PrimerAnalysis};
 use crate::backend::{DimerResult, ThermoBackend, ThermoParams};
 use crate::defaults::{round_or_none, DEFAULT_MAX_NS_ACCEPTED, DEFAULT_MAX_POLY_X, DEFAULT_PRIMER_GC, DEFAULT_PRIMER_SIZE, DEFAULT_PRIMER_TM};
+use crate::design_internal::MAX_POOL_FOR_PAIRING;
+use crate::picker::{in_region, pick_in_region, pick_oligos, pick_pairs, scan_candidates, CandidateConstraints, GcRange, OligoFilters, PairWeights, PenaltyWeights, SizeRange, Strand, TmRange};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FromSequenceOverrides {
@@ -48,9 +31,7 @@ pub struct FromSequenceOverrides {
 }
 
 /// `amplicon_target`/`amplicon_deviation` in the request body. `None`
-/// (no target given) falls back to Python's `[[50, 100000]]` wide-open
-/// default, matching the app's own comment ("Override Primer3's strict
-/// default constraint, which is normally ~100-300").
+/// (no target given) allows any product from 50 bp to 100 kb.
 #[derive(Debug, Clone, Copy)]
 pub struct AmpliconTarget {
     pub target: i32,
@@ -64,8 +45,8 @@ fn product_size_range(amplicon: Option<AmpliconTarget>) -> (i32, i32) {
     }
 }
 
-/// `-1` means "anywhere", matching primer3's own `SEQUENCE_PRIMER_PAIR_OK_REGION_LIST`
-/// convention and `main.py`'s `fwd_pos`/`rev_pos` request fields.
+/// A region of the template a primer must lie in; `-1` means "anywhere"
+/// (the `fwd_pos`/`rev_pos` request fields' convention).
 #[derive(Debug, Clone, Copy)]
 pub struct RegionPosition {
     pub pos: i32,
@@ -81,9 +62,8 @@ impl RegionPosition {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SeqPrimerRecord {
     pub analysis: PrimerAnalysis,
-    /// `[start, end)`, present only in the unified path (primer3 reports
-    /// coordinates there; the independent-design fallback never did,
-    /// mirrored exactly).
+    /// `[start, end)`, present only in the unified path (the independent
+    /// fallback has no shared template to place primers on).
     pub coords: Option<[i32; 2]>,
 }
 
@@ -112,28 +92,46 @@ pub struct FromSequenceResult {
 pub enum DesignFromSequenceError {
     #[error("{0}")]
     NoPairsFound(String),
-    #[error(transparent)]
-    Primer3(#[from] Primer3Error),
 }
 
-fn configure_common(gs: &mut GlobalSettings, overrides: &FromSequenceOverrides, thermo: ThermoParams, product_range: (i32, i32)) {
-    let size_opt = overrides.size_opt.unwrap_or(DEFAULT_PRIMER_SIZE.opt_size as i32);
-    let size_min = overrides.size_min.unwrap_or(DEFAULT_PRIMER_SIZE.min_size as i32);
-    let size_max = overrides.size_max.unwrap_or(DEFAULT_PRIMER_SIZE.max_size as i32);
-    let tm_opt = overrides.tm_opt.unwrap_or(DEFAULT_PRIMER_TM.opt_tm);
-    let tm_min = overrides.tm_min.unwrap_or(DEFAULT_PRIMER_TM.min_tm);
-    let tm_max = overrides.tm_max.unwrap_or(DEFAULT_PRIMER_TM.max_tm);
-    let gc_min = overrides.gc_min.unwrap_or(DEFAULT_PRIMER_GC.min_gc);
-    let gc_max = overrides.gc_max.unwrap_or(DEFAULT_PRIMER_GC.max_gc);
-    gs.set_primer_size(size_opt, size_min, size_max);
-    gs.set_primer_tm(tm_opt, tm_min, tm_max);
-    gs.set_primer_gc(gc_min, gc_max);
-    gs.set_salt_conc(thermo.mv_conc, thermo.dv_conc, thermo.dntp_conc, thermo.dna_conc);
-    gs.set_max_poly_x(overrides.max_poly_x.unwrap_or(DEFAULT_MAX_POLY_X as i32));
-    gs.set_num_ns_accepted(overrides.max_ns.unwrap_or(DEFAULT_MAX_NS_ACCEPTED as i32));
-    gs.set_num_return(overrides.num_return.unwrap_or(5));
-    gs.set_pick_internal_oligo(false);
-    gs.set_product_size_range(product_range.0, product_range.1);
+const NUM_RETURN: i32 = 5;
+
+fn picking_setup(overrides: &FromSequenceOverrides) -> (CandidateConstraints, OligoFilters) {
+    let size = |v: Option<i32>, d: u32| v.map(|x| x.max(1) as usize).unwrap_or(d as usize);
+    let constraints = CandidateConstraints {
+        size: SizeRange {
+            min: size(overrides.size_min, DEFAULT_PRIMER_SIZE.min_size),
+            opt: size(overrides.size_opt, DEFAULT_PRIMER_SIZE.opt_size),
+            max: size(overrides.size_max, DEFAULT_PRIMER_SIZE.max_size),
+        },
+        tm: TmRange {
+            min: overrides.tm_min.unwrap_or(DEFAULT_PRIMER_TM.min_tm),
+            opt: overrides.tm_opt.unwrap_or(DEFAULT_PRIMER_TM.opt_tm),
+            max: overrides.tm_max.unwrap_or(DEFAULT_PRIMER_TM.max_tm),
+        },
+        gc: GcRange { min: overrides.gc_min.unwrap_or(DEFAULT_PRIMER_GC.min_gc), max: overrides.gc_max.unwrap_or(DEFAULT_PRIMER_GC.max_gc) },
+    };
+    let filters = OligoFilters {
+        max_poly_x: overrides.max_poly_x.unwrap_or(DEFAULT_MAX_POLY_X as i32).max(1) as usize,
+        max_ns: overrides.max_ns.unwrap_or(DEFAULT_MAX_NS_ACCEPTED as i32).max(0) as usize,
+        ..OligoFilters::default()
+    };
+    (constraints, filters)
+}
+
+fn num_return(overrides: &FromSequenceOverrides) -> usize {
+    overrides.num_return.unwrap_or(NUM_RETURN).max(1) as usize
+}
+
+/// `[start, end)` of `region` clamped to a template of length `len`;
+/// `pos == -1` means the whole template.
+fn region_bounds(region: RegionPosition, len: usize) -> (usize, usize) {
+    if region.pos < 0 {
+        return (0, len);
+    }
+    let start = (region.pos as usize).min(len);
+    let end = if region.len < 0 { len } else { (start + region.len as usize).min(len) };
+    (start, end)
 }
 
 fn design_unified(
@@ -145,46 +143,56 @@ fn design_unified(
     overrides: FromSequenceOverrides,
     thermo: ThermoParams,
 ) -> Result<FromSequenceResult, DesignFromSequenceError> {
-    let mut gs = GlobalSettings::new();
-    configure_common(&mut gs, &overrides, thermo, product_size_range(amplicon));
-    gs.set_pick_primers(true, true);
+    let template = template_seq.to_uppercase();
+    let (constraints, filters) = picking_setup(&overrides);
+    let range = product_size_range(amplicon);
 
-    let mut sa = SeqArgs::new(template_seq)?;
-    if fwd.pos != -1 || rev.pos != -1 {
-        sa.add_ok_region(fwd.pos, fwd.len, rev.pos, rev.len);
+    let all = scan_candidates(&template, &constraints);
+    let (fs, fe) = region_bounds(fwd, template.len());
+    let (rs, re) = region_bounds(rev, template.len());
+    let weights = PenaltyWeights::default();
+    let left = pick_oligos(backend, &template, &in_region(&all, fs, fe), Strand::Forward, &constraints, &filters, thermo, &weights, MAX_POOL_FOR_PAIRING);
+    let right = pick_oligos(backend, &template, &in_region(&all, rs, re), Strand::Reverse, &constraints, &filters, thermo, &weights, MAX_POOL_FOR_PAIRING);
+    let picked = pick_pairs(backend, &left.oligos, &right.oligos, (range.0.max(0) as usize, range.1.max(0) as usize), thermo, &PairWeights::default(), num_return(&overrides));
+
+    if picked.pairs.is_empty() {
+        let explain = if left.oligos.is_empty() {
+            format!("Forward: {}", left.explain())
+        } else if right.oligos.is_empty() {
+            format!("Reverse: {}", right.explain())
+        } else {
+            format!("Pairs: {}", picked.explain())
+        };
+        return Err(DesignFromSequenceError::NoPairsFound(explain));
     }
 
-    let result = design_primers(&gs, &mut sa)?;
+    let mut forward_primers = Vec::with_capacity(picked.pairs.len());
+    let mut reverse_primers = Vec::with_capacity(picked.pairs.len());
+    let mut best_pairs = Vec::with_capacity(picked.pairs.len());
 
-    let mut forward_primers = Vec::with_capacity(result.pairs.len());
-    let mut reverse_primers = Vec::with_capacity(result.pairs.len());
-    let mut best_pairs = Vec::with_capacity(result.pairs.len());
-
-    for pair in &result.pairs {
-        let f_p = analyze_primer(backend, &pair.left.sequence, thermo);
-        let r_p = analyze_primer(backend, &pair.right.sequence, thermo);
-        let pair_info = analyze_pair(backend, &pair.left.sequence, &pair.right.sequence, thermo);
+    for pair in &picked.pairs {
+        let (l, r) = (&pair.left, &pair.right);
+        let f_p = analyze_primer(backend, &l.sequence, thermo);
+        let r_p = analyze_primer(backend, &r.sequence, thermo);
+        let pair_info = analyze_pair(backend, &l.sequence, &r.sequence, thermo);
         let tm_diff = (f_p.tm.unwrap_or(0.0) - r_p.tm.unwrap_or(0.0)).abs();
+        let f_coords = [l.candidate.start as i32, l.candidate.end as i32];
+        let r_coords = [r.candidate.start as i32, r.candidate.end as i32];
 
-        forward_primers.push(SeqPrimerRecord { analysis: f_p.clone(), coords: Some([pair.left.start, pair.left.end]) });
-        reverse_primers.push(SeqPrimerRecord { analysis: r_p.clone(), coords: Some([pair.right.start, pair.right.end]) });
+        forward_primers.push(SeqPrimerRecord { analysis: f_p.clone(), coords: Some(f_coords) });
+        reverse_primers.push(SeqPrimerRecord { analysis: r_p.clone(), coords: Some(r_coords) });
         best_pairs.push(BestPair {
-            forward_seq: pair.left.sequence.clone(),
+            forward_seq: l.sequence.clone(),
             forward_tm: f_p.tm,
-            forward_coords: Some([pair.left.start, pair.left.end]),
-            reverse_seq: pair.right.sequence.clone(),
+            forward_coords: Some(f_coords),
+            reverse_seq: r.sequence.clone(),
             reverse_tm: r_p.tm,
-            reverse_coords: Some([pair.right.start, pair.right.end]),
+            reverse_coords: Some(r_coords),
             tm_diff: round_or_none(Some(tm_diff)).unwrap(),
             heterodimer: pair_info.heterodimer,
-            product_size: Some(pair.product_size),
-            score: pair.pair_quality,
+            product_size: Some(pair.product_size as i32),
+            score: pair.penalty,
         });
-    }
-
-    if best_pairs.is_empty() {
-        let explain = result.left_explain.or(result.pair_explain).unwrap_or_else(|| "No valid pairs found.".to_string());
-        return Err(DesignFromSequenceError::NoPairsFound(explain));
     }
 
     Ok(FromSequenceResult { forward_primers, reverse_primers, best_pairs })
@@ -194,32 +202,25 @@ fn design_independent(
     backend: &dyn ThermoBackend,
     forward_region: &str,
     reverse_region: &str,
-    amplicon: Option<AmpliconTarget>,
     overrides: FromSequenceOverrides,
     thermo: ThermoParams,
 ) -> Result<FromSequenceResult, DesignFromSequenceError> {
-    let range = product_size_range(amplicon);
+    let (constraints, filters) = picking_setup(&overrides);
+    let keep = num_return(&overrides);
+    let fwd_seq = forward_region.to_uppercase();
+    let rev_seq = reverse_region.to_uppercase();
 
-    let mut fwd_gs = GlobalSettings::new();
-    configure_common(&mut fwd_gs, &overrides, thermo, range);
-    fwd_gs.set_pick_primers(true, false);
-    let mut fwd_sa = SeqArgs::new(forward_region)?;
-    let fwd_result = design_primers(&fwd_gs, &mut fwd_sa)?;
-    let forward: Vec<PrimerAnalysis> = fwd_result.left_candidates.iter().map(|o| analyze_primer(backend, &o.sequence, thermo)).collect();
-
-    let mut rev_gs = GlobalSettings::new();
-    configure_common(&mut rev_gs, &overrides, thermo, range);
-    rev_gs.set_pick_primers(false, true);
-    let mut rev_sa = SeqArgs::new(reverse_region)?;
-    let rev_result = design_primers(&rev_gs, &mut rev_sa)?;
-    let reverse: Vec<PrimerAnalysis> = rev_result.right_candidates.iter().map(|o| analyze_primer(backend, &o.sequence, thermo)).collect();
+    let fwd_pick = pick_in_region(backend, &fwd_seq, (0, fwd_seq.len()), Strand::Forward, &constraints, &filters, thermo, keep);
+    let rev_pick = pick_in_region(backend, &rev_seq, (0, rev_seq.len()), Strand::Reverse, &constraints, &filters, thermo, keep);
+    let forward: Vec<PrimerAnalysis> = fwd_pick.oligos.iter().map(|o| analyze_primer(backend, &o.sequence, thermo)).collect();
+    let reverse: Vec<PrimerAnalysis> = rev_pick.oligos.iter().map(|o| analyze_primer(backend, &o.sequence, thermo)).collect();
 
     let mut errors = Vec::new();
     if forward.is_empty() {
-        errors.push(format!("No forward primers found. {}", fwd_result.left_explain.unwrap_or_default()));
+        errors.push(format!("No forward primers found. {}", fwd_pick.explain()));
     }
     if reverse.is_empty() {
-        errors.push(format!("No reverse primers found. {}", rev_result.right_explain.unwrap_or_default()));
+        errors.push(format!("No reverse primers found. {}", rev_pick.explain()));
     }
     if !errors.is_empty() {
         return Err(DesignFromSequenceError::NoPairsFound(errors.join(" | ")));
@@ -270,18 +271,18 @@ pub fn design_from_sequence(
 ) -> Result<FromSequenceResult, DesignFromSequenceError> {
     match template_seq {
         Some(template) if !template.is_empty() => design_unified(backend, template, fwd, rev, amplicon, overrides, thermo),
-        _ => design_independent(backend, forward_region, reverse_region, amplicon, overrides, thermo),
+        _ => design_independent(backend, forward_region, reverse_region, overrides, thermo),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend_primer3::Primer3Backend;
+    use crate::backend_native::NativeBackend;
 
     #[test]
     fn independent_path_pairs_forward_and_reverse_regions() {
-        let backend = Primer3Backend;
+        let backend = NativeBackend;
         let fwd_region = "GATCGGAAGAGCACACGTCTGAACTCCAGTCACATCACGATCTCGTATGCC";
         let rev_region = "TTCTGGCCTAGAGATCCGATGCTGACTGCCAACTTAGTGCCTAGCTTGCCG";
         let result = design_from_sequence(
@@ -306,7 +307,7 @@ mod tests {
 
     #[test]
     fn unified_path_respects_ok_region_list_pinning() {
-        let backend = Primer3Backend;
+        let backend = NativeBackend;
         let template = "GATCGGAAGAGCACACGTCTGAACTCCAGTCACATCACGATCTCGTATGCCGTCTTCTGCTTGAGGCCTATCAAGCAGTGGTATCAACGCAGAGTACATGGGTACGACCTTCTGGCCTAGAGATCCGATGCTGACTGCCAACTTAGTGCCTAGCTTGCCGAATATCATGGTGCACTCTCAGTACAATCTGCTCTGATGCCGCATAGTTAAGCCA";
         let result = design_from_sequence(
             &backend,

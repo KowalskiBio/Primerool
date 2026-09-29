@@ -190,7 +190,7 @@ export default function PrimerSetsPanel({ data, selections, onSelect, idtCredent
         const tag = `${key}:${sel.primerSeq}`;
         if (inFlight.current.has(tag)) continue;
         inFlight.current.add(tag);
-        analyzePrimer({ sequence: sel.primerSeq, engine: 'strider' }).then(
+        analyzePrimer({ sequence: sel.primerSeq }).then(
           (analysis) => onSelect(key, { ...sel, analysis }),
           () => onSelect(key, { ...sel, analysis: null }),
         );

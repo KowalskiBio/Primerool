@@ -14,10 +14,11 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use engine::backend_native::NativeBackend;
 use engine::design_arms::{design_arms_primers, Allele, ArmsCommonCandidate, ArmsDesignResult, ArmsError, ArmsParams, VariantSite};
 
 use crate::error::AppError;
-use crate::routes::{analysis_json_with, normalized_tuple, select_backend, AdvancedThermo};
+use crate::routes::{analysis_json_with, normalized_tuple, AdvancedThermo};
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -34,7 +35,6 @@ pub struct DesignArmsRequest {
     pub product_max: i64,
     pub max_common_candidates: i64,
     pub advanced: AdvancedThermo,
-    pub engine: String,
 }
 
 impl Default for DesignArmsRequest {
@@ -53,7 +53,6 @@ impl Default for DesignArmsRequest {
             product_max: defaults.product_max as i64,
             max_common_candidates: defaults.max_common_candidates as i64,
             advanced: AdvancedThermo::default(),
-            engine: "strider".to_string(),
         }
     }
 }
@@ -116,18 +115,14 @@ fn design_arms_sync(req: &DesignArmsRequest) -> Result<Json<Value>, AppError> {
         max_common_candidates: if req.max_common_candidates > 0 { req.max_common_candidates as usize } else { defaults.max_common_candidates },
     };
 
-    let backend = select_backend(&req.engine);
     let thermo = req.advanced.thermo_params();
-    let result: ArmsDesignResult = match design_arms_primers(backend.as_ref(), &req.sequence, &variant, &params, thermo) {
+    let result: ArmsDesignResult = match design_arms_primers(&NativeBackend, &req.sequence, &variant, &params, thermo) {
         Ok(r) => r,
         Err(e @ (ArmsError::EmptyTemplate | ArmsError::EmptyAllele | ArmsError::VariantPosOutOfRange | ArmsError::RefAlleleMismatch { .. })) => {
             return Err(AppError::bad_request(format!("{e}")));
         }
         Err(e @ (ArmsError::NoValidPrimerWindow | ArmsError::NoCommonPrimersFound(_))) => {
             return Err(AppError::not_found(format!("{e}")));
-        }
-        Err(e @ ArmsError::Primer3(_)) => {
-            return Err(AppError::server_error(format!("ARMS primer design failed: {e}")));
         }
     };
 

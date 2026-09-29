@@ -1,21 +1,21 @@
-//! `POST /design_primers`, ported from `main.py`'s `mode`-dispatched
-//! handler: exon-exon junction design (`mode=="internal"` +
+//! `POST /design_primers`, dispatched on `mode`: exon-exon junction design (`mode=="internal"` +
 //! `junction_pos` present), classic internal `SEQUENCE_TARGET` design
 //! (`mode=="internal"` otherwise), or flanking/WGA design (any other
 //! `mode`).
 
 use axum::Json;
-use primer3_ffi::design::DesignedOligo;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use engine::backend::ThermoParams;
+use engine::backend_native::NativeBackend;
 use engine::design_flanking::design_primers_for_flanking_regions;
 use engine::design_internal::design_primers_for_region;
+use engine::picker::ScoredCandidate;
 use engine::design_junction::{design_junction_primer_pairs, JunctionError, JunctionParams};
 
 use crate::error::AppError;
-use crate::routes::{analysis_json_with, normalized_tuple, raw_tuple, select_backend};
+use crate::routes::{analysis_json_with, normalized_tuple, raw_tuple};
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -38,7 +38,6 @@ pub struct DesignPrimersRequest {
     /// of `upstream_seq`/`downstream_seq` (the bases nearest the target),
     /// instead of the full flank. `None`/absent uses the full flank.
     pub flank_window: Option<i64>,
-    pub engine: String,
 }
 
 impl Default for DesignPrimersRequest {
@@ -59,7 +58,6 @@ impl Default for DesignPrimersRequest {
             upstream_seq: None,
             downstream_seq: None,
             flank_window: None,
-            engine: "strider".to_string(),
         }
     }
 }
@@ -72,21 +70,19 @@ fn round1(x: f64) -> f64 {
     (x * 10.0).round() / 10.0
 }
 
-/// `design_internal`'s minimal per-oligo shape (`main.py`'s classic-mode
-/// dict literal): no `analyze_primer` re-analysis, no hairpin/homodimer —
-/// just primer3's own raw sequence/Tm/GC%/position, with "gc" (not
-/// "gc_percent") as the key name, matching that dict literal exactly.
-fn internal_side_json(o: &DesignedOligo, is_right: bool) -> Value {
+/// `design_internal`'s minimal per-oligo shape: sequence/Tm/GC%/position,
+/// with "gc" (not "gc_percent") as the key name.
+fn internal_side_json(o: &ScoredCandidate, is_right: bool) -> Value {
     json!({
         "sequence": o.sequence,
         "tm": round1(o.tm),
         "gc": round1(o.gc_percent),
-        "position": raw_tuple([o.start, o.end], is_right),
+        "position": raw_tuple([o.candidate.start as i32, o.candidate.end as i32], is_right),
     })
 }
 
 pub async fn design_primers(Json(req): Json<DesignPrimersRequest>) -> Result<Json<Value>, AppError> {
-    // CPU-bound FFI work — see `design_probe.rs`'s identical comment on why
+    // CPU-bound design work — see `design_probe.rs`'s identical comment on why
     // this runs via `spawn_blocking` rather than directly on the async
     // handler.
     tokio::task::spawn_blocking(move || design_primers_sync(&req))
@@ -96,18 +92,18 @@ pub async fn design_primers(Json(req): Json<DesignPrimersRequest>) -> Result<Jso
 
 fn design_primers_sync(req: &DesignPrimersRequest) -> Result<Json<Value>, AppError> {
     let mode = if req.mode.is_empty() { "internal".to_string() } else { req.mode.clone() };
-    let backend = select_backend(&req.engine);
+    let backend = NativeBackend;
 
     if mode == "internal" && req.junction_pos.is_some() {
-        return design_junction_mode(req, backend.as_ref());
+        return design_junction_mode(req, &backend);
     }
     if mode == "internal" {
-        return design_internal_mode(req);
+        return design_internal_mode(req, &backend);
     }
-    design_flanking_mode(req, backend.as_ref())
+    design_flanking_mode(req, &backend)
 }
 
-fn design_internal_mode(req: &DesignPrimersRequest) -> Result<Json<Value>, AppError> {
+fn design_internal_mode(req: &DesignPrimersRequest, backend: &dyn engine::backend::ThermoBackend) -> Result<Json<Value>, AppError> {
     if req.sequence.is_empty() {
         return Err(AppError::bad_request("No sequence provided"));
     }
@@ -118,10 +114,17 @@ fn design_internal_mode(req: &DesignPrimersRequest) -> Result<Json<Value>, AppEr
         return Err(AppError::bad_request("Invalid target positions"));
     }
 
-    let result = design_primers_for_region(&req.sequence, target_start as i32, target_end as i32).map_err(|e| AppError::server_error(format!("Server error: {e}")))?;
+    let result = design_primers_for_region(backend, &req.sequence, target_start as usize, target_end as usize);
 
     if result.pairs.is_empty() {
-        return Err(AppError::not_found("No primers found. Try different positions."));
+        let explain = if result.left_explain.ends_with("ok 0") {
+            format!("Left: {}", result.left_explain)
+        } else if result.right_explain.ends_with("ok 0") {
+            format!("Right: {}", result.right_explain)
+        } else {
+            format!("Pairs: {}", result.pair_explain)
+        };
+        return Err(AppError::not_found(format!("No primers found. Try different positions. ({explain})")));
     }
 
     let primer_pairs: Vec<Value> = result
@@ -172,17 +175,7 @@ fn design_junction_mode(req: &DesignPrimersRequest, backend: &dyn engine::backen
         max_candidates: max_candidates as usize,
     };
 
-    // `primer_junction.py::design_junction_primer_pairs` never raises for
-    // any of these "soft" zero-candidate conditions — it returns a dict
-    // with `num_pairs: 0` and its own (never-surfaced) `error` string, and
-    // `main.py`'s route only checks `num_pairs == 0`, always responding
-    // with the same generic 404 regardless of *which* internal reason
-    // produced zero pairs. Rust models each reason as a distinct `Err`
-    // variant instead of an always-`Ok`-with-empty-Vec return (the more
-    // idiomatic shape here), so the three that correspond to Python's soft
-    // paths are folded back into that same generic 404 below; only a
-    // genuine `Primer3Error` (the FFI/C layer itself failing) matches
-    // Python's actual `except Exception` 500 case.
+    // Every zero-pair reason maps to the same generic 404.
     let pairs = match design_junction_primer_pairs(backend, &template, junction_pos as i32, &params, ThermoParams::default()) {
         Ok(pairs) => pairs,
         Err(JunctionError::EmptyTemplate) | Err(JunctionError::JunctionPosOutOfRange) => {
@@ -193,9 +186,6 @@ fn design_junction_mode(req: &DesignPrimersRequest, backend: &dyn engine::backen
         }
         Err(JunctionError::NoCandidatesInWindow) | Err(JunctionError::WindowTooSmallForRightPrimers) | Err(JunctionError::NoRightPrimersFound(_)) => {
             return Err(AppError::not_found("No exon-exon junction primer pairs found. Try a different junction or relax constraints."));
-        }
-        Err(e @ JunctionError::Primer3(_)) => {
-            return Err(AppError::server_error(format!("Junction primer design failed: {e}")));
         }
     };
 
@@ -240,7 +230,7 @@ fn design_flanking_mode(req: &DesignPrimersRequest, backend: &dyn engine::backen
     }
 
     let flank_window = req.flank_window.map(|w| w as i32);
-    let result = design_primers_for_flanking_regions(backend, upstream, downstream, flank_window, ThermoParams::default()).map_err(|e| AppError::server_error(format!("Server error: {e}")))?;
+    let result = design_primers_for_flanking_regions(backend, upstream, downstream, flank_window, ThermoParams::default());
 
     if result.forward.primers.is_empty() || result.reverse.primers.is_empty() {
         let mut details = Vec::new();
@@ -267,23 +257,6 @@ fn design_flanking_mode(req: &DesignPrimersRequest, backend: &dyn engine::backen
                         ("interval", json!(o.interval)),
                         ("position", json!(position)),
                         ("position_raw", json!(position_raw)),
-                        (
-                            "primer3",
-                            json!({
-                                "tm": o.primer3_tm,
-                                "gc_percent": o.primer3_gc_percent,
-                                // Preserves a real bug in `primer_flanking.py`: it
-                                // reads `PRIMER_LEFT/RIGHT_{i}_SELF_ANY`/`_SELF_END`,
-                                // but real primer3-py only ever populates the
-                                // `_TH`-suffixed keys (`_SELF_ANY_TH`/`_SELF_END_TH`)
-                                // — confirmed against a live install — so these two
-                                // fields are always `null` in the real app's output,
-                                // never the real self-complementarity score.
-                                "self_any": Value::Null,
-                                "self_end": Value::Null,
-                                "hairpin_th": o.primer3_hairpin_th,
-                            }),
-                        ),
                     ],
                 )
             })

@@ -1,6 +1,5 @@
-//! `analyze_primer`/`analyze_pair`, ported from `primer_utils.py`. Generic
-//! over `ThermoBackend` so both `Primer3Backend` (today) and
-//! `NativeBackend` (Phase 5) share this exact logic.
+//! `analyze_primer`/`analyze_pair`: the per-oligo QC every design mode
+//! reports. Generic over `ThermoBackend`.
 
 use crate::backend::{DimerResult, ThermoBackend, ThermoParams};
 use crate::defaults::round_or_none;
@@ -62,11 +61,11 @@ pub fn analyze_pair(backend: &dyn ThermoBackend, fwd_seq: &str, rev_seq: &str, p
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend_primer3::Primer3Backend;
+    use crate::backend_native::NativeBackend;
 
     #[test]
     fn analyze_primer_reports_plausible_values() {
-        let backend = Primer3Backend;
+        let backend = NativeBackend;
         let result = analyze_primer(&backend, " acgtacgtacgtacgtacgt ", ThermoParams::default());
         assert_eq!(result.sequence, "ACGTACGTACGTACGTACGT");
         assert_eq!(result.length, 20);
@@ -76,7 +75,7 @@ mod tests {
 
     #[test]
     fn analyze_pair_reports_heterodimer() {
-        let backend = Primer3Backend;
+        let backend = NativeBackend;
         let result = analyze_pair(&backend, "ACGTACGTACGT", "ACGTACGTACGT", ThermoParams::default());
         assert!(result.heterodimer.structure_found);
         assert!(result.heterodimer.dg.unwrap() < 0.0);

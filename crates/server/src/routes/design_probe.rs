@@ -1,20 +1,20 @@
-//! `POST /design_probe`, ported from `main.py::design_probe`.
+//! `POST /design_probe`.
 
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use engine::backend_native::NativeBackend;
 use engine::design_probe::{design_probe as engine_design_probe, ProbeDesignOverrides};
 
 use crate::error::AppError;
-use crate::routes::{analysis_json_with, clean_seq, raw_tuple, select_backend, AdvancedThermo};
+use crate::routes::{analysis_json_with, clean_seq, raw_tuple, AdvancedThermo};
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct DesignProbeRequest {
     pub probe_region: String,
     pub conditions: Option<ProbeConditions>,
-    pub engine: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -52,31 +52,15 @@ pub async fn design_probe(Json(req): Json<DesignProbeRequest>) -> Result<Json<Va
         num_return: cond.num_return,
     };
 
-    // `choose_primers()` (behind `engine_design_probe`) is CPU-bound,
-    // synchronous FFI work — potentially hundreds of milliseconds (see
-    // `engine::design_internal::MAX_POOL_FOR_PAIRING`'s doc comment for a
-    // measured example of how expensive primer3 FFI calls can get). Running
-    // it directly on an async handler would block that tokio worker thread
-    // for the whole call, starving other requests; `spawn_blocking` moves
-    // it onto tokio's blocking thread pool instead.
-    let engine_name = req.engine.clone();
+    // Picking is CPU-bound, synchronous work — potentially hundreds of
+    // milliseconds of hairpin/dimer DPs. Running it directly on an async
+    // handler would block that tokio worker thread for the whole call,
+    // starving other requests; `spawn_blocking` moves it onto tokio's
+    // blocking thread pool instead.
     tokio::task::spawn_blocking(move || {
-        let backend = select_backend(&engine_name);
-        let (probes, explain) = engine_design_probe(backend.as_ref(), &probe_region, thermo, overrides).map_err(|e| AppError::server_error(format!("Server error: {e}")))?;
+        let (probes, explain) = engine_design_probe(&NativeBackend, &probe_region, thermo, overrides);
 
         if probes.is_empty() {
-            // Preserves a real bug in `main.py`: it reads
-            // `probe_result.get("PRIMER_INTERNAL_OLIGO_EXPLAIN", "")`, but real
-            // `primer3-py` output only ever has `PRIMER_INTERNAL_EXPLAIN`
-            // (confirmed against a live install — `int_oligo = "INTERNAL"` in
-            // `thermoanalysis.pyx`, never `"INTERNAL_OLIGO"`), so Python's
-            // explain is always empty here. That's a pure error-message
-            // regression with no data/behavior risk, so unlike every other
-            // documented Python quirk in this rewrite (which are preserved
-            // faithfully), this one is deliberately NOT reproduced — the real
-            // explain text is used instead, since it can only make the 404
-            // response more useful.
-            let explain = explain.unwrap_or_default();
             return Err(AppError::not_found(format!("No probes found. {explain}")));
         }
 

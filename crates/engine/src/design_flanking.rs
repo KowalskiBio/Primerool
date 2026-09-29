@@ -1,26 +1,17 @@
-//! Port of `primer_flanking.py::design_primers_for_flanking_regions` (WGA
-//! flanking-primer design). Real call sites never pass `primer_params`
-//! (grep-confirmed), so that dead override parameter is dropped here, same
-//! as `design_internal`.
+//! Flanking/WGA primer design (`/design_primers`, `mode: "flanking"`).
 //!
 //! Forward (LEFT) primers are searched in the last `flank_window` bases of
 //! `upstream_seq`; reverse (RIGHT) primers in the first `flank_window`
-//! bases of `downstream_seq`. Each side is one independent `choose_primers`
-//! call windowed via `SEQUENCE_INCLUDED_REGION`, not a paired design — like
-//! Python, this module re-analyzes every returned oligo through
-//! `analyze_primer` for its primary QC fields, but also keeps primer3's own
-//! oligo-record QC (`primer3_tm`/`primer3_gc_percent`/etc.) alongside it,
-//! matching the `"primer3": {...}` sub-dict Python attaches to each primer.
-
-use primer3_ffi::design::{design_primers, DesignedOligo, GlobalSettings, SeqArgs};
-use primer3_ffi::Primer3Error;
+//! bases of `downstream_seq`. Each side is an independent one-sided pick,
+//! not a paired design; every returned oligo is re-analysed through
+//! `analyze_primer` for the fields the UI shows.
 
 use crate::analyze::{analyze_pair, analyze_primer, PairAnalysis, PrimerAnalysis};
 use crate::backend::{ThermoBackend, ThermoParams};
-use crate::defaults::{round_or_none, DEFAULT_PRIMER_SIZE, FLANKING_PRIMER_GC, FLANKING_PRIMER_TM};
+use crate::defaults::{DEFAULT_PRIMER_SIZE, FLANKING_PRIMER_GC, FLANKING_PRIMER_TM};
+use crate::picker::{pick_in_region, CandidateConstraints, GcRange, OligoFilters, PickResult, SizeRange, Strand, TmRange};
 
-const PRODUCT_SIZE_RANGE: (i32, i32) = (50, 50_000);
-const MAX_RETURNED: i32 = 5;
+const MAX_RETURNED: usize = 5;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlankingOligo {
@@ -28,16 +19,6 @@ pub struct FlankingOligo {
     /// `[start, end)` into the forward strand of whichever flank sequence
     /// (`upstream_seq`/`downstream_seq`) this oligo was designed against.
     pub interval: [i32; 2],
-    /// Primer3's own oligo-record QC — kept alongside `analysis` because
-    /// Python attaches both independently (`analyze_primer`'s recompute
-    /// plus a raw `"primer3": {...}` sub-dict off the same
-    /// `choose_primers()` call), not because the two ever meaningfully
-    /// disagree (same C thermodynamics either way).
-    pub primer3_tm: f64,
-    pub primer3_gc_percent: f64,
-    pub primer3_self_any: f64,
-    pub primer3_self_end: f64,
-    pub primer3_hairpin_th: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -53,101 +34,85 @@ pub struct FlankingDesignResult {
     pub pair_metrics: Option<PairAnalysis>,
 }
 
-fn to_flanking_oligo(backend: &dyn ThermoBackend, oligo: &DesignedOligo, thermo: ThermoParams) -> FlankingOligo {
-    FlankingOligo {
-        analysis: analyze_primer(backend, &oligo.sequence, thermo),
-        interval: [oligo.start, oligo.end],
-        primer3_tm: round_or_none(Some(oligo.tm)).unwrap(),
-        primer3_gc_percent: round_or_none(Some(oligo.gc_percent)).unwrap(),
-        primer3_self_any: round_or_none(Some(oligo.self_any)).unwrap(),
-        primer3_self_end: round_or_none(Some(oligo.self_end)).unwrap(),
-        primer3_hairpin_th: round_or_none(Some(oligo.hairpin_th)).unwrap(),
+fn constraints() -> CandidateConstraints {
+    CandidateConstraints {
+        size: SizeRange { min: DEFAULT_PRIMER_SIZE.min_size as usize, opt: DEFAULT_PRIMER_SIZE.opt_size as usize, max: DEFAULT_PRIMER_SIZE.max_size as usize },
+        tm: TmRange { min: FLANKING_PRIMER_TM.min_tm, opt: FLANKING_PRIMER_TM.opt_tm, max: FLANKING_PRIMER_TM.max_tm },
+        gc: GcRange { min: FLANKING_PRIMER_GC.min_gc, max: FLANKING_PRIMER_GC.max_gc },
     }
 }
 
-fn design_side(template: &str, included_start: i32, included_len: i32, pick_left: bool, thermo: ThermoParams) -> Result<primer3_ffi::design::DesignResult, Primer3Error> {
-    let mut gs = GlobalSettings::new();
-    gs.set_primer_size(DEFAULT_PRIMER_SIZE.opt_size as i32, DEFAULT_PRIMER_SIZE.min_size as i32, DEFAULT_PRIMER_SIZE.max_size as i32);
-    gs.set_primer_tm(FLANKING_PRIMER_TM.opt_tm, FLANKING_PRIMER_TM.min_tm, FLANKING_PRIMER_TM.max_tm);
-    gs.set_primer_gc(FLANKING_PRIMER_GC.min_gc, FLANKING_PRIMER_GC.max_gc);
-    gs.set_salt_conc(thermo.mv_conc, thermo.dv_conc, thermo.dntp_conc, thermo.dna_conc);
-    gs.set_num_return(MAX_RETURNED);
-    gs.set_pick_primers(pick_left, !pick_left);
-    gs.set_pick_internal_oligo(false);
-    gs.set_product_size_range(PRODUCT_SIZE_RANGE.0, PRODUCT_SIZE_RANGE.1);
-
-    let mut sa = SeqArgs::new(template)?;
-    sa.set_included_region(included_start, included_len);
-    design_primers(&gs, &mut sa)
+fn to_side(backend: &dyn ThermoBackend, picked: PickResult, thermo: ThermoParams) -> FlankingSideResult {
+    FlankingSideResult {
+        primers: picked
+            .oligos
+            .iter()
+            .map(|o| FlankingOligo { analysis: analyze_primer(backend, &o.sequence, thermo), interval: [o.candidate.start as i32, o.candidate.end as i32] })
+            .collect(),
+        explain: Some(picked.explain()),
+    }
 }
 
-/// `flank_window`: `None` uses the full flank sequence, matching Python's
-/// `Optional[int]` semantics.
+/// `flank_window`: `None` uses the full flank sequence.
 pub fn design_primers_for_flanking_regions(
     backend: &dyn ThermoBackend,
     upstream_seq: &str,
     downstream_seq: &str,
     flank_window: Option<i32>,
     thermo: ThermoParams,
-) -> Result<FlankingDesignResult, Primer3Error> {
+) -> FlankingDesignResult {
     let min_size = DEFAULT_PRIMER_SIZE.min_size as usize;
+    let window = |len: usize| flank_window.map(|w| (w.max(0) as usize).min(len)).unwrap_or(len);
+    let c = constraints();
+    let filters = OligoFilters::default();
     let mut result = FlankingDesignResult::default();
 
     let upstream = upstream_seq.to_uppercase().replace(' ', "");
     if upstream.len() >= min_size {
-        let up_len = upstream.len() as i32;
-        let win = flank_window.map(|w| w.min(up_len)).unwrap_or(up_len);
-        let up_start = up_len - win;
-
-        let side = design_side(&upstream, up_start, win, true, thermo)?;
-        result.forward = FlankingSideResult {
-            primers: side.left_candidates.iter().map(|o| to_flanking_oligo(backend, o, thermo)).collect(),
-            explain: side.left_explain,
-        };
+        let len = upstream.len();
+        let picked = pick_in_region(backend, &upstream, (len - window(len), len), Strand::Forward, &c, &filters, thermo, MAX_RETURNED);
+        result.forward = to_side(backend, picked, thermo);
     }
 
     let downstream = downstream_seq.to_uppercase().replace(' ', "");
     if downstream.len() >= min_size {
-        let down_len = downstream.len() as i32;
-        let win = flank_window.map(|w| w.min(down_len)).unwrap_or(down_len);
-
-        let side = design_side(&downstream, 0, win, false, thermo)?;
-        result.reverse = FlankingSideResult {
-            primers: side.right_candidates.iter().map(|o| to_flanking_oligo(backend, o, thermo)).collect(),
-            explain: side.right_explain,
-        };
+        let picked = pick_in_region(backend, &downstream, (0, window(downstream.len())), Strand::Reverse, &c, &filters, thermo, MAX_RETURNED);
+        result.reverse = to_side(backend, picked, thermo);
     }
 
     if let (Some(f0), Some(r0)) = (result.forward.primers.first(), result.reverse.primers.first()) {
         result.pair_metrics = Some(analyze_pair(backend, &f0.analysis.sequence, &r0.analysis.sequence, thermo));
     }
 
-    Ok(result)
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend_primer3::Primer3Backend;
+    use crate::backend_native::NativeBackend;
+
+    const UPSTREAM: &str = "GATCGGAAGAGCACACGTCTGAACTCCAGTCACATCACGATCTCGTATGCCGTCTTCTGCTTGAGGCCTATCAAGCAGTGGTATCAACGCAGAGTACATGGGTACGACC";
+    const DOWNSTREAM: &str = "TTCTGGCCTAGAGATCCGATGCTGACTGCCAACTTAGTGCCTAGCTTGCCGAATATCATGGTGCACTCTCAGTACAATCTGCTCTGATGCCGCATAGTTAAGCCAGGTA";
 
     #[test]
     fn finds_flanking_primers_on_both_sides() {
-        let backend = Primer3Backend;
-        let upstream = "GATCGGAAGAGCACACGTCTGAACTCCAGTCACATCACGATCTCGTATGCCGTCTTCTGCTTGAGGCCTATCAAGCAGTGGTATCAACGCAGAGTACATGGGTACGACC";
-        let downstream = "TTCTGGCCTAGAGATCCGATGCTGACTGCCAACTTAGTGCCTAGCTTGCCGAATATCATGGTGCACTCTCAGTACAATCTGCTCTGATGCCGCATAGTTAAGCCAGGTA";
-        let result = design_primers_for_flanking_regions(&backend, upstream, downstream, None, ThermoParams::default()).unwrap();
+        let result = design_primers_for_flanking_regions(&NativeBackend, UPSTREAM, DOWNSTREAM, None, ThermoParams::default());
         assert!(!result.forward.primers.is_empty(), "forward explain: {:?}", result.forward.explain);
         assert!(!result.reverse.primers.is_empty(), "reverse explain: {:?}", result.reverse.explain);
         assert!(result.pair_metrics.is_some());
+        // Reverse primers read as the reverse complement of their window.
+        for p in &result.reverse.primers {
+            let [s, e] = p.interval;
+            assert_eq!(p.analysis.sequence, thermo_core::reverse_complement(&DOWNSTREAM[s as usize..e as usize]));
+        }
     }
 
     #[test]
     fn flank_window_narrows_the_search_region() {
-        let backend = Primer3Backend;
-        let upstream = "GATCGGAAGAGCACACGTCTGAACTCCAGTCACATCACGATCTCGTATGCCGTCTTCTGCTTGAGGCCTATCAAGCAGTGGTATCAACGCAGAGTACATGGGTACGACC";
-        let result = design_primers_for_flanking_regions(&backend, upstream, "", Some(40), ThermoParams::default()).unwrap();
+        let result = design_primers_for_flanking_regions(&NativeBackend, UPSTREAM, "", Some(40), ThermoParams::default());
         for p in &result.forward.primers {
-            assert!(p.interval[0] as usize >= upstream.len() - 40, "primer should fall within the last 40bp window");
+            assert!(p.interval[0] as usize >= UPSTREAM.len() - 40, "primer should fall within the last 40bp window");
         }
     }
 }

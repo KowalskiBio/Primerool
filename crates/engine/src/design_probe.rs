@@ -1,18 +1,11 @@
-//! Port of `main.py`'s `/design_probe` handler (TaqMan internal-oligo
-//! design). Unlike `design_internal`, Python re-analyzes every returned
-//! oligo through `analyze_primer` (independent `primer3.bindings.calc_tm`/
-//! `calc_hairpin`/`calc_homodimer` calls) rather than trusting
-//! `choose_primers`' own `PRIMER_INTERNAL_i_TM`/`GC_PERCENT` fields —
-//! mirrored here via `engine::analyze::analyze_primer`, generic over
-//! `ThermoBackend` so this module works unchanged once probes are
-//! re-targeted onto `NativeBackend`.
-
-use primer3_ffi::design::{design_primers, GlobalSettings, SeqArgs};
-use primer3_ffi::Primer3Error;
+//! TaqMan probe design (`/design_probe`): a forward-strand pick over the
+//! probe region with the probe Tm/size/GC window, every returned oligo
+//! re-analysed through `analyze_primer`.
 
 use crate::analyze::{analyze_primer, PrimerAnalysis};
 use crate::backend::{ThermoBackend, ThermoParams};
 use crate::defaults::{DEFAULT_PROBE_GC, DEFAULT_PROBE_SIZE, DEFAULT_PROBE_TM};
+use crate::picker::{pick_in_region, CandidateConstraints, GcRange, OligoFilters, SizeRange, Strand, TmRange};
 
 /// Overrides for `cond.probe_tm_*`/`probe_len_*`/`probe_gc_*`/`num_return`
 /// in `main.py`'s request body. Each field is independently overridable
@@ -38,9 +31,7 @@ pub struct ProbeDesignOverrides {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DesignedProbe {
     pub analysis: PrimerAnalysis,
-    /// `[start, end)` — matches `main.py`'s raw `coords` field being the
-    /// primer3 `(start, length)` tuple; normalized here like every other
-    /// oligo interval in this crate.
+    /// `[start, end)` into the probe region.
     pub interval: [i32; 2],
 }
 
@@ -54,7 +45,7 @@ pub fn design_probe(
     probe_region: &str,
     thermo: ThermoParams,
     overrides: ProbeDesignOverrides,
-) -> Result<(Vec<DesignedProbe>, Option<String>), Primer3Error> {
+) -> (Vec<DesignedProbe>, String) {
     let probe_region = clean_seq(probe_region);
 
     let tm_opt = overrides.tm_opt.unwrap_or(DEFAULT_PROBE_TM.opt_tm);
@@ -67,32 +58,20 @@ pub fn design_probe(
     let gc_max = overrides.gc_max.unwrap_or(DEFAULT_PROBE_GC.max_gc);
     let num_return = overrides.num_return.unwrap_or(5);
 
-    let mut gs = GlobalSettings::new();
-    gs.set_pick_primers(false, false);
-    gs.set_pick_internal_oligo(true);
-    gs.set_internal_oligo_size(size_opt, size_min, size_max);
-    gs.set_internal_oligo_tm(tm_opt, tm_min, tm_max);
-    gs.set_internal_oligo_gc(gc_min, gc_max);
-    // Probe candidates are picked at the same reaction conditions they are
-    // reported at. (`main.py` only ever wrote them into the *primer* salt
-    // fields, so picking silently ran at primer3's internal-oligo defaults
-    // of 50/0/0/50 — deliberately no longer preserved.)
-    gs.set_internal_oligo_salt_conc(thermo.mv_conc, thermo.dv_conc, thermo.dntp_conc, thermo.dna_conc);
-    gs.set_num_return(num_return);
+    let constraints = CandidateConstraints {
+        size: SizeRange { min: size_min.max(1) as usize, opt: size_opt.max(1) as usize, max: size_max.max(1) as usize },
+        tm: TmRange { min: tm_min, opt: tm_opt, max: tm_max },
+        gc: GcRange { min: gc_min, max: gc_max },
+    };
+    let picked = pick_in_region(backend, &probe_region, (0, probe_region.len()), Strand::Forward, &constraints, &OligoFilters::default(), thermo, num_return.max(0) as usize);
 
-    let mut sa = SeqArgs::new(&probe_region)?;
-    let result = design_primers(&gs, &mut sa)?;
-
-    let probes = result
-        .internal_candidates
+    let probes = picked
+        .oligos
         .iter()
-        .map(|oligo| DesignedProbe {
-            analysis: analyze_primer(backend, &oligo.sequence, thermo),
-            interval: [oligo.start, oligo.end],
-        })
+        .map(|o| DesignedProbe { analysis: analyze_primer(backend, &o.sequence, thermo), interval: [o.candidate.start as i32, o.candidate.end as i32] })
         .collect();
 
-    Ok((probes, result.internal_explain))
+    (probes, picked.explain())
 }
 
 fn clean_seq(s: &str) -> String {
@@ -102,16 +81,13 @@ fn clean_seq(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend_primer3::Primer3Backend;
+    use crate::backend_native::NativeBackend;
 
     #[test]
     fn finds_taqman_probes_in_a_realistic_region() {
-        let backend = Primer3Backend;
-        // GC-rich enough to clear the TaqMan 65-75C Tm window under
-        // primer3's real (never user-overridable, see the comment above)
-        // internal-oligo salt defaults of 0mM divalent/dNTP.
+        let backend = NativeBackend;
         let region = "GCAGTCAGATCCTAGCGTCGAGCCCCCTCTGAGTCAGGAAACATTTTCAGACCTATGGAAACTACTTCCTGAAAACAACGTTCTGTCCCCCTTGCCGTCC";
-        let (probes, explain) = design_probe(&backend, region, ThermoParams::default(), ProbeDesignOverrides::default()).unwrap();
+        let (probes, explain) = design_probe(&backend, region, ThermoParams::default(), ProbeDesignOverrides::default());
         assert!(!probes.is_empty(), "expected at least one probe, explain: {explain:?}");
         for p in &probes {
             assert!(p.analysis.tm.unwrap() >= 60.0, "TaqMan probes should run hot: {:?}", p.analysis.tm);

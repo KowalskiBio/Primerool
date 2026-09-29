@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
 import type { Selection, Selections } from '../utils/regionMapping';
@@ -7,6 +8,9 @@ import FeatureMap from './FeatureMap';
 import PrimerSetsPanel from './PrimerSetsPanel';
 import type { IdtCredentials } from '../utils/idtCredentials';
 import Button from './ui/Button';
+import SegmentedControl from './ui/SegmentedControl';
+import { isPlusOriented } from '../utils/orientation';
+import { flipSelection, flipSelections, flipSequenceData } from '../utils/strandFlip';
 
 type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
 
@@ -39,6 +43,23 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
 
   const hasAnnotations = (data.annotations || []).length > 0;
 
+  // The sequence map's strand. Always the genomic plus strand by default;
+  // a minus-strand gene can be switched to its own (minus) strand, where
+  // the mRNA reads left to right. Remembered as the `data` it was chosen
+  // for, so loading another sequence falls back to plus. Only the map
+  // flips - selections are stored in `data`'s own coordinates and are
+  // translated into and out of the flipped view.
+  const [minusFor, setMinusFor] = useState<SequenceData | null>(null);
+  const canFlip = data.strand === '-' && data.transcript_id !== 'custom';
+  const mapStrand: '+' | '-' = canFlip && minusFor === data ? '-' : '+';
+  const flipped = canFlip && isPlusOriented(data) !== (mapStrand === '+');
+  const mapData = useMemo(() => (flipped ? flipSequenceData(data) : data), [flipped, data]);
+  const mapSelections = useMemo(() => (flipped ? flipSelections(selections, data) : selections), [flipped, selections, data]);
+  const mapOnSelect = useMemo(
+    () => (flipped && onSelect ? (key: keyof Selections, value: Selection | null) => onSelect(key, value && flipSelection(value, mapData)) : onSelect),
+    [flipped, onSelect, mapData],
+  );
+
   return (
     <div>
       {hasAnnotations && (
@@ -49,9 +70,21 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
             </div>
           )}
 
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-ink">Sequence map (for WGA / flanking primers)</h3>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {canFlip && (
+                <SegmentedControl
+                  size="sm"
+                  ariaLabel="Strand shown on the sequence map"
+                  value={mapStrand}
+                  onChange={(v) => setMinusFor(v === '-' ? data : null)}
+                  options={[
+                    { value: '+', label: '+ strand', title: 'Show the map on the genomic plus strand' },
+                    { value: '-', label: '− strand', title: `Show the map on the minus strand, where ${data.gene_name} is - its mRNA reads left to right` },
+                  ]}
+                />
+              )}
               <Button size="sm" onClick={() => setShowFeatureMap((v) => !v)}>
                 Feature map
               </Button>
@@ -90,7 +123,21 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
         </>
       )}
 
-      <SequenceViewer persistKey="viewer.main" data={data} selections={selections} truncateIntrons={truncateIntrons} onSelect={onSelect} species={species} apiSource={apiSource} selectedSpecies={selectedSpecies} />
+      {/* Remounted on a strand switch, so in-map state held in map
+          coordinates (an alignment hit, a drag) is recomputed rather than
+          misplaced; the search queries themselves are session state and
+          survive. */}
+      <SequenceViewer
+        key={mapStrand}
+        persistKey="viewer.main"
+        data={mapData}
+        selections={mapSelections}
+        truncateIntrons={truncateIntrons}
+        onSelect={mapOnSelect}
+        species={species}
+        apiSource={apiSource}
+        selectedSpecies={selectedSpecies}
+      />
 
       {primerMode === 'junction' && showSplicedMap && (
         <div className="mt-6">

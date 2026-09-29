@@ -15,6 +15,7 @@ import { findBestAlignment, type AlignmentHit } from '../utils/localAlign';
 import { resolveSequenceIds, type SequenceIds } from '../utils/lookupIds';
 import { getNcbiApiKey } from '../api/ncbiApiKey';
 import OrientationNote from './OrientationNote';
+import { isPlusOriented } from '../utils/orientation';
 
 interface Segment {
   text: string;
@@ -889,15 +890,15 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     prevRsPlacedKey.current = null;
   }
 
-  // Alleles re-oriented into `gene_seq`'s own strand sense (a minus-strand
-  // gene's sequence is reverse-complemented at fetch time, so showing the
-  // plus-strand alleles would look like a mismatch at that base) - the
+  // Alleles re-oriented into `gene_seq`'s own strand sense (a map on the
+  // minus strand is reverse-complemented relative to dbSNP's plus-strand
+  // alleles, so showing those would look like a mismatch at that base) - the
   // same rule `ArmsDesignPanel.tsx`'s `orientedAlleles` applies. Only
   // meaningful for a hit from the loaded sequence's own species; one
   // found in another organism keeps its catalog (plus-strand) alleles.
   const rsOrientedAlleles = useMemo(
-    () => (rsVariant && rsFoundInSpecies !== null && rsFoundInSpecies === species && data.strand === '-' ? rsVariant.alleles.map((a) => (a === '-' ? a : reverseComplement(a))) : rsVariant?.alleles ?? []),
-    [rsVariant, rsFoundInSpecies, species, data.strand],
+    () => (rsVariant && rsFoundInSpecies !== null && rsFoundInSpecies === species && !isPlusOriented(data) ? rsVariant.alleles.map((a) => (a === '-' ? a : reverseComplement(a))) : rsVariant?.alleles ?? []),
+    [rsVariant, rsFoundInSpecies, species, data],
   );
 
   /** The looked-up rsID as a proposed allele-probe SNP (see

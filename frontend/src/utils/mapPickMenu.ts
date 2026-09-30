@@ -1,6 +1,7 @@
 import type { SequenceData } from '../api/sequence';
 import type { MenuEntry } from '../components/SequenceContextMenu';
 import { reverseComplement } from './dna';
+import { isPlusOriented } from './orientation';
 import { genomicToSpliced, selectionStrand, type Selection, type Selections } from './regionMapping';
 import type { MapPick } from './mapSelection';
 
@@ -221,6 +222,9 @@ export function createAlleleProbes(ctx: Pick<PickMenuContext, 'commit'>, req: Al
 export function buildPickMenu(ctx: PickMenuContext): { heading: string; entries: MenuEntry[] } {
   const { data, selections, pick, kinds } = ctx;
   const contiguous = pick.kind === 'contiguous' ? pick : null;
+  // The strand of the map being shown - follows the strand toggle, so the
+  // forward/reverse entries name exactly the strand a pick would read on.
+  const strandLabel = isPlusOriented(data) ? '+' : '−';
   const junction = junctionFromPick(data, pick);
   const junctionOk = 'seq' in junction;
   // Only an exon-only pick crossing a junction stands in for joined exon
@@ -377,8 +381,12 @@ export function buildPickMenu(ctx: PickMenuContext): { heading: string; entries:
   return {
     heading,
     entries: [
-      { shortcut: 'F', label: 'Select as forward primer', disabledReason: anyPrimer ? null : 'Primer picks are not available in this view', submenu: primerSubmenu('F') },
-      { shortcut: 'R', label: 'Select as reverse primer', disabledReason: anyPrimer ? null : 'Primer picks are not available in this view', submenu: primerSubmenu('R') },
+      // F/R here mean "reads on the + / - strand OF THIS VIEW" - on a
+      // minus-strand gene's default (plus) view, a paper's mRNA-"sense"
+      // primer is the reverse one, so spelling the strand out prevents
+      // picking template reads instead of the intended oligos.
+      { shortcut: 'F', label: `Select as forward primer (${strandLabel} strand)`, disabledReason: anyPrimer ? null : 'Primer picks are not available in this view', submenu: primerSubmenu('F') },
+      { shortcut: 'R', label: `Select as reverse primer (${strandLabel} strand)`, disabledReason: anyPrimer ? null : 'Primer picks are not available in this view', submenu: primerSubmenu('R') },
       {
         shortcut: 'P',
         label: 'Select as probe',

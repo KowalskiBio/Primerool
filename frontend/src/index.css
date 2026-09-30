@@ -59,6 +59,7 @@
   --seq-probe-bg: #dbeafe;
   --seq-probe-wt-ink: #15803d;
   --seq-probe-wt-bg: #dcfce7;
+  --seq-probe-dual-ink: #1c1c1f;
   --seq-hit-ring: #b45309;
   --seq-hit-active-bg: #fdba74;
   --seq-hit-active-ring: #9a3412;
@@ -107,6 +108,7 @@
   --seq-probe-bg: rgba(147, 197, 253, 0.13);
   --seq-probe-wt-ink: #4ade80;
   --seq-probe-wt-bg: rgba(74, 222, 128, 0.13);
+  --seq-probe-dual-ink: #e4e4e7;
   --seq-hit-ring: #f59e0b;
   --seq-hit-active-bg: rgba(251, 146, 60, 0.25);
   --seq-hit-active-ring: #fb923c;
@@ -210,6 +212,17 @@
     font-weight: 700;
     text-decoration: underline;
     background-color: var(--seq-probe-wt-bg);
+  }
+
+  /* The span BOTH allele probes cover - diagonal stripes of the two probe
+   * colors, so each probe's first and last base stays visible even when
+   * one probe sits entirely inside the other. */
+  .seq-probe-dual {
+    color: var(--seq-probe-dual-ink);
+    font-weight: 700;
+    text-decoration: underline;
+    background-image: linear-gradient(45deg, var(--seq-probe-wt-bg) 25%, var(--seq-probe-bg) 0, var(--seq-probe-bg) 50%, var(--seq-probe-wt-bg) 0, var(--seq-probe-wt-bg) 75%, var(--seq-probe-bg) 0);
+    background-size: 8px 8px;
   }
 
   .seq-search-hit {

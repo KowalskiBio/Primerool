@@ -52,7 +52,7 @@ interface Segment {
  * intron chunk of `gene_seq`, each starting at a different absolute gene
  * position, but positions must come out in that absolute space to line up
  * with `Selection.start`/`end`. */
-function sliceWithIntervals(rawSeq: string, intervals: { start: number; end: number; className: string; id?: string; key?: keyof Selections }[], baseClassName: string, baseOffset = 0): Omit<Segment, 'region'>[] {
+function sliceWithIntervals(rawSeq: string, intervals: { start: number; end: number; className: string; id?: string; key?: keyof Selections; fallbackClassName?: string }[], baseClassName: string, baseOffset = 0): Omit<Segment, 'region'>[] {
   if (intervals.length === 0) return [{ text: rawSeq, className: baseClassName, startPos: baseOffset }];
 
   const sorted = [...intervals].sort((a, b) => a.start - b.start);
@@ -65,7 +65,7 @@ function sliceWithIntervals(rawSeq: string, intervals: { start: number; end: num
 
     if (s > cur) segments.push({ text: rawSeq.substring(cur, s), className: baseClassName, startPos: baseOffset + cur });
 
-    segments.push({ text: rawSeq.substring(s, e), className: iv.className, id: iv.id, key: iv.key, fallbackClassName: iv.key ? baseClassName : undefined, startPos: baseOffset + s });
+    segments.push({ text: rawSeq.substring(s, e), className: iv.className, id: iv.id, key: iv.key, fallbackClassName: iv.key ? (iv.fallbackClassName ?? baseClassName) : undefined, startPos: baseOffset + s });
     cur = e;
   }
   if (cur < rawSeq.length) segments.push({ text: rawSeq.substring(cur), className: baseClassName, startPos: baseOffset + cur });
@@ -127,8 +127,8 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
   const seq = data.gene_seq || '';
   if (!seq) return [];
 
-  function highlightIntervalsFor(segStart: number, segLen: number): { start: number; end: number; className: string; key?: keyof Selections }[] {
-    const out: { start: number; end: number; className: string; key?: keyof Selections }[] = [];
+  function highlightIntervalsFor(segStart: number, segLen: number): { start: number; end: number; className: string; key?: keyof Selections; fallbackClassName?: string }[] {
+    const out: { start: number; end: number; className: string; key?: keyof Selections; fallbackClassName?: string }[] = [];
     const add = (p: Selection | null, cls: string, key?: keyof Selections) => {
       if (!p) return;
       for (const r of mapPrimerToGenomic(p, data)) {
@@ -147,41 +147,34 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
     add(sel.juncRight, 'seq-primer');
     add(sel.geneForward, 'seq-primer', 'geneForward');
     add(sel.geneReverse, 'seq-primer', 'geneReverse');
-    // The allele twins overlap almost completely - whichever comes first
-    // paints (and, once unlocked, is draggable over) the shared span; the
-    // other twin shows only where it sticks out (e.g. where the user
-    // lengthened it beyond its partner). The probe picked for editing goes
-    // first, so it's always grabbable, not just at an overhang.
-    const probes: [Selection | null, string, keyof Selections][] =
-      probeEditable === 'geneProbeAlt'
-        ? [
-            [sel.geneProbeAlt, 'seq-probe', 'geneProbeAlt'],
-            [sel.geneProbe, 'seq-probe-wt', 'geneProbe'],
-          ]
-        : [
-            [sel.geneProbe, 'seq-probe-wt', 'geneProbe'],
-            [sel.geneProbeAlt, 'seq-probe', 'geneProbeAlt'],
-          ];
-    const [head, tail] = probes;
-    add(head[0], head[1], head[2]);
-    if (tail[0] && head[0]) {
-      // The tail probe, clipped to whatever the head doesn't cover - even
-      // where it starts EARLIER than the head (the start-sorted slicer
-      // alone would then let the tail swallow the head whole).
-      const hr = mapPrimerToGenomic(head[0], data);
-      const clip = { start: Math.min(...hr.map((r) => r.start)), end: Math.max(...hr.map((r) => r.end)) };
-      for (const r of mapPrimerToGenomic(tail[0], data)) {
-        for (const [a, b] of [
-          [r.start, Math.min(r.end, clip.start)],
-          [Math.max(r.start, clip.end), r.end],
-        ] as const) {
-          const s = Math.max(segStart, a);
-          const e = Math.min(segStart + segLen, b);
-          if (e > s) out.push({ start: s - segStart, end: e - segStart, className: tail[1], key: tail[0].region === 'gene' ? tail[2] : undefined });
-        }
-      }
+    // The allele twins usually overlap almost completely - recombine their
+    // spans into WT-only, MUT-only and shared pieces so BOTH probes'
+    // beginnings and ends are always visible: the shared part is striped in
+    // both colors (one color painting the overlap would hide wherever the
+    // other probe starts or ends). The shared piece carries the
+    // currently-edited probe's key (default WT), so that probe explodes
+    // into draggable chars across the whole overlap - not just where it
+    // sticks out; mid-drag, the bases it slides off fall back to the
+    // sibling's color instead of vanishing.
+    if (sel.geneProbe && sel.geneProbeAlt && sel.geneProbe.region === 'gene' && sel.geneProbeAlt.region === 'gene') {
+      const wt = { start: sel.geneProbe.start, end: sel.geneProbe.end };
+      const mut = { start: sel.geneProbeAlt.start, end: sel.geneProbeAlt.end };
+      const both = { start: Math.max(wt.start, mut.start), end: Math.min(wt.end, mut.end) };
+      const emit = (start: number, end: number, className: string, key: keyof Selections, fallbackClassName?: string) => {
+        const s = Math.max(segStart, start);
+        const e = Math.min(segStart + segLen, end);
+        if (e > s) out.push({ start: s - segStart, end: e - segStart, className, key, fallbackClassName });
+      };
+      const subtract = (x: { start: number; end: number }, y: { start: number; end: number }): [number, number][] => [
+        [x.start, Math.min(x.end, y.start)],
+        [Math.max(x.start, y.end), x.end],
+      ];
+      for (const [s, e] of subtract(wt, both)) emit(s, e, 'seq-probe-wt', 'geneProbe');
+      for (const [s, e] of subtract(mut, both)) emit(s, e, 'seq-probe', 'geneProbeAlt');
+      if (both.end > both.start) emit(both.start, both.end, 'seq-probe-dual', probeEditable === 'geneProbeAlt' ? 'geneProbeAlt' : 'geneProbe', probeEditable === 'geneProbeAlt' ? 'seq-probe-wt' : 'seq-probe');
     } else {
-      add(tail[0], tail[1], tail[2]);
+      add(sel.geneProbe, 'seq-probe-wt', 'geneProbe');
+      add(sel.geneProbeAlt, 'seq-probe', 'geneProbeAlt');
     }
     add(sel.armsRefPrimer, 'seq-primer', 'armsRefPrimer');
     add(sel.armsAltPrimer, 'seq-primer', 'armsAltPrimer');

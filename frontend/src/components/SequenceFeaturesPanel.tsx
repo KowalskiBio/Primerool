@@ -136,6 +136,9 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
             <div className="flex items-center gap-1.5">
               <span aria-hidden="true" className="h-2.5 w-2.5 rounded-[2px] bg-[var(--seq-probe-ink)]" /> Allele probe · mutant
             </div>
+            <div className="flex items-center gap-1.5">
+              <span aria-hidden="true" className="seq-probe-dual h-2.5 w-2.5 rounded-[2px]" /> Allele probes · shared span
+            </div>
           </div>
         </>
       )}

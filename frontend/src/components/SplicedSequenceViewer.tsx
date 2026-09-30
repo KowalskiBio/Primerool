@@ -52,26 +52,35 @@ function collectSplicedSpans(data: SequenceData, sel: Selections): Span[] {
   };
   addMapped(sel.geneForward, 'seq-primer', 'geneForward');
   addMapped(sel.geneReverse, 'seq-primer', 'geneReverse');
-  // Allele probes: the wild-type one paints the span they share, the
-  // mutant twin shows only where it sticks out - same rule as the
-  // sequence map, so the two maps never tell different stories.
+  // Allele probes: WT-only and MUT-only parts in their own colors, the span
+  // they share striped - both probes' beginnings and ends stay visible (the
+  // same treatment as the sequence map, so they never tell different
+  // stories). The striped piece belongs to the WT probe for right-clicks.
   const wtProbeRanges = sel.geneProbe ? genomicToSpliced(sel.geneProbe, data) : [];
-  for (const r of wtProbeRanges) spans.push({ ...r, className: 'seq-probe-wt', pickKey: 'geneProbe' });
-  if (sel.geneProbeAlt) {
-    const clip = wtProbeRanges.length > 0 ? { start: Math.min(...wtProbeRanges.map((r) => r.start)), end: Math.max(...wtProbeRanges.map((r) => r.end)) } : null;
-    for (const r of genomicToSpliced(sel.geneProbeAlt, data)) {
-      if (!clip) {
-        spans.push({ ...r, className: 'seq-probe', pickKey: 'geneProbeAlt' });
-        continue;
-      }
-      for (const [a, b] of [
-        [r.start, Math.min(r.end, clip.start)],
-        [Math.max(r.start, clip.end), r.end],
-      ] as const) {
-        if (b > a) spans.push({ start: a, end: b, className: 'seq-probe', pickKey: 'geneProbeAlt' });
-      }
+  const mutProbeRanges = sel.geneProbeAlt ? genomicToSpliced(sel.geneProbeAlt, data) : [];
+  const dualRanges: { start: number; end: number }[] = [];
+  for (const w of wtProbeRanges) {
+    for (const m of mutProbeRanges) {
+      const s = Math.max(w.start, m.start);
+      const e = Math.min(w.end, m.end);
+      if (e > s) dualRanges.push({ start: s, end: e });
     }
   }
+  const subtractDuals = (r: { start: number; end: number }) =>
+    dualRanges.reduce<[number, number][]>(
+      (pieces, d) => pieces.flatMap(([a, b]) =>
+        (
+          [
+            [a, Math.min(b, d.start)],
+            [Math.max(a, d.end), b],
+          ] as [number, number][]
+        ).filter(([x, y]) => y > x),
+      ),
+      [[r.start, r.end]],
+    );
+  for (const r of wtProbeRanges) for (const [start, end] of subtractDuals(r)) spans.push({ start, end, className: 'seq-probe-wt', pickKey: 'geneProbe' });
+  for (const r of mutProbeRanges) for (const [start, end] of subtractDuals(r)) spans.push({ start, end, className: 'seq-probe', pickKey: 'geneProbeAlt' });
+  for (const r of dualRanges) spans.push({ ...r, className: 'seq-probe-dual', pickKey: 'geneProbe' });
   addMapped(sel.wgaForward, 'seq-primer', 'wgaForward');
   addMapped(sel.wgaReverse, 'seq-primer', 'wgaReverse');
   addMapped(sel.armsRefPrimer, 'seq-primer', 'armsRefPrimer');

@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { SequenceData } from '../api/sequence';
-import type { Selection, Selections } from '../utils/regionMapping';
+import type { ProbeEditKey, Selection, Selections } from '../utils/regionMapping';
 import { genomicToSpliced, selectionStrand } from '../utils/regionMapping';
 import { reverseComplement } from '../utils/dna';
-import { alleleMutantProbe, armsMutantTwin, type PickKind } from '../utils/mapPickMenu';
+import { armsMutantTwin, withAlleleBase, type PickKind } from '../utils/mapPickMenu';
 import type { MapPick } from '../utils/mapSelection';
 import { computeDraggedInterval, type DragGeometry } from '../utils/dragInterval';
 import { baseAtPoint, describeGenePosition, useBaseHover } from './BaseHoverTooltip';
@@ -52,7 +52,26 @@ function collectSplicedSpans(data: SequenceData, sel: Selections): Span[] {
   };
   addMapped(sel.geneForward, 'seq-primer', 'geneForward');
   addMapped(sel.geneReverse, 'seq-primer', 'geneReverse');
-  addMapped(sel.geneProbe, 'seq-probe', 'geneProbe');
+  // Allele probes: the wild-type one paints the span they share, the
+  // mutant twin shows only where it sticks out - same rule as the
+  // sequence map, so the two maps never tell different stories.
+  const wtProbeRanges = sel.geneProbe ? genomicToSpliced(sel.geneProbe, data) : [];
+  for (const r of wtProbeRanges) spans.push({ ...r, className: 'seq-probe-wt', pickKey: 'geneProbe' });
+  if (sel.geneProbeAlt) {
+    const clip = wtProbeRanges.length > 0 ? { start: Math.min(...wtProbeRanges.map((r) => r.start)), end: Math.max(...wtProbeRanges.map((r) => r.end)) } : null;
+    for (const r of genomicToSpliced(sel.geneProbeAlt, data)) {
+      if (!clip) {
+        spans.push({ ...r, className: 'seq-probe', pickKey: 'geneProbeAlt' });
+        continue;
+      }
+      for (const [a, b] of [
+        [r.start, Math.min(r.end, clip.start)],
+        [Math.max(r.start, clip.end), r.end],
+      ] as const) {
+        if (b > a) spans.push({ start: a, end: b, className: 'seq-probe', pickKey: 'geneProbeAlt' });
+      }
+    }
+  }
   addMapped(sel.wgaForward, 'seq-primer', 'wgaForward');
   addMapped(sel.wgaReverse, 'seq-primer', 'wgaReverse');
   addMapped(sel.armsRefPrimer, 'seq-primer', 'armsRefPrimer');
@@ -115,6 +134,10 @@ interface Props {
   selections: Selections;
   /** Enables picks from the right-click menu and dragging picks. */
   onSelect?: (key: keyof Selections, value: Selection | null) => void;
+  /** The one allele probe currently unlocked for dragging (picked in "My
+   * primers" for the genomic map; the same lock applies here so the two
+   * maps never disagree). Default null: both static. */
+  probeEditable?: ProbeEditKey | null;
   /** Shows a "Hide exon map" button beside the heading, so the map can be
    * closed where it is instead of from the toggle above the sequence map. */
   onHide?: () => void;
@@ -125,7 +148,7 @@ interface Props {
  * primers belong in the flanks, which this map doesn't show. */
 const EXON_MAP_PICKS: readonly PickKind[] = ['general', 'junction', 'arms', 'probe'];
 
-export default function SplicedSequenceViewer({ data, selections, onSelect, onHide }: Props) {
+export default function SplicedSequenceViewer({ data, selections, onSelect, probeEditable = null, onHide }: Props) {
   const interactive = Boolean(onSelect);
   const spliced = data.spliced_exons_seq || '';
 
@@ -158,6 +181,9 @@ export default function SplicedSequenceViewer({ data, selections, onSelect, onHi
     for (const key of DRAGGABLE_KEYS) {
       const sel = selections[key];
       if (!sel) continue;
+      // Allele probes drag one at a time, picked in "My primers" - an
+      // unpicked grab would catch whichever twin renders on top.
+      if ((key === 'geneProbe' || key === 'geneProbeAlt') && probeEditable !== key) continue;
       const reverse = selectionStrand(sel) === 'R';
       const primerOf = (slice: string) => (reverse ? reverseComplement(slice) : slice);
       const onlyEdge = sel.arms ? (reverse ? 'right' : 'left') : undefined;
@@ -199,7 +225,7 @@ export default function SplicedSequenceViewer({ data, selections, onSelect, onHi
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interactive, selections, data, spliced, exons]);
+  }, [interactive, selections, data, spliced, exons, probeEditable]);
 
   const [drag, setDrag] = useState<DragSession | null>(null);
   const [deltaChars, setDeltaChars] = useState(0);
@@ -217,7 +243,7 @@ export default function SplicedSequenceViewer({ data, selections, onSelect, onHi
     if (liveDrag) {
       const riders = new Set<keyof Selections>([liveDrag.key, ...(liveDrag.key === 'armsRefPrimer' ? (['armsAltPrimer'] as const) : [])]);
       spans = spans.filter((sp) => !sp.pickKey || !riders.has(sp.pickKey));
-      spans.push({ start: liveDrag.start, end: liveDrag.end, className: liveDrag.key === 'geneProbe' ? 'seq-probe' : 'seq-primer', pickKey: liveDrag.key });
+      spans.push({ start: liveDrag.start, end: liveDrag.end, className: liveDrag.key === 'geneProbe' ? 'seq-probe-wt' : 'seq-primer', pickKey: liveDrag.key });
       spans.sort((a, b) => a.start - b.start);
     }
     const jPos = (data.junctions || [])
@@ -265,13 +291,13 @@ export default function SplicedSequenceViewer({ data, selections, onSelect, onHi
     const { start, end } = computeDraggedInterval(session, finalDelta, d.lo, d.hi);
     if (start === d.start && end === d.end) return;
     const next: Selection = { ...sel, ...d.place(start, end), source: 'manual', analysis: undefined };
-    commitSelection(session.key, next);
-    // The mutant twin/probe differ only at the SNP, so they follow.
+    // The mutant probe is edited independently of its wild-type partner,
+    // but `place()` rebuilt its sequence from bare template - re-stamp the
+    // allele base at the SNP.
+    commitSelection(session.key, session.key === 'geneProbeAlt' ? withAlleleBase(next) : next);
+    // The ARMS mutant twin differs only at its 3' base, so it follows.
     if (session.key === 'armsRefPrimer' && next.arms && selections.armsAltPrimer) {
       commitSelection('armsAltPrimer', armsMutantTwin(next, selections.armsAltPrimer.name));
-    }
-    if (session.key === 'geneProbe' && next.allele && selections.geneProbeAlt) {
-      commitSelection('geneProbeAlt', alleleMutantProbe(next, selections.geneProbeAlt.name));
     }
   }
 

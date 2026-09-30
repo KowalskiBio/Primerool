@@ -18,6 +18,11 @@ export interface SwAlignment {
   subjectStart: number;
   /** End of the aligned window, exclusive. */
   subjectEnd: number;
+  /** 0-based span of `query` actually covered by the alignment [start, end,
+   * exclusive) - a trimmed local alignment covers only these bases of what
+   * the user pasted, so callers can say so. */
+  queryStart: number;
+  queryEnd: number;
   /** Columns where both rows carry a base (excludes gap columns). */
   alignedColumns: number;
   matches: number;
@@ -138,6 +143,8 @@ export function smithWaterman(subject: string, query: string): SwAlignment | nul
     score: best,
     subjectStart: i,
     subjectEnd: endSubject,
+    queryStart: j,
+    queryEnd: bestJ,
     alignedColumns,
     matches,
     identityPct: alignedColumns > 0 ? (matches / alignedColumns) * 100 : 0,
@@ -161,6 +168,13 @@ export interface AlignmentHit {
   matches: number;
   alignedColumns: number;
   identityPct: number;
+  /** 0-based span [start, end, exclusive) of the ORIENTED pasted query the
+   * alignment actually covers; the caller maps it back to the original
+   * paste's coordinates for a "only bases X-Y of your sequence bind here"
+   * note (for strand '-', position k of the oriented query is position
+   * `query.length - k` of the paste). */
+  queryStart: number;
+  queryEnd: number;
   /** Traceback rows in map orientation (alignedSubject is the map slice,
    * alignedQuery the user's sequence, '-'-padded), for the detail view. */
   alignedQuery: string;
@@ -203,6 +217,8 @@ export function findBestAlignment(data: SequenceData, customer: string): Alignme
         matches: hit.matches,
         alignedColumns: hit.alignedColumns,
         identityPct: hit.identityPct,
+        queryStart: hit.queryStart,
+        queryEnd: hit.queryEnd,
         alignedQuery: hit.alignedQuery,
         alignedSubject: hit.alignedSubject,
       };

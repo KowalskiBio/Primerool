@@ -174,6 +174,21 @@ export function createArmsTwins(ctx: Pick<PickMenuContext, 'data' | 'selections'
   ctx.commit('armsAltPrimer', armsMutantTwin(wt, mutName));
 }
 
+/** Re-stamps an allele probe's mutant base after its span was rebuilt from
+ * bare template (e.g. a drag/resize on a map, which derives `primerSeq` as
+ * the plain template slice): the wild-type probe reads as the template,
+ * the mutant carries `allele.mutBase` at the SNP, in the selection's own
+ * strand sense. No-op for allele-less selections or a SNP left outside the
+ * span (a drag can't do that - `mustCover` keeps it inside). */
+export function withAlleleBase(sel: Selection): Selection {
+  const allele = sel.allele;
+  if (!allele) return sel;
+  const i = allele.snpPos - sel.start;
+  if (i < 0 || i >= sel.bindingSeq.length) return sel;
+  const slice = sel.bindingSeq.slice(0, i) + allele.mutBase + sel.bindingSeq.slice(i + 1);
+  return { ...sel, primerSeq: selectionStrand(sel) === 'F' ? slice : reverseComplement(slice) };
+}
+
 /** The mutant probe for a wild-type allele-detection probe: identical but
  * for the SNP base, which carries `allele.mutBase`. */
 export function alleleMutantProbe(wt: Selection, name: string | undefined): Selection {

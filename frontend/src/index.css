@@ -57,6 +57,8 @@
   --seq-primer-bg: #fee2e2;
   --seq-probe-ink: #1d4ed8;
   --seq-probe-bg: #dbeafe;
+  --seq-probe-wt-ink: #15803d;
+  --seq-probe-wt-bg: #dcfce7;
   --seq-hit-ring: #b45309;
   --seq-hit-active-bg: #fdba74;
   --seq-hit-active-ring: #9a3412;
@@ -103,6 +105,8 @@
   --seq-primer-bg: rgba(248, 113, 113, 0.13);
   --seq-probe-ink: #93c5fd;
   --seq-probe-bg: rgba(147, 197, 253, 0.13);
+  --seq-probe-wt-ink: #4ade80;
+  --seq-probe-wt-bg: rgba(74, 222, 128, 0.13);
   --seq-hit-ring: #f59e0b;
   --seq-hit-active-bg: rgba(251, 146, 60, 0.25);
   --seq-hit-active-ring: #fb923c;
@@ -197,6 +201,15 @@
     font-weight: 700;
     text-decoration: underline;
     background-color: var(--seq-probe-bg);
+  }
+
+  /* The wild-type probe of an allele-detection pair - green to the mutant
+   * probe's blue, so the two are told apart where they don't overlap. */
+  .seq-probe-wt {
+    color: var(--seq-probe-wt-ink);
+    font-weight: 700;
+    text-decoration: underline;
+    background-color: var(--seq-probe-wt-bg);
   }
 
   .seq-search-hit {

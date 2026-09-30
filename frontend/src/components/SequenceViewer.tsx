@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SequenceData } from '../api/sequence';
-import type { Selection, Selections } from '../utils/regionMapping';
+import type { ProbeEditKey, Selection, Selections } from '../utils/regionMapping';
 import { mapPrimerToGenomic, selectionStrand } from '../utils/regionMapping';
 import { cleanDNA, reverseComplement } from '../utils/dna';
 import { lookupVariant, type VariantHit } from '../api/variants';
 import { localGenePos } from '../utils/variantMapping';
 import { baseAtPoint, describeGenePosition, useBaseHover } from './BaseHoverTooltip';
-import { ALL_PICK_KINDS, alleleMutantProbe, armsMutantTwin, type PickKind } from '../utils/mapPickMenu';
+import { ALL_PICK_KINDS, armsMutantTwin, withAlleleBase, type PickKind } from '../utils/mapPickMenu';
 import { computeDraggedInterval, type DragGeometry } from '../utils/dragInterval';
 import { useMapPickMenu } from './useMapPickMenu';
 import { useMapDragSelect } from './useMapDragSelect';
@@ -123,7 +123,7 @@ function isInCDS(pos: number, cdsIntervals: [number, number][]): boolean {
   return false;
 }
 
-function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons: boolean, variantMarkers: VariantMarker[]): Segment[] {
+function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons: boolean, variantMarkers: VariantMarker[], forcedIntronRanges: { start: number; end: number }[], probeEditable: ProbeEditKey | null): Segment[] {
   const seq = data.gene_seq || '';
   if (!seq) return [];
 
@@ -147,7 +147,42 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
     add(sel.juncRight, 'seq-primer');
     add(sel.geneForward, 'seq-primer', 'geneForward');
     add(sel.geneReverse, 'seq-primer', 'geneReverse');
-    add(sel.geneProbe, 'seq-probe', 'geneProbe');
+    // The allele twins overlap almost completely - whichever comes first
+    // paints (and, once unlocked, is draggable over) the shared span; the
+    // other twin shows only where it sticks out (e.g. where the user
+    // lengthened it beyond its partner). The probe picked for editing goes
+    // first, so it's always grabbable, not just at an overhang.
+    const probes: [Selection | null, string, keyof Selections][] =
+      probeEditable === 'geneProbeAlt'
+        ? [
+            [sel.geneProbeAlt, 'seq-probe', 'geneProbeAlt'],
+            [sel.geneProbe, 'seq-probe-wt', 'geneProbe'],
+          ]
+        : [
+            [sel.geneProbe, 'seq-probe-wt', 'geneProbe'],
+            [sel.geneProbeAlt, 'seq-probe', 'geneProbeAlt'],
+          ];
+    const [head, tail] = probes;
+    add(head[0], head[1], head[2]);
+    if (tail[0] && head[0]) {
+      // The tail probe, clipped to whatever the head doesn't cover - even
+      // where it starts EARLIER than the head (the start-sorted slicer
+      // alone would then let the tail swallow the head whole).
+      const hr = mapPrimerToGenomic(head[0], data);
+      const clip = { start: Math.min(...hr.map((r) => r.start)), end: Math.max(...hr.map((r) => r.end)) };
+      for (const r of mapPrimerToGenomic(tail[0], data)) {
+        for (const [a, b] of [
+          [r.start, Math.min(r.end, clip.start)],
+          [Math.max(r.start, clip.end), r.end],
+        ] as const) {
+          const s = Math.max(segStart, a);
+          const e = Math.min(segStart + segLen, b);
+          if (e > s) out.push({ start: s - segStart, end: e - segStart, className: tail[1], key: tail[0].region === 'gene' ? tail[2] : undefined });
+        }
+      }
+    } else {
+      add(tail[0], tail[1], tail[2]);
+    }
     add(sel.armsRefPrimer, 'seq-primer', 'armsRefPrimer');
     add(sel.armsAltPrimer, 'seq-primer', 'armsAltPrimer');
     add(sel.armsCommon, 'seq-primer', 'armsCommon');
@@ -182,9 +217,14 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
     const pushIntron = (intronSeq: string, offset: number) => {
       // An intron carrying one of these is always rendered in full
       // instead, regardless of the toggle - "truncate introns" means "the
-      // ones I don't need to see", not "hide my SNPs/primers".
+      // ones I don't need to see", not "hide my SNPs/primers" (nor the hit
+      // the user is currently hunting for: `forcedIntronRanges` carries the
+      // live find/align matches, which would otherwise highlight nothing
+      // and scroll nowhere).
       const hasMarker =
-        variantMarkers.some((m) => m.end > offset && m.start < offset + intronSeq.length) || geneSelectionRanges.some((r) => r.end > offset && r.start < offset + intronSeq.length);
+        variantMarkers.some((m) => m.end > offset && m.start < offset + intronSeq.length) ||
+        geneSelectionRanges.some((r) => r.end > offset && r.start < offset + intronSeq.length) ||
+        forcedIntronRanges.some((r) => r.end > offset && r.start < offset + intronSeq.length);
       if (truncateIntrons && !hasMarker) {
         segments.push({ text: `...intron ${intronSeq.length}bp...`, className: 'seq-intron-placeholder', startPos: offset, region: 'gene' });
       } else {
@@ -230,7 +270,9 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
 }
 
 function colorClassName(key: keyof Selections): string {
-  return key === 'geneProbe' ? 'seq-probe' : 'seq-primer';
+  if (key === 'geneProbe') return 'seq-probe-wt';
+  if (key === 'geneProbeAlt') return 'seq-probe';
+  return 'seq-primer';
 }
 
 function regionRawSeq(data: SequenceData, region: Selection['region']): string {
@@ -653,6 +695,11 @@ interface Props {
    * span. Absent (not just a no-op) disables interactive editing entirely
    * - primers render read-only, exactly as before. */
   onSelect?: (key: keyof Selections, value: Selection | null) => void;
+  /** The one allele probe currently unlocked for dragging, picked in "My
+   * primers" (default null: both static). The two overlap almost
+   * completely on the map, so an unpicked drag would grab whichever
+   * renders on top. */
+  probeEditable?: ProbeEditKey | null;
   /** Which primer picks the right-click menu offers (default: all). Only
    * meaningful with `onSelect`. */
   pickKinds?: readonly PickKind[];
@@ -677,7 +724,7 @@ interface Props {
   persistKey?: string;
 }
 
-export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, pickKinds = ALL_PICK_KINDS, variantMarkers = [], species, apiSource, selectedSpecies, persistKey }: Props) {
+export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, probeEditable = null, pickKinds = ALL_PICK_KINDS, variantMarkers = [], species, apiSource, selectedSpecies, persistKey }: Props) {
   const interactive = Boolean(onSelect);
 
   // External-ID header links (GenBank/Gene/transcript/assembly) - resolved
@@ -735,7 +782,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
   // pattern for "reset state when a prop/derived value changes" - so it
   // resolves before this render paints instead of costing an extra one.
   const [prevData, setPrevData] = useState(data);
-  const searchKey = `${searchQuery} ${includeRevComp}`;
+  const searchKey = `${searchQuery}\u0000${includeRevComp}`;
   const [prevSearchKey, setPrevSearchKey] = useState(searchKey);
   if (data !== prevData) {
     setPrevData(data);
@@ -779,6 +826,23 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     }, 300);
     return () => clearTimeout(timer);
   }, [data, alignQuery]);
+
+  /** Which bases of the pasted query the hit actually covers, in the
+   * paste's own 1-based coordinates (5'->3' as pasted) - null when the
+   * whole query aligns. A local alignment silently trims ends that only
+   * lose score, and a bare "11/26 nowhere" looks like a broken result, so
+   * the report spells the trim out. */
+  const alignTrimNote = useMemo(() => {
+    if (!alignHit) return null;
+    const qLen = cleanDNA(alignQuery).length;
+    const covered = alignHit.queryEnd - alignHit.queryStart;
+    if (qLen === 0 || covered >= qLen) return null;
+    // For a reverse-complement hit the alignedQuery runs antiparallel to
+    // the paste: oriented position k is paste position qLen - k.
+    const from = alignHit.strand === '+' ? alignHit.queryStart + 1 : qLen - alignHit.queryEnd + 1;
+    const to = alignHit.strand === '+' ? alignHit.queryEnd : qLen - alignHit.queryStart;
+    return { covered, qLen, from, to };
+  }, [alignHit, alignQuery]);
 
   // --- rsID ("rs334") search ----------------------------------------------
   // A query shaped like a bare rsID can never be a meaningful literal
@@ -935,27 +999,6 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     return [...base, { rsid: `${probe.name ?? 'Probe'} SNP`, start: snpPos, end: snpPos + 1, alleles: [wtBase, mutBase] }];
   }, [variantMarkers, rsMarker, selections.geneProbe]);
 
-  const segments = useMemo(() => {
-    const up = flankSegments(data.upstream_seq || '', 'up', data, selections);
-    const gene = geneBlockSegments(data, selections, truncateIntrons, allVariantMarkers);
-    const down = flankSegments(data.downstream_seq || '', 'down', data, selections);
-    return [...up, ...gene, ...down];
-  }, [data, selections, truncateIntrons, allVariantMarkers]);
-
-  // Every selection rendered in its own region is draggable, even when its
-  // highlight is split into several pieces - a primer straddling an exon/
-  // intron or CDS/UTR boundary is drawn as one piece per chunk. (It used to
-  // require exactly one piece, so a primer dragged across such a boundary
-  // turned read-only and could never be moved back.) `buildCells` decides
-  // resize handles by the primer's real first/last base, so the pieces
-  // behave as one span.
-  const editableKeys = useMemo(() => {
-    if (!interactive) return new Set<keyof Selections>();
-    const keys = new Set<keyof Selections>();
-    for (const s of segments) if (s.key) keys.add(s.key);
-    return keys;
-  }, [segments, interactive]);
-
   const searchMatches = useMemo<SearchMatch[]>(() => {
     // Every active search contributes its own highlighting at once: the
     // alignment hit (if any), the rsID hit, and the literal matches. The
@@ -968,6 +1011,45 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     hits.push(...literalMatches.map((m) => ({ ...m, idx: 0 })));
     return hits.map((m, idx) => ({ ...m, idx }));
   }, [alignHit, rsLocalPos, literalMatches]);
+
+  const segments = useMemo(() => {
+    const up = flankSegments(data.upstream_seq || '', 'up', data, selections);
+    // A search/align hit landing inside a truncated intron would collapse
+    // into its `...intron Nbp...` placeholder - highlighted nowhere,
+    // scrolled to nothing. Force such introns to render in full (the same
+    // break-glass rule variant markers and selections already get).
+    const gene = geneBlockSegments(
+      data,
+      selections,
+      truncateIntrons,
+      allVariantMarkers,
+      searchMatches.filter((m) => m.region === 'gene'),
+      probeEditable,
+    );
+    const down = flankSegments(data.downstream_seq || '', 'down', data, selections);
+    return [...up, ...gene, ...down];
+  }, [data, selections, truncateIntrons, allVariantMarkers, searchMatches, probeEditable]);
+
+  // Every selection rendered in its own region is draggable, even when its
+  // highlight is split into several pieces - a primer straddling an exon/
+  // intron or CDS/UTR boundary is drawn as one piece per chunk. (It used to
+  // require exactly one piece, so a primer dragged across such a boundary
+  // turned read-only and could never be moved back.) `buildCells` decides
+  // resize handles by the primer's real first/last base, so the pieces
+  // behave as one span.
+  const editableKeys = useMemo(() => {
+    if (!interactive) return new Set<keyof Selections>();
+    const keys = new Set<keyof Selections>();
+    for (const s of segments) if (s.key) keys.add(s.key);
+    // The two allele probes overlap almost completely, so an unpicked drag
+    // would just grab whichever renders on top - they stay static until one
+    // is unlocked for editing in "My primers" (`probeEditable`).
+    keys.delete('geneProbe');
+    keys.delete('geneProbeAlt');
+    if (probeEditable) keys.add(probeEditable);
+    return keys;
+  }, [segments, interactive, probeEditable]);
+
   const activeSearchIdx = searchMatches.length > 0 ? Math.min(activeMatchIndex, searchMatches.length - 1) : -1;
 
   // Scrolling the active match into view is a real effect: it reaches out
@@ -1024,15 +1106,15 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     const primerSeq = isReverseStrand ? reverseComplement(bindingSeq) : bindingSeq;
 
     const next: Selection = { ...sel, start, end, primerSeq, bindingSeq, source: 'manual', analysis: undefined };
-    commitSelection(session.selKey, next);
+    // The mutant probe is edited independently (its own length can pull
+    // its Tm up to the wild-type's) - but the template-derived primerSeq
+    // above would erase its allele base, so re-stamp it at the SNP (always
+    // inside the span: the drag must keep covering it).
+    commitSelection(session.selKey, session.selKey === 'geneProbeAlt' ? withAlleleBase(next) : next);
     // The mutant twin is the same primer but for its 3' base, so it
     // follows the wild-type twin's new 5' end.
     if (session.selKey === 'armsRefPrimer' && next.arms && selections.armsAltPrimer) {
       commitSelection('armsAltPrimer', armsMutantTwin(next, selections.armsAltPrimer.name));
-    }
-    // Likewise the mutant allele probe, which differs only at the SNP.
-    if (session.selKey === 'geneProbe' && next.allele && selections.geneProbeAlt) {
-      commitSelection('geneProbeAlt', alleleMutantProbe(next, selections.geneProbeAlt.name));
     }
   }
 
@@ -1354,6 +1436,11 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
           </div>
           {alignHit.strand === '-' && (
             <p className="mt-1 text-ink-faint">It matched on the reverse complement - the pasted sequence binds the antisense strand at this spot.</p>
+          )}
+          {alignTrimNote && (
+            <p className="mt-1 text-ink-faint">
+              Only bases {alignTrimNote.from}–{alignTrimNote.to} of your {alignTrimNote.qLen}-base sequence align here - the rest doesn't match the loaded sequence at this site.
+            </p>
           )}
           {alignHit.identityPct < 100 && (
             <pre className="mt-1.5 overflow-x-auto font-mono text-[11px] leading-snug text-ink">{formatAlignmentRows(alignHit)}</pre>

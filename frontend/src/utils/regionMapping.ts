@@ -68,6 +68,11 @@ export interface Selections {
   armsCommon: Selection | null;
 }
 
+/** The two allele-detection probe slots - the only selections the "My
+ * primers" panel offers one-at-a-time map editing for (they overlap almost
+ * completely, so an unpicked drag would grab whichever renders on top). */
+export type ProbeEditKey = 'geneProbe' | 'geneProbeAlt';
+
 export const EMPTY_SELECTIONS: Selections = {
   wgaForward: null,
   wgaReverse: null,

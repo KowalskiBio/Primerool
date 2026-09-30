@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
-import type { Selection, Selections } from '../utils/regionMapping';
+import type { ProbeEditKey, Selection, Selections } from '../utils/regionMapping';
 import SequenceViewer from './SequenceViewer';
 import SplicedSequenceViewer from './SplicedSequenceViewer';
 import FeatureMap from './FeatureMap';
@@ -52,6 +52,19 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
   // the flipped view.
   const [minusFor, setMinusFor] = useState<SequenceData | null>(null);
   const canFlip = data.strand === '-' && data.transcript_id !== 'custom';
+
+  // Which allele probe (if any) is unlocked for drag/resize on the maps -
+  // picked in "My primers" beside the set's buttons. The two overlap almost
+  // completely, so only the picked one is ever editable; they then differ
+  // independently (a shorter-allele probe can be lengthened to pull its Tm
+  // back up). A freshly loaded sequence starts with both locked.
+  const [probeEditKey, setProbeEditKey] = useState<ProbeEditKey | null>(null);
+  const [prevDataForProbe, setPrevDataForProbe] = useState(data);
+  if (data !== prevDataForProbe) {
+    setPrevDataForProbe(data);
+    if (probeEditKey !== null) setProbeEditKey(null);
+  }
+  const activeProbeEditKey: ProbeEditKey | null = probeEditKey && selections[probeEditKey] ? probeEditKey : null;
   const mapStrand: '+' | '-' = canFlip && minusFor === data ? '-' : '+';
   const flipped = canFlip && isPlusOriented(data) !== (mapStrand === '+');
   const mapData = useMemo(() => (flipped ? flipSequenceData(data) : data), [flipped, data]);
@@ -118,7 +131,10 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
               <span aria-hidden="true" className="h-2.5 w-2.5 rounded-[2px] bg-[var(--seq-primer-ink)]" /> Selected primer binding sites
             </div>
             <div className="flex items-center gap-1.5">
-              <span aria-hidden="true" className="h-2.5 w-2.5 rounded-[2px] bg-[var(--seq-probe-ink)]" /> Selected TaqMan probe
+              <span aria-hidden="true" className="h-2.5 w-2.5 rounded-[2px] bg-[var(--seq-probe-wt-ink)]" /> Allele probe · wild type
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span aria-hidden="true" className="h-2.5 w-2.5 rounded-[2px] bg-[var(--seq-probe-ink)]" /> Allele probe · mutant
             </div>
           </div>
         </>
@@ -135,6 +151,7 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
         selections={mapSelections}
         truncateIntrons={truncateIntrons}
         onSelect={mapOnSelect}
+        probeEditable={activeProbeEditKey}
         species={species}
         apiSource={apiSource}
         selectedSpecies={selectedSpecies}
@@ -142,11 +159,11 @@ export default function SequenceFeaturesPanel({ data, selections, truncateIntron
 
       {primerMode === 'junction' && showSplicedMap && (
         <div className="mt-6">
-          <SplicedSequenceViewer key={mapStrand} data={mapData} selections={mapSelections} onSelect={mapOnSelect} onHide={() => setShowSplicedMap(false)} />
+          <SplicedSequenceViewer key={mapStrand} data={mapData} selections={mapSelections} onSelect={mapOnSelect} probeEditable={activeProbeEditKey} onHide={() => setShowSplicedMap(false)} />
         </div>
       )}
 
-      {onSelect && <PrimerSetsPanel data={data} selections={selections} onSelect={onSelect} idtCredentials={idtCredentials} />}
+      {onSelect && <PrimerSetsPanel data={data} selections={selections} onSelect={onSelect} idtCredentials={idtCredentials} probeEditKey={activeProbeEditKey} onProbeEditKeyChange={setProbeEditKey} />}
 
       <div className="mt-4 flex justify-end">
         <Button variant="ghost" size="sm" onClick={onClearSelections}>

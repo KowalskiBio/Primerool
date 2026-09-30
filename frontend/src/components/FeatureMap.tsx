@@ -111,7 +111,7 @@ export default function FeatureMap({ data, selections }: Props) {
     { sel: selections.juncRight, label: 'R', color: 'var(--seq-primer-ink)' },
     { sel: selections.geneForward, label: 'F', color: 'var(--seq-primer-ink)' },
     { sel: selections.geneReverse, label: 'R', color: 'var(--seq-primer-ink)' },
-    { sel: selections.geneProbe, label: 'P', color: 'var(--seq-probe-ink)' },
+    { sel: selections.geneProbe, label: 'P', color: 'var(--seq-probe-wt-ink)' },
   ];
 
   const fwdPrimers = [selections.wgaForward, selections.juncLeft, selections.geneForward].filter((p) => p !== null);

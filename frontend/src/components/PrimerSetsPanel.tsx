@@ -73,7 +73,11 @@ function ampliconLabel(fwd: Selection | undefined, rev: Selection | undefined, d
   const r = span(rev, data, mixed);
   if (!Number.isFinite(f.start) || !Number.isFinite(r.end)) return null;
   const size = r.end - f.start;
-  if (size <= 0 || f.start >= r.start) return 'primers not in amplifying orientation';
+  // The forward (+ strand) pick must sit upstream of the reverse (- strand)
+  // one. When it doesn't, the usual cause is roles assigned by a paper's
+  // "sense/anti-sense" names on a minus-strand gene: the map is plus-strand
+  // genomic, so that paper's "sense" primer is this map's reverse one.
+  if (size <= 0 || f.start >= r.start) return 'primers not in amplifying orientation (F/R roles may be swapped)';
   const kind = mixed ? ' (unspliced template)' : f.space === 'spliced' ? ' (cDNA)' : data.include_introns ? ' (genomic)' : '';
   return `${size.toLocaleString('en-US')} bp amplicon${kind}`;
 }

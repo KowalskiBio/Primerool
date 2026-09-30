@@ -1436,7 +1436,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
             </p>
           )}
           {alignHit.identityPct < 100 && (
-            <pre className="mt-1.5 overflow-x-auto font-mono text-[11px] leading-snug text-ink">{formatAlignmentRows(alignHit)}</pre>
+            <pre className="mt-1.5 overflow-x-auto font-mono text-[13px] leading-normal text-ink">{formatAlignmentRows(alignHit)}</pre>
           )}
         </div>
       )}

@@ -9,8 +9,10 @@ interface Props {
    * needed for a pair (not just whichever primer was clicked) since the
    * heterodimer check is between them. Without `reverse` it analyzes
    * `forward` alone (hairpin + self-dimer, no heterodimer) - e.g. a
-   * stretch picked from the sequence map's right-click menu. */
-  pair: { forward: string; reverse?: string } | null;
+   * stretch picked from the sequence map's right-click menu.
+   * `forwardLabel`/`reverseLabel` override the "Forward"/"Reverse" headers
+   * (e.g. two allele probes, which aren't an F/R pair at all). */
+  pair: { forward: string; reverse?: string; forwardLabel?: string; reverseLabel?: string } | null;
 }
 
 /** Strider-style figures, falling back to the older diagrams. */
@@ -18,12 +20,12 @@ function hairpin(sequence: string, structure: string) {
   return <StriderStructure sequence={sequence} structure={structure} title="Hairpin" fallback={<HairpinSvg sequence={sequence} structure={structure} />} />;
 }
 /** A self-dimer (`seq2` omitted) or the F × R heterodimer. */
-function dimer(seq1: string, structure: string, seq2 = seq1) {
+function dimer(seq1: string, structure: string, seq2 = seq1, names?: string[]) {
   return (
     <StriderStructure
       sequence={seq1 + seq2}
       nick={seq1.length}
-      strandNames={seq2 === seq1 ? undefined : HETERODIMER_NAMES}
+      strandNames={seq2 === seq1 ? undefined : (names ?? HETERODIMER_NAMES)}
       structure={structure}
       title={seq2 === seq1 ? 'Self-dimer' : 'Heterodimer'}
       fallback={<DimerSvg seq1={seq1} seq2={seq2} structure={structure} />}
@@ -156,7 +158,7 @@ export default function PrimerStructurePanel({ pair }: Props) {
               own block. */}
           <div className={pair.reverse ? 'mb-5 border-b border-line pb-5' : ''}>
             <p className="mb-2 break-all font-mono text-xs text-ink">
-              {pair.reverse ? 'Forward' : 'Selection'}: {pair.forward} <span className="text-ink-faint">({pair.forward.length} bp)</span>
+              {pair.forwardLabel ?? (pair.reverse ? 'Forward' : 'Selection')}: {pair.forward} <span className="text-ink-faint">({pair.forward.length} bp)</span>
             </p>
             <CategorySection title="Hairpin (Strider MFE, ΔG at 25 °C)">
               <CandidateStrip candidates={shownFwd.hairpin.with_bulge.candidates} diagram={(s) => hairpin(pair.forward, s)} />
@@ -169,7 +171,7 @@ export default function PrimerStructurePanel({ pair }: Props) {
             <>
               <div className="mb-5 border-b border-line pb-5">
                 <p className="mb-2 break-all font-mono text-xs text-ink">
-                  Reverse: {pair.reverse} <span className="text-ink-faint">({pair.reverse.length} bp)</span>
+                  {pair.reverseLabel ?? 'Reverse'}: {pair.reverse} <span className="text-ink-faint">({pair.reverse.length} bp)</span>
                 </p>
                 <CategorySection title="Hairpin (Strider MFE, ΔG at 25 °C)">
                   <CandidateStrip candidates={shownRev.hairpin.with_bulge.candidates} diagram={(s) => hairpin(pair.reverse!, s)} />
@@ -178,8 +180,12 @@ export default function PrimerStructurePanel({ pair }: Props) {
                   <CandidateStrip candidates={shownRev.homodimer.with_bulge.candidates} diagram={(s) => dimer(pair.reverse!, s)} wide />
                 </CategorySection>
               </div>
-              <CategorySection title="Heterodimer - forward × reverse (Strider MFE)">
-                <CandidateStrip candidates={shownFwd.heterodimer?.with_bulge.candidates ?? []} diagram={(s) => dimer(pair.forward, s, pair.reverse!)} wide />
+              <CategorySection title={pair.forwardLabel && pair.reverseLabel ? `Heterodimer - ${pair.forwardLabel} × ${pair.reverseLabel} (Strider MFE)` : 'Heterodimer - forward × reverse (Strider MFE)'}>
+                <CandidateStrip
+                  candidates={shownFwd.heterodimer?.with_bulge.candidates ?? []}
+                  diagram={(s) => dimer(pair.forward, s, pair.reverse!, pair.forwardLabel && pair.reverseLabel ? [pair.forwardLabel, pair.reverseLabel] : undefined)}
+                  wide
+                />
               </CategorySection>
             </>
           )}

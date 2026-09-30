@@ -165,7 +165,7 @@ function NameInput({ value, onCommit }: { value: string; onCommit: (v: string) =
  * IDT OligoAnalyzer's Tm (same conditions) beside Strider's. Sets persist
  * per sequence (see `utils/primerSetStore.ts`). */
 export default function PrimerSetsPanel({ data, selections, onSelect, probeEditKey, onProbeEditKeyChange, idtCredentials }: Props) {
-  const [structurePair, setStructurePair] = useState<{ label: string; forward: string; reverse?: string } | null>(null);
+  const [structurePair, setStructurePair] = useState<{ label: string; forward: string; reverse?: string; forwardLabel?: string; reverseLabel?: string } | null>(null);
   const inFlight = useRef(new Set<string>());
   // IDT Tm per primer sequence, for this page view only (not persisted).
   const [idtTms, setIdtTms] = useState<Record<string, IdtTmResult | 'loading'>>({});
@@ -301,13 +301,26 @@ export default function PrimerSetsPanel({ data, selections, onSelect, probeEditK
                     </Button>
                     <Button
                       size="sm"
-                      onClick={() =>
+                      onClick={() => {
+                        // The allele probes are two separate oligos, not an
+                        // F/R pair (they're both forward by default - a
+                        // strand lookup would show only the wild-type one).
+                        // List both with their probe names; their cross-dimer
+                        // matters too - the pair shares one tube in a
+                        // multiplex assay.
+                        if (g.id === 'probe' && g.rows.length > 1) {
+                          const probeLabel = (key: Key, sel: Selection) => sel.name ?? (key === 'geneProbe' ? 'WT probe' : 'MUT probe');
+                          const f = probeLabel(g.rows[0].key, g.rows[0].sel);
+                          const r = probeLabel(g.rows[1].key, g.rows[1].sel);
+                          setStructurePair({ label: `${title}: ${f} × ${r}`, forward: g.rows[0].sel.primerSeq, reverse: g.rows[1].sel.primerSeq, forwardLabel: f, reverseLabel: r });
+                          return;
+                        }
                         setStructurePair(
                           fwd && rev
                             ? { label: `${title}: ${fwd.name ?? 'F'} × ${rev.name ?? 'R'}`, forward: fwd.primerSeq, reverse: rev.primerSeq }
                             : { label: `${title}: ${g.rows[0].sel.name ?? ''}`, forward: g.rows[0].sel.primerSeq },
-                        )
-                      }
+                        );
+                      }}
                     >
                       Structures
                     </Button>

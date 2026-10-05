@@ -215,6 +215,20 @@ pub trait SequenceProvider: Send + Sync {
     ) -> Result<(String, String), ProviderError>;
 }
 
+/// Strips FASTA headers, joins the remaining lines, uppercases. `None`
+/// when nothing is left — callers treat that as "nothing fetched".
+pub(crate) fn strip_fasta(text: &str) -> Option<String> {
+    let seq: String = text
+        .trim()
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('>'))
+        .collect::<Vec<_>>()
+        .join("")
+        .to_uppercase();
+    if seq.is_empty() { None } else { Some(seq) }
+}
+
 /// DNA reverse-complement matching `str.maketrans("ACGTacgt", "TGCAtgca")`
 /// followed by `[::-1]` — unmapped characters pass through unchanged.
 /// Every provider always fetches plus-strand and calls this locally rather

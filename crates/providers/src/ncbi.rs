@@ -22,7 +22,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::species_map::ensembl_to_binomial_or_guess;
-use crate::{revcomp, Feature, GeneMatch, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo, TranscriptSummary, VariantHit};
+use crate::{revcomp, strip_fasta, Feature, GeneMatch, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo, TranscriptSummary, VariantHit};
 
 const EUTILS: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const MIN_INTERVAL: Duration = Duration::from_millis(340); // ~3 req/s, no API key
@@ -130,15 +130,32 @@ impl NcbiProvider {
             Err(e) => return Err(e),
         };
         let text = resp.text().await?;
-        let seq: String = text
-            .trim()
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('>'))
-            .collect::<Vec<_>>()
-            .join("")
-            .to_uppercase();
-        Ok(if seq.is_empty() { None } else { Some(seq) })
+        Ok(strip_fasta(&text))
+    }
+
+    /// The plus-strand sequence of one GenBank accession over the 1-based
+    /// inclusive range `[start, stop]`, FASTA-stripped and uppercased -
+    /// what a primer's dangling BLAST-hit ends are judged against (the
+    /// server route passes it to `blast::hit_flank_strings`). `Ok(None)`
+    /// on any upstream error: callers degrade to leaving those primer
+    /// bases unaligned rather than failing the request.
+    pub async fn fetch_nuccore_range(&self, accession: &str, start: i64, stop: i64, api_key: Option<&str>) -> Result<Option<String>, ProviderError> {
+        let (start_s, stop_s) = (start.to_string(), stop.to_string());
+        let params = [
+            ("db", "nucleotide"),
+            ("id", accession),
+            ("seq_start", &start_s),
+            ("seq_stop", &stop_s),
+            ("rettype", "fasta"),
+            ("retmode", "text"),
+        ];
+        let resp = match self.get_with_key(&format!("{EUTILS}/efetch.fcgi"), &params, api_key, Duration::from_secs(30)).await {
+            Ok(r) => r,
+            Err(ProviderError::UpstreamStatus { .. }) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let text = resp.text().await?;
+        Ok(strip_fasta(&text))
     }
 
     async fn fetch_region_sequence(&self, chrom: &str, chr_accession: &str, start: u64, end: u64) -> Result<Option<String>, ProviderError> {

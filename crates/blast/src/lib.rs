@@ -225,6 +225,102 @@ pub async fn run_blast_batch(client: &reqwest::Client, queries: &[(String, Strin
     parse::parse_blast_results_multi(&xml)
 }
 
+/// The subject range to fetch so a hit's alignment can cover the primer's
+/// full length: BLAST's local alignment reports only the stretch it
+/// aligned, leaving the primer's ends (positions before `query_from` and
+/// after `query_to`) dangling with no subject bases shown. Returns the
+/// 1-based inclusive plus-strand range spanning the HSP plus those
+/// dangling ends, or `None` when the alignment already covers the whole
+/// primer (nothing to fetch).
+///
+/// Plus-strand HSP (`hit_from <= hit_to`): the 5' flank sits just below
+/// `hit_from`, the 3' flank just above `hit_to`. Minus-strand HSP
+/// (`hit_from > hit_to`, the query reads the subject top-down): the 5'
+/// flank sits just above `hit_from`, the 3' flank just below `hit_to`.
+pub fn flank_fetch_range(hit_from: i64, hit_to: i64, query_from: i64, query_to: i64, query_len: i64) -> Option<(i64, i64)> {
+    let left = query_from - 1;
+    let right = query_len - query_to;
+    if left <= 0 && right <= 0 {
+        return None;
+    }
+    let (start, stop) = if hit_from > hit_to {
+        (hit_to - right, hit_from + left)
+    } else {
+        (hit_from - left, hit_to + right)
+    };
+    Some((start.max(1), stop))
+}
+
+/// IUPAC complement, uppercased; anything unrecognized reads as `N`.
+fn complement(base: u8) -> u8 {
+    match base.to_ascii_uppercase() {
+        b'A' => b'T',
+        b'T' => b'A',
+        b'C' => b'G',
+        b'G' => b'C',
+        b'R' => b'Y',
+        b'Y' => b'R',
+        b'S' => b'S',
+        b'W' => b'W',
+        b'K' => b'M',
+        b'M' => b'K',
+        b'B' => b'V',
+        b'V' => b'B',
+        b'D' => b'H',
+        b'H' => b'D',
+        _ => b'N',
+    }
+}
+
+/// The target strings for a hit's dangling primer ends, cut out of the
+/// subject sequence fetched by `flank_fetch_range`: `subject` is the
+/// plus-strand sequence starting at 1-based coordinate `subject_start`,
+/// possibly shorter than asked for when the range runs past the subject's
+/// own end. Returns the 5' flank (first) and the 3' flank (second), each
+/// in the query's orientation and at most the dangling length; bases
+/// that don't exist (before the subject's start or past its end) are
+/// dropped from the end of the flank nearest them, and the leftover
+/// primer bases stay unaligned in the display.
+pub fn hit_flank_strings(hit_from: i64, hit_to: i64, query_from: i64, query_to: i64, query_len: i64, subject: &str, subject_start: i64) -> (String, String) {
+    let left = (query_from - 1).max(0);
+    let right = (query_len - query_to).max(0);
+    let minus = hit_from > hit_to;
+    // The plus-strand subject base at 1-based coordinate `c`, if fetched.
+    let base = |c: i64| -> Option<u8> {
+        if c < subject_start {
+            None
+        } else {
+            subject.as_bytes().get((c - subject_start) as usize).map(|b| b.to_ascii_uppercase())
+        }
+    };
+    // Each flank's coordinates in query order. Missing bases can only
+    // sit at the flank's outer end (lowest/highest subject coordinate),
+    // so drop them there, keeping the bases adjacent to the HSP.
+    let mut five: Vec<Option<u8>> = if minus {
+        // Query position q < query_from pairs with subject coordinate
+        // hit_from + (query_from - q), complemented; q ascending means the
+        // coordinate descends from hit_from + left.
+        ((hit_from + 1)..=(hit_from + left)).rev().map(|c| base(c).map(complement)).collect()
+    } else {
+        ((hit_from - left)..hit_from).map(base).collect()
+    };
+    let mut three: Vec<Option<u8>> = if minus {
+        // Query position q > query_to pairs with hit_to - (q - query_to),
+        // complemented; the coordinate descends from hit_to - 1.
+        ((hit_to - right)..hit_to).rev().map(|c| base(c).map(complement)).collect()
+    } else {
+        ((hit_to + 1)..=(hit_to + right)).map(base).collect()
+    };
+    while five.first().is_some_and(|b| b.is_none()) {
+        five.remove(0);
+    }
+    while three.last().is_some_and(|b| b.is_none()) {
+        three.pop();
+    }
+    let flatten = |v: Vec<Option<u8>>| v.into_iter().map(|b| b.unwrap_or(b'N') as char).collect();
+    (flatten(five), flatten(three))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,5 +360,69 @@ mod tests {
         // any two calls to their servers).
         assert_eq!(poll_schedule(30, MAX_WAIT).first(), Some(&Duration::from_secs(30)));
         assert_eq!(poll_schedule(0, MAX_WAIT).first(), Some(&Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn flank_range_and_strings_minus_strand_hsp() {
+        // The real NBAS hit from a live /blast_batch run: a 20nt primer
+        // (TGACTCTTCCTCAACTACCG) whose HSP aligned only query 3-19 on the
+        // minus strand of NG_032964.2 (hit 236061 -> 236045), leaving the
+        // primer's first 2 and last 1 bases dangling.
+        let (start, stop) = flank_fetch_range(236061, 236045, 3, 19, 20).unwrap();
+        assert_eq!((start, stop), (236044, 236063));
+
+        // Fabricate a subject for the fetched range [236044, 236063]:
+        // coords 236044..236063 = "AAACCCGGGTTTACGTACGT".
+        let subject = "AAACCCGGGTTTACGTACGT";
+        let (five, three) = hit_flank_strings(236061, 236045, 3, 19, 20, subject, start);
+        // 5' flank: primer positions 1-2 pair with coords 236063, 236062
+        // (T, G), complemented to A, C, in that order.
+        assert_eq!(five, "AC");
+        // 3' flank: primer position 20 pairs with coord 236044 (A),
+        // complemented to T.
+        assert_eq!(three, "T");
+    }
+
+    #[test]
+    fn flank_range_and_strings_plus_strand_hsp() {
+        // Same dangling shape on a plus-strand HSP: query 3-19 aligned to
+        // subject 100-116 of some accession.
+        let (start, stop) = flank_fetch_range(100, 116, 3, 19, 20).unwrap();
+        assert_eq!((start, stop), (98, 117));
+
+        let subject = "AAACCCGGGTTTACGTACGT";
+        let (five, three) = hit_flank_strings(100, 116, 3, 19, 20, subject, 98);
+        // 5' flank: primer positions 1-2 pair with coords 98, 99 (A, A).
+        assert_eq!(five, "AA");
+        // 3' flank: primer position 20 pairs with coord 117 (T).
+        assert_eq!(three, "T");
+    }
+
+    #[test]
+    fn full_coverage_hit_needs_no_flank_fetch() {
+        assert_eq!(flank_fetch_range(50, 70, 1, 21, 21), None);
+        // Subject boundary clamping: the 5' flank would start below 1.
+        assert_eq!(flank_fetch_range(2, 18, 5, 18, 24), Some((1, 24)));
+    }
+
+    #[test]
+    fn flanks_trim_to_what_the_subject_actually_has() {
+        // The fetch asked for [98, 117] but the subject ends at 112: only
+        // 15 bases come back (coords 98-112). The 3' flank (coords
+        // 113-117) is entirely past the end -> empty, and the 5' flank
+        // still reads coords 98-99.
+        let subject = "AAACCCGGGTTTACG";
+        let (five, three) = hit_flank_strings(100, 116, 3, 19, 20, subject, 98);
+        assert_eq!(five, "AA");
+        assert_eq!(three, "");
+
+        // Minus-strand HSP hugging the subject's end: primer positions 1-3
+        // pair with subject coords 6, 5, 4, but only 5 and 4 exist (the
+        // fetched subject is coords 1-5). The missing leading base is
+        // dropped, keeping the two bases adjacent to the HSP, and the 3'
+        // flank is empty (query_to = query_len).
+        let (five, three) = hit_flank_strings(3, 1, 4, 10, 10, "TTTTA", 1);
+        assert_eq!(five, "TA");
+        assert_eq!(three, "");
     }
 }

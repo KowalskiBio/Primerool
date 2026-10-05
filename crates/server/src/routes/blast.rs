@@ -387,6 +387,69 @@ pub async fn blast_batch_status(State(state): State<AppState>, axum::extract::Pa
     }
 }
 
+/// Characters permitted in a `/blast_hit_flanks` accession: it becomes
+/// an efetch `id` parameter, so anything outside this set is rejected
+/// rather than forwarded (same rationale as `BATCH_ID_CHARS`).
+const FLANK_ACCESSION_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-";
+
+/// Upper bound on the primer length `/blast_hit_flanks` accepts: primers
+/// are 18-30nt, and anything much larger is a client bug, not a hit.
+const MAX_FLANK_QUERY_LEN: i64 = 200;
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct BlastHitFlanksRequest {
+    pub accession: String,
+    pub hit_from: i64,
+    pub hit_to: i64,
+    pub query_from: i64,
+    pub query_to: i64,
+    pub query_len: i64,
+    pub api_key: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BlastHitFlanksResponse {
+    /// Subject bases, in the query's orientation, opposite the primer's
+    /// dangling 5' ends (first) and 3' ends (second) — each at most the
+    /// dangling length, shorter when the subject itself runs out.
+    pub five: String,
+    pub three: String,
+}
+
+/// `POST /blast_hit_flanks`: the subject bases a primer's BLAST hit has
+/// opposite the primer ends BLAST's local alignment left unaligned, so
+/// the alignment can be shown over the primer's full length with real
+/// mismatching bases instead of blanks. One efetch of the hit's
+/// accession over the range `blast::flank_fetch_range` computes;
+/// failures degrade to empty strings (the client keeps those ends
+/// unaligned) rather than an error, so one bad accession can't break a
+/// primer's whole results table.
+pub async fn blast_hit_flanks(State(state): State<AppState>, Json(req): Json<BlastHitFlanksRequest>) -> Result<Json<BlastHitFlanksResponse>, AppError> {
+    if req.accession.is_empty() || !req.accession.chars().all(|c| FLANK_ACCESSION_CHARS.contains(c)) {
+        return Err(AppError::bad_request("Invalid accession for hit flanks"));
+    }
+    if !(1..=MAX_FLANK_QUERY_LEN).contains(&req.query_len) || !(1 <= req.query_from && req.query_from <= req.query_to && req.query_to <= req.query_len) {
+        return Err(AppError::bad_request("Invalid query coordinates for hit flanks"));
+    }
+    if req.hit_from < 1 || req.hit_to < 1 {
+        return Err(AppError::bad_request("Invalid hit coordinates for hit flanks"));
+    }
+    let api_key = match req.api_key.trim().to_string() {
+        key if key.is_empty() => None,
+        key => Some(key),
+    };
+
+    let (five, three) = match blast::flank_fetch_range(req.hit_from, req.hit_to, req.query_from, req.query_to, req.query_len) {
+        None => (String::new(), String::new()),
+        Some((start, stop)) => {
+            let subject = state.ncbi.fetch_nuccore_range(&req.accession, start, stop, api_key.as_deref()).await.unwrap_or(None).unwrap_or_default();
+            blast::hit_flank_strings(req.hit_from, req.hit_to, req.query_from, req.query_to, req.query_len, &subject, start)
+        }
+    };
+    Ok(Json(BlastHitFlanksResponse { five, three }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

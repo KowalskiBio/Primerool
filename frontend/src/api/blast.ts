@@ -39,6 +39,33 @@ export function blastSequence(sequence: string): Promise<BlastSequenceResponse> 
   return postJson<BlastSequenceResponse>('/blast_sequence', { sequence, api_key: getNcbiApiKey() });
 }
 
+// Matches `crates/server/src/routes/blast.rs`'s `/blast_hit_flanks`.
+
+export interface HitFlanks {
+  /** Subject bases, in the query's orientation, opposite the primer's
+   * dangling 5' end (first) and 3' end (second) — each at most the
+   * dangling length, shorter when the hit's own sequence runs out. */
+  five: string;
+  three: string;
+}
+
+/** Fetches the subject bases a hit has opposite the primer ends BLAST's
+ * local alignment left unaligned (it reports only the stretch it
+ * aligned), so the alignment can be shown over the primer's full length
+ * with the real mismatching bases instead of blanks. Built entirely from
+ * one `BlastHit`'s fields, so callers pass the hit they display. */
+export function fetchBlastHitFlanks(hit: BlastHit): Promise<HitFlanks> {
+  return postJson<HitFlanks>('/blast_hit_flanks', {
+    accession: hit.accession,
+    hit_from: hit.hit_from,
+    hit_to: hit.hit_to,
+    query_from: hit.query_from,
+    query_to: hit.query_to,
+    query_len: hit.query_len,
+    api_key: getNcbiApiKey(),
+  });
+}
+
 // Matches `crates/server/src/routes/blast.rs`'s `/blast_batch`.
 
 export interface BlastBatchQuery {

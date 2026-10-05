@@ -1,5 +1,6 @@
-import { Fragment } from 'react';
-import type { BlastHit } from '../api/blast';
+import { Fragment, useEffect, useState } from 'react';
+import type { BlastHit, HitFlanks } from '../api/blast';
+import { fetchBlastHitFlanks } from '../api/blast';
 import { assessPrimerHit, THREE_PRIME_WINDOW, type PrimingLevel } from '../utils/primerAlignment';
 import PrimerHitAlignment from './PrimerHitAlignment';
 import Badge from './ui/Badge';
@@ -19,6 +20,23 @@ const LEVEL_LABEL: Record<PrimingLevel, string> = {
   unlikely: 'unlikely',
 };
 
+/** Fetched hit flanks, cached per hit identity (accession + both
+ * coordinate pairs): re-opening a primer's results, or the same hit
+ * appearing again, never refetches. A failed fetch is cached as `null`
+ * — the affected primer ends just stay unaligned. */
+const flankCache = new Map<string, HitFlanks | null>();
+
+function flankKey(hit: BlastHit): string {
+  return `${hit.accession}|${hit.hit_from}|${hit.hit_to}|${hit.query_from}|${hit.query_to}|${hit.query_len}`;
+}
+
+/** A hit whose alignment does not cover the primer's full length — the
+ * ones the flank fetch upgrades from blank dangling ends to real
+ * mismatching bases. */
+function hasDanglingEnds(hit: BlastHit): boolean {
+  return Boolean(hit.qseq && hit.hseq && (hit.query_from > 1 || hit.query_to < hit.query_len));
+}
+
 interface Props {
   hits: BlastHit[];
   /** Absent hides the "Action" column - e.g. BLASTing a stretch picked from
@@ -33,7 +51,38 @@ interface Props {
 export default function BlastResultsTable({ hits, onUse, primer }: Props) {
   const top = primer ? hits : hits.slice(0, 10);
   const columnCount = 8 + (primer ? 1 : 0) + (onUse ? 1 : 0);
-  const assessments = top.map((hit) => (primer ? assessPrimerHit(primer, hit) : null));
+  const [flanks, setFlanks] = useState<Record<string, HitFlanks | null>>({});
+
+  // Fetches the subject bases for the dangling primer ends of each hit
+  // (sequentially — they all hit NCBI efetch) so the alignments cover the
+  // primer's full length. Cached across renders and tables; hits render
+  // with blank dangling ends first and re-render as flanks land.
+  useEffect(() => {
+    if (!primer) return;
+    const needed = hits.filter(hasDanglingEnds);
+    const sync = () => setFlanks(Object.fromEntries(needed.map((h) => [flankKey(h), flankCache.get(flankKey(h)) ?? null])));
+    sync();
+    const pending = needed.filter((h) => !flankCache.has(flankKey(h)));
+    if (!pending.length) return;
+    let cancelled = false;
+    (async () => {
+      for (const hit of pending) {
+        const key = flankKey(hit);
+        try {
+          flankCache.set(key, await fetchBlastHitFlanks(hit));
+        } catch {
+          flankCache.set(key, null);
+        }
+        if (cancelled) return;
+        sync();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [primer, hits]);
+
+  const assessments = top.map((hit) => (primer ? assessPrimerHit(primer, hit, flanks[flankKey(hit)]) : null));
   const levelCounts = (Object.keys(LEVEL_TONE) as PrimingLevel[])
     .map((level) => ({ level, count: assessments.filter((a) => a?.level === level).length }))
     .filter((c) => c.count > 0);
@@ -43,7 +92,7 @@ export default function BlastResultsTable({ hits, onUse, primer }: Props) {
       {primer && (
         <p className="mb-3 text-xs text-ink-muted">
           Polymerase extends from the primer&rsquo;s 3′ end, so a hit mismatched there is unlikely to amplify even at high identity, while 5′-end mismatches are tolerated. A hit with 2+ mismatches in the 3′-terminal {THREE_PRIME_WINDOW} nt
-          (<span className="underline decoration-accent decoration-2 underline-offset-4">underlined</span>) or 6+ in total is not expected to prime (Primer-BLAST&rsquo;s default rule). Primer ends BLAST left unaligned (<span className="text-ink-faint">·</span>) count as mismatches.
+          (<span className="underline decoration-accent decoration-2 underline-offset-4">underlined</span>) or 6+ in total is not expected to prime (Primer-BLAST&rsquo;s default rule). Primer ends BLAST left unaligned are shown against the hit&rsquo;s actual sequence, fetched on demand; a dot (<span className="text-ink-faint">·</span>) is a position past the end of that sequence (or a failed fetch) and counts as a mismatch.
         </p>
       )}
       {primer && levelCounts.length > 0 && (

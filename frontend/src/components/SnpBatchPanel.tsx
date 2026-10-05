@@ -4,15 +4,18 @@ import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
 import { analyzePrimer, designFlanking, type FlankingOptions } from '../api/design';
 import { searchGene } from '../api/gene';
 import { getSequence } from '../api/sequence';
+import { blastBatch, type BlastHit } from '../api/blast';
 import { ApiError } from '../api/client';
 import SnpAmpliconMap, { type PlacedAmplicon } from './SnpAmpliconMap';
 import SnpGeneMapModal from './SnpGeneMapModal';
 import PrimerStructureModal from './PrimerStructureModal';
 import AmpliconDetailModal from './AmpliconDetailModal';
+import BlastResultsTable from './BlastResultsTable';
 import Section from './ui/Section';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
 import Field from './ui/Field';
+import Modal from './ui/Modal';
 import TextInput, { controlClasses } from './ui/TextInput';
 import { fmt } from '../utils/format';
 import { localGenePos, SNP_WORKFLOW_SPECIES } from '../utils/variantMapping';
@@ -65,6 +68,57 @@ interface BatchResult {
    * member rsID, so this is also how the table/map tell a merged group's
    * rows apart from an incidental identical result. */
   mergedWith?: string[];
+}
+
+/** One primer's NCBI BLAST check under the batch panel's BLAST section -
+ * keyed `${amplicon design rsID}.fwd`/`.rev`. `sequence` is the primer as
+ * BLASTed, kept so a cell can flag that its primer moved (drag/re-design)
+ * since the check ran, rather than silently showing hits for the old
+ * oligo. */
+interface BlastCheck {
+  sequence: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  hits?: BlastHit[];
+  error?: string;
+}
+
+/** Top-hit summary of a finished primer check in the BLAST section's
+ * table - clickable for the full hit list in a modal. */
+function BlastCell({ check, currentSequence, label, onOpen }: { check: BlastCheck | undefined; currentSequence: string; label: string; onOpen: (hits: BlastHit[], title: string) => void }) {
+  if (!check) return <span className="text-ink-faint">-</span>;
+  if (check.status === 'pending') return <span className="text-ink-faint">queued</span>;
+  if (check.status === 'running') return <span className="text-accent">BLASTing…</span>;
+  if (check.status === 'error') {
+    return (
+      <span className="text-danger" title={check.error}>
+        {check.error}
+      </span>
+    );
+  }
+
+  const hits = check.hits ?? [];
+  const organisms = new Set(hits.map((h) => h.organism)).size;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {hits.length === 0 ? (
+        <Badge tone="success">no hits</Badge>
+      ) : (
+        <button
+          type="button"
+          className="text-left text-ink hover:text-accent hover:underline"
+          onClick={() => onOpen(hits, label)}
+          title={`Show all ${hits.length} hit(s) for ${label}`}
+        >
+          <em>{hits[0].organism}</em> · {hits[0].identity_pct}% id · {hits.length} hit{hits.length === 1 ? '' : 's'} · {organisms} organism{organisms === 1 ? '' : 's'}
+        </button>
+      )}
+      {check.sequence !== currentSequence && (
+        <Badge tone="warning" title="This primer changed (dragged or re-designed) after its BLAST ran - re-run BLAST for the new sequence.">
+          primer changed
+        </Badge>
+      )}
+    </div>
+  );
 }
 
 /** Splices multiple SNP blocks' own 401bp flanking windows into one
@@ -319,6 +373,9 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   // by key on every render (see `openAmpliconData`) keeps it live instead.
   const [openAmpliconKey, setOpenAmpliconKey] = useState<string | null>(null);
   const [canonicalChecks, setCanonicalChecks] = useSessionState<Record<string, CanonicalCheck>>('snpBatch.canonicalChecks', {}, dropUnfinished((c) => c.status !== 'checking'));
+  const [blastChecks, setBlastChecks] = useSessionState<Record<string, BlastCheck>>('snpBatch.blastChecks', {}, dropUnfinished((c) => c.status === 'done' || c.status === 'error'));
+  const [blasting, setBlasting] = useState(false);
+  const [openBlast, setOpenBlast] = useState<{ title: string; hits: BlastHit[] } | null>(null);
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
   // work checks this before each write so a stale check from a superseded
   // import can't clobber a fresh one (same purpose as the `cancelled` flag
@@ -391,6 +448,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
     setImporting(true);
     setResults({});
     setCanonicalChecks({});
+    setBlastChecks({});
     try {
       const base64 = await readFileAsBase64(file);
       const res = await importSnpDocx(base64);
@@ -410,6 +468,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
     setImporting(true);
     setResults({});
     setCanonicalChecks({});
+    setBlastChecks({});
     try {
       const res = await importSnpText(pastedText);
       setBlocks(res.blocks);
@@ -450,6 +509,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
     const next: Record<string, BatchResult> = {};
     for (const b of blocks) next[b.rsid] = { status: 'pending' };
     setResults(next);
+    setBlastChecks({});
 
     const positionByRsid = new Map(blocks.map((b) => [b.rsid, b.position]));
 
@@ -575,6 +635,66 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
       }
     }
     setRunning(false);
+  }
+
+  /** How many primers one `/blast_batch` request carries. The server caps
+   * a request at 100 queries; staying well under that keeps each HTTP
+   * request within one NCBI submission's ~180s worst case (a reverse
+   * proxy may cut longer requests off), while still amortizing the
+   * submit/poll round-trip across many primers. */
+  const BLAST_CHUNK = 25;
+
+  /** BLASTs every designed primer (both sides of every placed amplicon,
+   * merged groups once - they share their pair) against NCBI in chunks,
+   * updating each primer's row as its chunk finishes. Per-primer checks
+   * are stored under `${design rsID}.fwd`/`.rev`. */
+  async function runBlastAll() {
+    const targets: { id: string; sequence: string }[] = [];
+    for (const amp of placedAmplicons) {
+      targets.push({ id: `${amp.rsid}.fwd`, sequence: amp.fwd.sequence });
+      targets.push({ id: `${amp.rsid}.rev`, sequence: amp.rev.sequence });
+    }
+    if (!targets.length) return;
+
+    setBlasting(true);
+    const initial: Record<string, BlastCheck> = {};
+    for (const t of targets) initial[t.id] = { sequence: t.sequence, status: 'pending' };
+    setBlastChecks(initial);
+
+    for (let i = 0; i < targets.length; i += BLAST_CHUNK) {
+      const chunk = targets.slice(i, i + BLAST_CHUNK);
+      setBlastChecks((prev) => {
+        const next = { ...prev };
+        for (const t of chunk) if (next[t.id]) next[t.id] = { ...next[t.id], status: 'running' };
+        return next;
+      });
+
+      try {
+        const res = await blastBatch(chunk);
+        const byId = new Map(res.results.map((r) => [r.id, r]));
+        setBlastChecks((prev) => {
+          const next = { ...prev };
+          for (const t of chunk) {
+            const r = byId.get(t.id);
+            next[t.id] =
+              r === undefined
+                ? { sequence: t.sequence, status: 'error', error: 'No result returned for this primer' }
+                : r.status === 'done'
+                  ? { sequence: t.sequence, status: 'done', hits: r.hits ?? [] }
+                  : { sequence: t.sequence, status: 'error', error: r.error ?? 'BLAST failed' };
+          }
+          return next;
+        });
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
+        setBlastChecks((prev) => {
+          const next = { ...prev };
+          for (const t of chunk) next[t.id] = { sequence: t.sequence, status: 'error', error: message };
+          return next;
+        });
+      }
+    }
+    setBlasting(false);
   }
 
   /** Pure geometry step shared by `handleManualEdgeEdit` (one side) and
@@ -788,6 +908,9 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   // Batches top out around a few dozen SNPs, so recomputing these plainly
   // on every render (rather than reaching for useMemo) is cheap enough.
   const overlaps = findOverlaps(blocks || [], results);
+
+  const blastTotalCount = Object.keys(blastChecks).length;
+  const blastDoneCount = Object.values(blastChecks).filter((c) => c.status === 'done' || c.status === 'error').length;
 
   // One `PlacedAmplicon` per *design*, not per block - a merged group's
   // members all point at the exact same `BatchResult` object (see
@@ -1107,9 +1230,69 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
         </Section>
       )}
 
+      {placedAmplicons.length > 0 && (
+        <Section title="BLAST check (NCBI)" persistKey="snpBatch.blastSectionCollapsed">
+          <p className="mb-3 text-xs text-ink-muted">
+            Runs NCBI BLAST (blastn, non-redundant nucleotide database) on every designed primer - all primers go out as one multi-query submission in chunks, so the whole panel takes a few minutes rather than one BLAST per primer. A primer aligning to many different sequences or organisms may bind more than one locus; click a cell for its full hit list.
+          </p>
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <Button variant="primary" disabled={blasting} onClick={() => void runBlastAll()}>
+              {blasting ? `BLASTing… (${blastDoneCount}/${blastTotalCount})` : `Run NCBI BLAST on all ${placedAmplicons.length * 2} primers`}
+            </Button>
+            {Object.keys(blastChecks).length > 0 && !blasting && <span className="text-xs text-ink-faint">From a previous run - re-run after re-designing or dragging primers.</span>}
+          </div>
+          {Object.keys(blastChecks).length > 0 && (
+            <div className="overflow-x-auto rounded-lg border border-line">
+              <table className="w-full text-left text-xs text-ink-muted">
+                <thead className="uppercase text-ink-muted bg-surface-2">
+                  <tr>
+                    <th className="border-b border-line px-2 py-2 font-medium">Gene</th>
+                    <th className="border-b border-line px-2 py-2 font-medium">rsID(s)</th>
+                    <th className="border-b border-line px-2 py-2 font-medium">Forward - top hit</th>
+                    <th className="border-b border-line px-2 py-2 font-medium">Reverse - top hit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {placedAmplicons.map((amp) => (
+                    <tr key={amp.rsid} className="border-b border-line bg-surface last:border-0 hover:bg-surface-2">
+                      <td className="px-2 py-2">{amp.gene}</td>
+                      <td className="px-2 py-2 font-mono">{amp.rsid}</td>
+                      <td className="px-2 py-2">
+                        <BlastCell
+                          check={blastChecks[`${amp.rsid}.fwd`]}
+                          currentSequence={amp.fwd.sequence}
+                          label={`${amp.rsid} forward primer`}
+                          onOpen={(hits, title) => setOpenBlast({ title, hits })}
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        <BlastCell
+                          check={blastChecks[`${amp.rsid}.rev`]}
+                          currentSequence={amp.rev.sequence}
+                          label={`${amp.rsid} reverse primer`}
+                          onOpen={(hits, title) => setOpenBlast({ title, hits })}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+      )}
+
       <SnpGeneMapModal gene={openGene} blocks={openGeneBlocks} selectedSpecies={selectedSpecies} onClose={() => setOpenGene(null)} />
       <PrimerStructureModal pair={openPrimer} onClose={() => setOpenPrimer(null)} />
       <AmpliconDetailModal amplicon={openAmpliconData} selectedSpecies={selectedSpecies} onPrimerEdit={handleAmpliconDetailEdit} onClose={() => setOpenAmpliconKey(null)} />
+      <Modal open={openBlast !== null} onClose={() => setOpenBlast(null)} title={openBlast ? `BLAST hits — ${openBlast.title}` : ''}>
+        {openBlast &&
+          (openBlast.hits.length === 0 ? (
+            <p className="text-sm text-ink-muted">No BLAST hits found.</p>
+          ) : (
+            <BlastResultsTable hits={openBlast.hits} />
+          ))}
+      </Modal>
     </>
   );
 }

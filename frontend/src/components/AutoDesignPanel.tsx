@@ -5,6 +5,7 @@ import { designFlanking, designGeneral, designJunction, type DimerResult, type F
 import { ApiError } from '../api/client';
 import type { Selection, Selections } from '../utils/regionMapping';
 import ResultsTable from './ResultsTable';
+import CopyableSequence, { CopyButton } from './CopyableSequence';
 import PrimerCard from './PrimerCard';
 import ArmsDesignPanel from './ArmsDesignPanel';
 import GeneralPrimerPreview from './GeneralPrimerPreview';
@@ -22,11 +23,12 @@ type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
 /** `design_general::PRODUCT_SIZE_RANGE` on the server. */
 const GENERAL_PRODUCT_RANGE = '100–1000';
 
-/** A primer sequence kept on one line, with its preview button. */
-function PrimerCell({ sequence, onShow }: { sequence: string; onShow: () => void }) {
+/** A primer sequence kept on one line, with its copy and preview buttons. */
+function PrimerCell({ sequence, label, onShow }: { sequence: string; label: string; onShow: () => void }) {
   return (
     <div className="flex items-center gap-2">
       <span className="whitespace-nowrap font-mono text-ink">{sequence}</span>
+      <CopyButton text={sequence} label={label} />
       <Button size="sm" onClick={onShow} title="See where this primer lands on the sequence map">
         Show
       </Button>
@@ -355,8 +357,8 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
             keyOf={(p, i) => `g-${i}-${p.left.sequence}`}
             columns={[
               { header: '#', render: (_p, i) => i + 1, width: '2.5rem' },
-              { header: "Left (5'→3')", render: (p) => <PrimerCell sequence={p.left.sequence} onShow={() => setPreview({ pair: p, side: 'left' })} />, width: '15rem' },
-              { header: "Right (5'→3')", render: (p) => <PrimerCell sequence={p.right.sequence} onShow={() => setPreview({ pair: p, side: 'right' })} />, width: '15rem' },
+              { header: "Left (5'→3')", render: (p) => <PrimerCell sequence={p.left.sequence} label="forward primer" onShow={() => setPreview({ pair: p, side: 'left' })} />, width: '18rem' },
+              { header: "Right (5'→3')", render: (p) => <PrimerCell sequence={p.right.sequence} label="reverse primer" onShow={() => setPreview({ pair: p, side: 'right' })} />, width: '18rem' },
               { header: 'Amplicon', render: (p) => `${p.product_size} bp`, width: '5.5rem' },
               { header: 'Position', render: (p) => `${p.left.interval[0]}–${p.right.interval[1]}`, width: '7.5rem', className: 'whitespace-nowrap tabular-nums' },
               { header: 'Tm L / R', render: (p) => `${fmt(p.left.tm)} / ${fmt(p.right.tm)}`, width: '5rem' },
@@ -396,8 +398,8 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
             keyOf={(p, i) => `p-${i}-${p.left.sequence}`}
             columns={[
               { header: '#', render: (_p, i) => i + 1 },
-              { header: "Left (5'→3')", render: (p) => p.left.sequence, className: 'font-mono text-ink' },
-              { header: "Right (5'→3')", render: (p) => p.right.sequence, className: 'font-mono text-ink' },
+              { header: "Left (5'→3')", render: (p) => <CopyableSequence sequence={p.left.sequence} label="forward primer" />, className: 'font-mono text-ink' },
+              { header: "Right (5'→3')", render: (p) => <CopyableSequence sequence={p.right.sequence} label="reverse primer" />, className: 'font-mono text-ink' },
               { header: 'Product', render: (p) => p.product_size },
               { header: 'Left Tm', render: (p) => fmt(p.left.tm) },
               { header: 'Right Tm', render: (p) => fmt(p.right.tm) },

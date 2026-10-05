@@ -1404,8 +1404,10 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
           <p className="mb-3 text-xs text-ink-muted">
             Runs NCBI BLAST (blastn, non-redundant nucleotide database) on every designed primer, restricted to the selected organism - all primers go out as one multi-query submission in chunks, so the whole panel takes a few minutes rather than one BLAST per primer. A primer aligning to many different sequences or loci of the organism may bind more than one place; click a cell for its full hit list.
           </p>
-          <div className="mb-3 flex flex-wrap items-end gap-3">
-            <Field label="Organism" hint="Only sequences from this organism are searched.">
+          {/* One toolbar row: organism + run on the left, the exports at the
+              right edge; the notes on one line beneath it. */}
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Organism">
               <Select value={blastOrganism} onChange={(e) => setBlastOrganism(e.target.value)} disabled={blasting} className="w-64">
                 {(Object.keys(SPECIES_BY_KINGDOM) as Kingdom[]).map((k) => (
                   <optgroup key={k} label={KINGDOM_LABELS[k]}>
@@ -1423,23 +1425,26 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
             <Button variant="primary" disabled={blasting} onClick={() => void runBlastAll()}>
               {blasting ? `BLASTing… (${blastDoneCount}/${blastTotalCount})` : `Run NCBI BLAST on all ${placedAmplicons.length * 2} primers`}
             </Button>
-            {Object.keys(blastChecks).length > 0 && !blasting && <span className="text-xs text-ink-faint">From a previous run - re-run after re-designing, dragging primers, or switching organism.</span>}
+            {Object.keys(blastChecks).length > 0 && (
+              <div className="ml-auto flex flex-wrap gap-2">
+                <Button disabled={blasting || reportProgress !== null} onClick={() => void exportBlastReport('html')} title="A self-contained page: summary, off-target amplicons and each primer's top off-target hits with alignments - print it to PDF from the browser">
+                  {reportProgress?.kind === 'html' ? 'Preparing report…' : 'Download report (HTML)'}
+                </Button>
+                <Button disabled={blasting || reportProgress !== null} onClick={() => void exportBlastReport('csv')} title="One row per BLAST hit of every primer, with verdicts and alignments - for filtering in a spreadsheet">
+                  {reportProgress?.kind === 'csv' ? 'Preparing CSV…' : 'Download hits (CSV)'}
+                </Button>
+              </div>
+            )}
           </div>
-          {Object.keys(blastChecks).length > 0 && !blasting && (
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <Button size="sm" disabled={reportProgress !== null} onClick={() => void exportBlastReport('html')} title="A self-contained page: summary, off-target amplicons and each primer's top off-target hits with alignments - print it to PDF from the browser">
-                {reportProgress?.kind === 'html' ? 'Preparing report…' : 'Download report (HTML)'}
-              </Button>
-              <Button size="sm" disabled={reportProgress !== null} onClick={() => void exportBlastReport('csv')} title="One row per BLAST hit of every primer, with verdicts and alignments - for filtering in a spreadsheet">
-                {reportProgress?.kind === 'csv' ? 'Preparing CSV…' : 'Download hits (CSV)'}
-              </Button>
-              {reportProgress && reportProgress.total > 0 && (
-                <span role="status" className="text-xs text-accent">
-                  Fetching unaligned primer-end bases from NCBI ({reportProgress.done}/{reportProgress.total})…
-                </span>
-              )}
-            </div>
-          )}
+          <p className="mb-3 mt-1.5 text-xs text-ink-faint">
+            Only sequences from this organism are searched.
+            {Object.keys(blastChecks).length > 0 && !blasting && ' Results below are from a previous run - re-run after re-designing, dragging primers, or switching organism.'}
+            {reportProgress && reportProgress.total > 0 && (
+              <span role="status" className="ml-1 text-accent">
+                Fetching unaligned primer-end bases from NCBI ({reportProgress.done}/{reportProgress.total})…
+              </span>
+            )}
+          </p>
           {Object.keys(blastChecks).length > 0 && (
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full text-left text-xs text-ink-muted">

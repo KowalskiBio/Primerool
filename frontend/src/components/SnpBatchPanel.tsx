@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { dropUnfinished, useSessionState } from '../session/sessionContext';
 import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
-import { analyzePrimer, designFlanking } from '../api/design';
+import { analyzePrimer, designFlanking, type FlankingOptions } from '../api/design';
 import { searchGene } from '../api/gene';
 import { getSequence } from '../api/sequence';
 import { ApiError } from '../api/client';
@@ -139,50 +139,105 @@ function buildMergeGroups(blocks: SnpBlock[], maxGapBp: number): SnpBlock[][] {
   return groups;
 }
 
-/** Picks one (forward, reverse) candidate pair jointly, in ranked order,
- * for two constraints that can't be resolved independently per side since
- * they're properties of the *pair*: clearing every `avoid` position (a
- * primer sitting on an unrelated listed SNP can silently fail to anneal
- * on the allele it doesn't match) and - if `maxProduct` is set - not
- * producing a longer product than that. Scans `fwdCandidates` outer,
- * `revCandidates` inner, both already penalty-ranked, so the first pair
- * satisfying everything is also the best-ranked one that does. Relaxes
- * one constraint at a time when nothing satisfies both (avoid first, kept
- * over length, since an unresolved overlap risks a silent allele dropout
- * a sequencer won't flag, where an oversized product is at least visible
- * on a gel/trace) before finally falling back to the top-ranked pair
- * outright, so a design is always returned - `tooLong`/`avoidUnresolved`
- * report which constraints, if any, that final pick still fails. */
-function pickPair<T extends { interval: [number, number] }>(
+/** Shortest primer the flanking picker will return
+ * (`DEFAULT_PRIMER_SIZE.min_size` on the server) - bounds how far from the
+ * SNP a primer's 5' end can sit and still fit a given product size. */
+const MIN_PRIMER_LEN = 18;
+
+/** Parses the amplicon-size field: `150` (exactly 150 bp) or a range like
+ * `130-150` / `130–150` / `130 - 150`. Blank means no size constraint
+ * (`null`); anything unparseable is `'invalid'`. */
+function parseAmpliconRange(text: string): { min: number; max: number } | null | 'invalid' {
+  const t = text.trim();
+  if (!t) return null;
+  const m = /^(\d+)\s*(?:[-–—]|\.\.)\s*(\d+)$/.exec(t) ?? /^(\d+)$/.exec(t);
+  if (!m) return 'invalid';
+  const a = parseInt(m[1], 10);
+  const b = m[2] !== undefined ? parseInt(m[2], 10) : a;
+  if (!a || !b) return 'invalid';
+  return { min: Math.min(a, b), max: Math.max(a, b) };
+}
+
+function formatRange(range: { min: number; max: number }): string {
+  return range.min === range.max ? `exactly ${range.min} bp` : `${range.min}–${range.max} bp`;
+}
+
+/** A blank numeric field is `undefined`; anything else must parse. */
+function optionalNumber(text: string): number | undefined | 'invalid' {
+  const t = text.trim();
+  if (!t) return undefined;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : 'invalid';
+}
+
+/** Picks one (forward, reverse) candidate pair jointly, for constraints
+ * that can't be resolved independently per side since they're properties
+ * of the *pair*: clearing every `avoid` position (a primer sitting on an
+ * unrelated listed SNP can silently fail to anneal on the allele it
+ * doesn't match) and - if `range` is set - a product size inside it.
+ * Among the pairs that satisfy everything, the best is the one with the
+ * lowest combined primer penalty plus Tm mismatch (the server's own
+ * `pick_pairs` scoring), so primers land wherever around the SNP the
+ * sequence is best within the allowed size. Relaxes one constraint at a
+ * time when nothing satisfies both (the size range first, keeping the
+ * pair closest to it, since an unresolved overlap risks a silent allele
+ * dropout a sequencer won't flag, where an off-size product is at least
+ * visible on a gel/trace) before finally falling back to the top-ranked
+ * pair outright, so a design is always returned - `outOfRange`/
+ * `avoidUnresolved` report which constraints, if any, that final pick
+ * still fails. */
+function pickPair<T extends { interval: [number, number]; penalty: number; tm: number | null }>(
   fwdCandidates: T[],
   revCandidates: T[],
   fwdSpan: (c: T) => [number, number],
   revSpan: (c: T) => [number, number],
   ampOf: (fwd: T, rev: T) => { ampStart: number; ampEnd: number; productSize: number },
   avoid: { rsid: string; pos: number }[],
-  maxProduct: number | undefined,
-): { fwd: T; fwdIndex: number; rev: T; revIndex: number; ampStart: number; ampEnd: number; productSize: number; avoidHits0: { rsid: string; pos: number }[]; avoidUnresolved: { rsid: string; pos: number }[]; tooLong: boolean } | null {
+  range: { min: number; max: number } | null,
+): { fwd: T; fwdIndex: number; rev: T; revIndex: number; ampStart: number; ampEnd: number; productSize: number; avoidedHits: { rsid: string; pos: number }[]; avoidUnresolved: { rsid: string; pos: number }[]; outOfRange: boolean } | null {
   if (!fwdCandidates.length || !revCandidates.length) return null;
 
   const hitsOf = (span: [number, number]) => avoid.filter((a) => a.pos >= span[0] && a.pos <= span[1]);
-  const avoidHits0 = [...hitsOf(fwdSpan(fwdCandidates[0])), ...hitsOf(revSpan(revCandidates[0]))];
+  const fwdHits = fwdCandidates.map((c) => hitsOf(fwdSpan(c)));
+  const revHits = revCandidates.map((c) => hitsOf(revSpan(c)));
+  const rangeMiss = (size: number) => (range ? Math.max(0, range.min - size, size - range.max) : 0);
+  const score = (f: T, r: T) => f.penalty + r.penalty + (f.tm !== null && r.tm !== null ? Math.abs(f.tm - r.tm) : 0);
 
-  for (const requireLength of maxProduct !== undefined ? [true, false] : [false]) {
+  // Best pair by (distance outside the size range, score), optionally
+  // only among pairs clearing every `avoid` position.
+  const best = (clearAvoid: boolean) => {
+    let found: { i: number; j: number; miss: number; score: number } | null = null;
     for (let i = 0; i < fwdCandidates.length; i++) {
-      if (hitsOf(fwdSpan(fwdCandidates[i])).length > 0) continue;
+      if (clearAvoid && fwdHits[i].length) continue;
       for (let j = 0; j < revCandidates.length; j++) {
-        if (hitsOf(revSpan(revCandidates[j])).length > 0) continue;
-        const amp = ampOf(fwdCandidates[i], revCandidates[j]);
-        if (requireLength && amp.productSize > maxProduct!) continue;
-        return { fwd: fwdCandidates[i], fwdIndex: i, rev: revCandidates[j], revIndex: j, ...amp, avoidHits0, avoidUnresolved: [], tooLong: maxProduct !== undefined && amp.productSize > maxProduct };
+        if (clearAvoid && revHits[j].length) continue;
+        const miss = rangeMiss(ampOf(fwdCandidates[i], revCandidates[j]).productSize);
+        const sc = score(fwdCandidates[i], revCandidates[j]);
+        if (!found || miss < found.miss || (miss === found.miss && sc < found.score)) found = { i, j, miss, score: sc };
       }
     }
-  }
+    return found;
+  };
 
-  // Nothing clears `avoid` at all (with or without the length cap) - fall
-  // back to the top-ranked pair, reporting every constraint it still fails.
-  const amp = ampOf(fwdCandidates[0], revCandidates[0]);
-  return { fwd: fwdCandidates[0], fwdIndex: 0, rev: revCandidates[0], revIndex: 0, ...amp, avoidHits0, avoidUnresolved: avoidHits0, tooLong: maxProduct !== undefined && amp.productSize > maxProduct };
+  const unconstrained = best(false)!;
+  const clear = best(true);
+  const chosen = clear ?? unconstrained;
+  const fwd = fwdCandidates[chosen.i];
+  const rev = revCandidates[chosen.j];
+  const amp = ampOf(fwd, rev);
+  // What the unconstrained best pick would have sat on - the positions
+  // this pick actually steered around (or, failing that, still hits).
+  const hitsOfBest = [...fwdHits[unconstrained.i], ...revHits[unconstrained.j]];
+  return {
+    fwd,
+    fwdIndex: chosen.i,
+    rev,
+    revIndex: chosen.j,
+    ...amp,
+    avoidedHits: clear ? hitsOfBest : [],
+    avoidUnresolved: clear ? [] : [...fwdHits[chosen.i], ...revHits[chosen.j]],
+    outOfRange: rangeMiss(amp.productSize) > 0,
+  };
 }
 
 /** Every pair of same-chromosome amplicons whose [ampStart, ampEnd] spans
@@ -246,7 +301,12 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
 
   const [flankWindow, setFlankWindow] = useSessionState('snpBatch.flankWindow', '130');
   const [mergeDistance, setMergeDistance] = useSessionState('snpBatch.mergeDistance', '20');
-  const [maxProduct, setMaxProduct] = useSessionState('snpBatch.maxProduct', '');
+  const [ampliconSize, setAmpliconSize] = useSessionState('snpBatch.ampliconSize', '');
+  const [tmMin, setTmMin] = useSessionState('snpBatch.tmMin', '');
+  const [tmOpt, setTmOpt] = useSessionState('snpBatch.tmOpt', '');
+  const [tmMax, setTmMax] = useSessionState('snpBatch.tmMax', '');
+  const [gcMin, setGcMin] = useSessionState('snpBatch.gcMin', '');
+  const [gcMax, setGcMax] = useSessionState('snpBatch.gcMax', '');
   const [results, setResults] = useSessionState<Record<string, BatchResult>>('snpBatch.results', {}, dropUnfinished((r) => r.status === 'done' || r.status === 'error'));
   const [running, setRunning] = useState(false);
   const [openGene, setOpenGene] = useState<string | null>(null);
@@ -361,10 +421,27 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
     }
   }
 
+  const parsedRange = parseAmpliconRange(ampliconSize);
+  const thermoFields = { tm_min: optionalNumber(tmMin), tm_opt: optionalNumber(tmOpt), tm_max: optionalNumber(tmMax), gc_min: optionalNumber(gcMin), gc_max: optionalNumber(gcMax) };
+  const thermoOptions = Object.fromEntries(Object.entries(thermoFields).filter(([, v]) => typeof v === 'number')) as FlankingOptions;
+  const settingsError = (() => {
+    if (parsedRange === 'invalid') return 'Amplicon size must be a number (150) or a range (130-150).';
+    if (Object.values(thermoFields).includes('invalid')) return 'Tm and GC settings must be numbers.';
+    const { tm_min, tm_opt, tm_max, gc_min, gc_max } = thermoOptions;
+    if (tm_min !== undefined && tm_max !== undefined && tm_min > tm_max) return 'Tm min is above Tm max.';
+    if (tm_opt !== undefined && ((tm_min !== undefined && tm_opt < tm_min) || (tm_max !== undefined && tm_opt > tm_max))) return 'Tm optimum is outside the Tm range.';
+    if ([gc_min, gc_max].some((v) => v !== undefined && (v < 0 || v > 100))) return 'GC must be between 0 and 100 %.';
+    if (gc_min !== undefined && gc_max !== undefined && gc_min > gc_max) return 'GC min is above GC max.';
+    return null;
+  })();
+  const advancedCount = [tmMin, tmOpt, tmMax, gcMin, gcMax].filter((v) => v.trim()).length;
+
   async function runBatch() {
-    if (!blocks || !blocks.length) return;
+    if (!blocks || !blocks.length || settingsError) return;
     setRunning(true);
-    const window = flankWindow.trim() ? parseInt(flankWindow, 10) : undefined;
+    const range = parsedRange === 'invalid' ? null : parsedRange;
+    const manualWindow = flankWindow.trim() ? parseInt(flankWindow, 10) : undefined;
+    const options: FlankingOptions = { ...thermoOptions, one_per_end: range !== null };
     const maxGap = mergeDistance.trim() ? parseInt(mergeDistance, 10) : 0;
     const groups = buildMergeGroups(blocks, maxGap);
 
@@ -403,7 +480,18 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
           downstream = combined.chars.substring(last.position + 1 - combined.start);
         }
 
-        const res = await designFlanking(upstream, downstream, window);
+        // With a size range, a primer's 5' end can sit at most
+        // `max - span - MIN_PRIMER_LEN` bases out from the target (the
+        // other primer needs at least its own length on the far side), so
+        // that's the search window; the picker then returns its best
+        // primer at every position in it for `pickPair` to fit the range.
+        let window = manualWindow;
+        if (range) {
+          const span = lastPos - group[0].position + 1;
+          window = range.max - span - MIN_PRIMER_LEN;
+          if (window < MIN_PRIMER_LEN) throw new Error(`A ${range.max} bp amplicon is too short to fit primers around a ${span} bp target`);
+        }
+        const res = await designFlanking(upstream, downstream, window, options);
         const fwdCandidates = res.primers.forward.primers;
         const revCandidates = res.primers.reverse.primers;
         if (!fwdCandidates.length || !revCandidates.length) {
@@ -416,8 +504,8 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
         // excluding this group's own rsIDs - those are inside the
         // amplicon on purpose) - a primer sitting on an unrelated
         // polymorphism can silently fail to anneal on the allele it
-        // doesn't match (allele dropout) - and, if a max product size is
-        // set, doesn't produce a longer product than that. Genomic
+        // doesn't match (allele dropout) - and, if an amplicon size is
+        // set, produces a product inside it. Genomic
         // coordinates: the forward primer's 5' end sits at
         // `combinedStart + fwd.interval[0]`; the reverse primer's 5' end
         // sits `rev.interval[1]` bases after the group's rightmost variant
@@ -430,7 +518,6 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
           .filter((rsid) => !groupRsids.has(rsid))
           .map((rsid) => ({ rsid, pos: positionByRsid.get(rsid) }))
           .filter((x): x is { rsid: string; pos: number } => x.pos !== undefined);
-        const maxProductBp = maxProduct.trim() ? parseInt(maxProduct, 10) : undefined;
         const pick = pickPair(
           fwdCandidates,
           revCandidates,
@@ -442,7 +529,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
             return { ampStart, ampEnd, productSize: ampEnd - ampStart + 1 };
           },
           avoid,
-          maxProductBp,
+          range,
         )!;
         const fwd = pick.fwd;
         const rev = pick.rev;
@@ -450,16 +537,16 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
         const notes: BatchResult['notes'] = [];
         if (pick.avoidUnresolved.length) {
           notes.push({ tone: 'danger', text: `Overlaps ${[...new Set(pick.avoidUnresolved.map((h) => h.rsid))].join(', ')} (no candidate pair clears it; review manually)` });
-        } else if (pick.avoidHits0.length) {
-          notes.push({ tone: 'accent', text: `Used alt candidates (fwd #${pick.fwdIndex + 1}, rev #${pick.revIndex + 1}) to avoid ${[...new Set(pick.avoidHits0.map((h) => h.rsid))].join(', ')}` });
+        } else if (pick.avoidedHits.length) {
+          notes.push({ tone: 'accent', text: `Shifted primers to avoid ${[...new Set(pick.avoidedHits.map((h) => h.rsid))].join(', ')}` });
         }
-        if (pick.tooLong) {
-          notes.push({ tone: 'danger', text: `Product ${pick.productSize} bp exceeds the ${maxProductBp} bp max (no candidate pair fits; review manually)` });
+        if (range && pick.outOfRange) {
+          notes.push({ tone: 'danger', text: `Product ${pick.productSize} bp is outside ${formatRange(range)} (no candidate pair fits; review manually)` });
         }
 
         // The server's heterodimer check is only ever computed for the
         // top-ranked forward/reverse pair — if either side switched
-        // candidates to avoid a neighbor or fit the length cap, that check
+        // candidates to avoid a neighbor or fit the size range, that check
         // no longer applies to the pair actually used, so don't report it
         // as if it did.
         const usedDefaultPair = pick.fwdIndex === 0 && pick.revIndex === 0;
@@ -787,13 +874,20 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
         {blocks && blocks.length > 0 && (
           <>
             <div className="mb-3 flex flex-wrap items-end gap-4 border-t border-line pt-3">
-              <Field label="Primer search window (bp from target; blank = full 200bp flank)">
+              <Field
+                label="Amplicon size (bp)"
+                hint={
+                  parsedRange && parsedRange !== 'invalid'
+                    ? `Primers are placed wherever around each SNP fits ${formatRange(parsedRange)} best.`
+                    : 'A range (130-150) or an exact size (150); blank = no size target.'
+                }
+              >
                 <TextInput
-                  type="number"
-                  min={1}
-                  placeholder="e.g. 130 for 2x150bp sequencing…"
-                  value={flankWindow}
-                  onChange={(e) => setFlankWindow(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="e.g. 130-150 or 150"
+                  value={ampliconSize}
+                  onChange={(e) => setAmpliconSize(e.target.value)}
+                  aria-invalid={parsedRange === 'invalid'}
                   className="w-56 tabular-nums"
                 />
               </Field>
@@ -807,17 +901,53 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                   className="w-56 tabular-nums"
                 />
               </Field>
-              <Field label="Max amplicon length (bp; blank = no limit)">
-                <TextInput
-                  type="number"
-                  min={1}
-                  placeholder="e.g. 260 for 2x150bp reads…"
-                  value={maxProduct}
-                  onChange={(e) => setMaxProduct(e.target.value)}
-                  className="w-56 tabular-nums"
-                />
-              </Field>
-              <Button variant="primary" disabled={running} onClick={() => void runBatch()}>
+            </div>
+
+            <details className="mb-3">
+              <summary className="cursor-pointer select-none text-xs text-ink-muted">
+                Advanced settings{advancedCount > 0 && <span className="text-accent"> ({advancedCount} set)</span>}
+              </summary>
+              <div className="mt-2 flex flex-wrap items-start gap-4">
+                <Field label="Primer Tm (°C)" hint="Min / optimum / max; blank = 52 / 62 / 68.">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-20"><TextInput type="number" step="0.5" placeholder="52" aria-label="Tm min" value={tmMin} onChange={(e) => setTmMin(e.target.value)} className="tabular-nums" /></div>
+                    <div className="w-20"><TextInput type="number" step="0.5" placeholder="62" aria-label="Tm optimum" value={tmOpt} onChange={(e) => setTmOpt(e.target.value)} className="tabular-nums" /></div>
+                    <div className="w-20"><TextInput type="number" step="0.5" placeholder="68" aria-label="Tm max" value={tmMax} onChange={(e) => setTmMax(e.target.value)} className="tabular-nums" /></div>
+                  </div>
+                </Field>
+                <Field label="Primer GC content (%)" hint="Min / max; the midpoint is preferred. Blank = 20 / 80.">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-20"><TextInput type="number" min={0} max={100} placeholder="20" aria-label="GC min" value={gcMin} onChange={(e) => setGcMin(e.target.value)} className="tabular-nums" /></div>
+                    <span className="text-ink-faint">–</span>
+                    <div className="w-20"><TextInput type="number" min={0} max={100} placeholder="80" aria-label="GC max" value={gcMax} onChange={(e) => setGcMax(e.target.value)} className="tabular-nums" /></div>
+                  </div>
+                </Field>
+                <Field
+                  label="Primer search window (bp from target)"
+                  hint={parsedRange && parsedRange !== 'invalid' ? 'Ignored while an amplicon size is set - the size decides the window.' : 'Blank = full 200 bp flank.'}
+                >
+                  <TextInput
+                    type="number"
+                    min={1}
+                    placeholder="e.g. 130"
+                    value={flankWindow}
+                    onChange={(e) => setFlankWindow(e.target.value)}
+                    disabled={!!parsedRange && parsedRange !== 'invalid'}
+                    className="w-40 tabular-nums disabled:opacity-50"
+                  />
+                </Field>
+                {(tmMin || tmOpt || tmMax || gcMin || gcMax) && (
+                  <Button size="sm" className="self-center" onClick={() => { setTmMin(''); setTmOpt(''); setTmMax(''); setGcMin(''); setGcMax(''); }}>
+                    Reset Tm/GC
+                  </Button>
+                )}
+              </div>
+            </details>
+
+            {settingsError && <div role="alert" className="mb-3 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-xs font-medium text-danger">{settingsError}</div>}
+
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <Button variant="primary" disabled={running || settingsError !== null} onClick={() => void runBatch()}>
                 {running ? `Designing… (${doneCount + errorCount}/${blocks.length})` : `Design flanking primers for all ${blocks.length} SNPs`}
               </Button>
               {Object.keys(results).length > 0 && !running && (

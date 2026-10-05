@@ -36,6 +36,7 @@
                 174
               ],
               "length": 20,
+              "penalty": 0.1,
               "position": [
                 154,
                 20
@@ -66,6 +67,7 @@
                 40
               ],
               "length": 20,
+              "penalty": 0.3,
               "position": [
                 20,
                 20
@@ -96,6 +98,7 @@
                 170
               ],
               "length": 20,
+              "penalty": 0.3,
               "position": [
                 150,
                 20
@@ -126,6 +129,7 @@
                 169
               ],
               "length": 20,
+              "penalty": 0.3,
               "position": [
                 149,
                 20
@@ -156,6 +160,7 @@
                 167
               ],
               "length": 20,
+              "penalty": 0.6,
               "position": [
                 147,
                 20
@@ -200,6 +205,7 @@
                 161
               ],
               "length": 20,
+              "penalty": 0.1,
               "position": [
                 141,
                 20
@@ -230,6 +236,7 @@
                 159
               ],
               "length": 20,
+              "penalty": 1.1,
               "position": [
                 139,
                 20
@@ -260,6 +267,7 @@
                 63
               ],
               "length": 21,
+              "penalty": 1.9,
               "position": [
                 42,
                 21
@@ -290,6 +298,7 @@
                 50
               ],
               "length": 21,
+              "penalty": 2.0,
               "position": [
                 29,
                 21
@@ -320,6 +329,7 @@
                 166
               ],
               "length": 20,
+              "penalty": 2.1,
               "position": [
                 146,
                 20

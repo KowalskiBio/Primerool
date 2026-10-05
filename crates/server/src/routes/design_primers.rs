@@ -10,7 +10,8 @@ use serde_json::{json, Value};
 use engine::backend::ThermoParams;
 use engine::backend_native::NativeBackend;
 use engine::analyze::{analyze_pair, analyze_primer};
-use engine::design_flanking::design_primers_for_flanking_regions;
+use engine::design_flanking::{design_primers_for_flanking_regions, FlankingOptions};
+use engine::picker::{GcRange, TmRange};
 use engine::design_general::{design_best_pairs, PrimerRegion};
 use engine::design_internal::design_primers_for_region;
 use engine::picker::ScoredCandidate;
@@ -40,6 +41,18 @@ pub struct DesignPrimersRequest {
     /// of `upstream_seq`/`downstream_seq` (the bases nearest the target),
     /// instead of the full flank. `None`/absent uses the full flank.
     pub flank_window: Option<i64>,
+    /// Flanking/WGA mode only: overrides the default primer Tm window (°C).
+    /// Any of the three may be given; missing ones keep their defaults.
+    pub tm_min: Option<f64>,
+    pub tm_opt: Option<f64>,
+    pub tm_max: Option<f64>,
+    /// Flanking/WGA mode only: overrides the default primer GC% window.
+    pub gc_min: Option<f64>,
+    pub gc_max: Option<f64>,
+    /// Flanking/WGA mode only: return the best oligo for every distinct
+    /// 5'-end position (see `FlankingOptions::one_per_end`) so the caller
+    /// can pair sides to a product size.
+    pub one_per_end: bool,
     /// General mode only: where the primers may sit - `"exon"`, `"intron"`
     /// or `"any"` (the default) - judged against `exons`.
     pub region: Option<String>,
@@ -65,6 +78,12 @@ impl Default for DesignPrimersRequest {
             upstream_seq: None,
             downstream_seq: None,
             flank_window: None,
+            tm_min: None,
+            tm_opt: None,
+            tm_max: None,
+            gc_min: None,
+            gc_max: None,
+            one_per_end: false,
             region: None,
             exons: Vec::new(),
         }
@@ -283,6 +302,36 @@ fn design_junction_mode(req: &DesignPrimersRequest, backend: &dyn engine::backen
     })))
 }
 
+/// The request's Tm overrides layered on `FLANKING_PRIMER_TM`, or `None`
+/// when none was given. An optimum outside an explicit range is clamped in.
+fn flanking_tm(req: &DesignPrimersRequest) -> Result<Option<TmRange>, AppError> {
+    if req.tm_min.is_none() && req.tm_opt.is_none() && req.tm_max.is_none() {
+        return Ok(None);
+    }
+    let d = engine::defaults::FLANKING_PRIMER_TM;
+    let min = req.tm_min.unwrap_or(d.min_tm);
+    let max = req.tm_max.unwrap_or(d.max_tm);
+    if !(min.is_finite() && max.is_finite()) || min > max {
+        return Err(AppError::bad_request(format!("Invalid Tm range {min}–{max} °C")));
+    }
+    let opt = req.tm_opt.unwrap_or(if (min..=max).contains(&d.opt_tm) { d.opt_tm } else { (min + max) / 2.0 }).clamp(min, max);
+    Ok(Some(TmRange { min, opt, max }))
+}
+
+/// The request's GC% overrides layered on `FLANKING_PRIMER_GC`, or `None`.
+fn flanking_gc(req: &DesignPrimersRequest) -> Result<Option<GcRange>, AppError> {
+    if req.gc_min.is_none() && req.gc_max.is_none() {
+        return Ok(None);
+    }
+    let d = engine::defaults::FLANKING_PRIMER_GC;
+    let min = req.gc_min.unwrap_or(d.min_gc);
+    let max = req.gc_max.unwrap_or(d.max_gc);
+    if !(0.0..=100.0).contains(&min) || !(0.0..=100.0).contains(&max) || min > max {
+        return Err(AppError::bad_request(format!("Invalid GC range {min}–{max} %")));
+    }
+    Ok(Some(GcRange { min, max }))
+}
+
 fn design_flanking_mode(req: &DesignPrimersRequest, backend: &dyn engine::backend::ThermoBackend) -> Result<Json<Value>, AppError> {
     let upstream = req.upstream_seq.as_deref().unwrap_or("");
     let downstream = req.downstream_seq.as_deref().unwrap_or("");
@@ -290,8 +339,8 @@ fn design_flanking_mode(req: &DesignPrimersRequest, backend: &dyn engine::backen
         return Err(AppError::bad_request("No flanking sequences provided"));
     }
 
-    let flank_window = req.flank_window.map(|w| w as i32);
-    let result = design_primers_for_flanking_regions(backend, upstream, downstream, flank_window, ThermoParams::default());
+    let opts = FlankingOptions { flank_window: req.flank_window.map(|w| w as i32), tm: flanking_tm(req)?, gc: flanking_gc(req)?, one_per_end: req.one_per_end };
+    let result = design_primers_for_flanking_regions(backend, upstream, downstream, &opts, ThermoParams::default());
 
     if result.forward.primers.is_empty() || result.reverse.primers.is_empty() {
         let mut details = Vec::new();
@@ -318,6 +367,7 @@ fn design_flanking_mode(req: &DesignPrimersRequest, backend: &dyn engine::backen
                         ("interval", json!(o.interval)),
                         ("position", json!(position)),
                         ("position_raw", json!(position_raw)),
+                        ("penalty", json!(round1(o.penalty))),
                     ],
                 )
             })

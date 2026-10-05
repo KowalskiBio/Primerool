@@ -180,6 +180,8 @@ export interface FlankingOligoResult extends PrimerAnalysis {
   position: [number, number];
   /** The raw, asymmetric tuple for the same oligo. */
   position_raw: [number, number];
+  /** Weighted distance from the Tm/GC/size optimum; lower is better. */
+  penalty: number;
 }
 
 export interface FlankingDesignResponse {
@@ -191,8 +193,21 @@ export interface FlankingDesignResponse {
   };
 }
 
-export function designFlanking(upstream_seq: string, downstream_seq: string, flank_window?: number): Promise<FlankingDesignResponse> {
-  return postJson<FlankingDesignResponse>('/design_primers', { mode: 'flanking', upstream_seq, downstream_seq, flank_window });
+/** Optional overrides for a flanking design - see `DesignPrimersRequest`
+ * in `crates/server/src/routes/design_primers.rs`. */
+export interface FlankingOptions {
+  tm_min?: number;
+  tm_opt?: number;
+  tm_max?: number;
+  gc_min?: number;
+  gc_max?: number;
+  /** Best oligo per distinct 5' end instead of the overall top 5 - for
+   * pairing the two sides to a product size client-side. */
+  one_per_end?: boolean;
+}
+
+export function designFlanking(upstream_seq: string, downstream_seq: string, flank_window?: number, options: FlankingOptions = {}): Promise<FlankingDesignResponse> {
+  return postJson<FlankingDesignResponse>('/design_primers', { mode: 'flanking', upstream_seq, downstream_seq, flank_window, ...options });
 }
 
 // ---------------------------------------------------------------------

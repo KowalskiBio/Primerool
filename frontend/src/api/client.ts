@@ -16,13 +16,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function postJson<TRes>(path: string, body: unknown): Promise<TRes> {
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
+async function readResponse<TRes>(response: Response): Promise<TRes> {
   const text = await response.text();
   let data: unknown = null;
   if (text) {
@@ -43,4 +37,20 @@ export async function postJson<TRes>(path: string, body: unknown): Promise<TRes>
   }
 
   return data as TRes;
+}
+
+export async function postJson<TRes>(path: string, body: unknown): Promise<TRes> {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return readResponse<TRes>(response);
+}
+
+/** GET counterpart of `postJson` for the few polling-style routes
+ * (`/blast_batch_status/:id`): same `{"error": ...}` handling. */
+export async function getJson<TRes>(path: string): Promise<TRes> {
+  const response = await fetch(path);
+  return readResponse<TRes>(response);
 }

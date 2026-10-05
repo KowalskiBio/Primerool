@@ -1,4 +1,4 @@
-import { postJson } from './client';
+import { getJson, postJson } from './client';
 import { getNcbiApiKey } from './ncbiApiKey';
 
 // Matches `crates/server/src/routes/blast.rs` (`BlastHitJson` flattens
@@ -49,14 +49,32 @@ export interface BlastBatchResult {
   error?: string;
 }
 
-export interface BlastBatchResponse {
-  results: BlastBatchResult[];
+/** Starts a batch BLAST of many named sequences as ONE multi-query NCBI
+ * submission. Returns immediately with a job id — the NCBI round-trip
+ * (~30-180s) happens server-side, and the results are polled via
+ * `getBlastBatchJob` (a synchronous response would be cut off by a
+ * reverse proxy's ~60s timeout with a 504). Batches larger than the
+ * server's per-request cap (100) must be chunked by the caller.
+ * `organism` (an Ensembl species slug like 'homo_sapiens', or an
+ * organism name like 'Homo sapiens') restricts the search to that
+ * organism via NCBI's ENTREZ_QUERY. */
+export function startBlastBatch(queries: BlastBatchQuery[], organism: string): Promise<BlastBatchStarted> {
+  return postJson<BlastBatchStarted>('/blast_batch', { queries, organism, api_key: getNcbiApiKey() });
 }
 
-/** BLASTs many named sequences in ONE multi-query NCBI submission — one
- * ~30-180s round-trip for the whole list, not one per sequence. Batches
- * larger than the server's per-request cap (100) must be chunked by the
- * caller. */
-export function blastBatch(queries: BlastBatchQuery[]): Promise<BlastBatchResponse> {
-  return postJson<BlastBatchResponse>('/blast_batch', { queries, api_key: getNcbiApiKey() });
+export interface BlastBatchStarted {
+  job_id: string;
+}
+
+export interface BlastBatchJob {
+  status: 'running' | 'done' | 'error';
+  results?: BlastBatchResult[];
+  error?: string;
+}
+
+/** Polls a `startBlastBatch` job: `running` until the background BLAST
+ * finishes, then the per-query results (or the job's error). An unknown
+ * id (expired, or lost to a server restart/deploy) is a 404 `ApiError`. */
+export function getBlastBatchJob(jobId: string): Promise<BlastBatchJob> {
+  return getJson<BlastBatchJob>(`/blast_batch_status/${encodeURIComponent(jobId)}`);
 }

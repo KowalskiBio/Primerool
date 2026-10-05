@@ -4,7 +4,7 @@ import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
 import { analyzePrimer, designFlanking, type FlankingOptions } from '../api/design';
 import { searchGene } from '../api/gene';
 import { getSequence } from '../api/sequence';
-import { blastBatch, type BlastHit } from '../api/blast';
+import { getBlastBatchJob, startBlastBatch, type BlastHit } from '../api/blast';
 import { ApiError } from '../api/client';
 import SnpAmpliconMap, { type PlacedAmplicon } from './SnpAmpliconMap';
 import SnpGeneMapModal from './SnpGeneMapModal';
@@ -16,10 +16,12 @@ import Badge from './ui/Badge';
 import Button from './ui/Button';
 import Field from './ui/Field';
 import Modal from './ui/Modal';
+import Select from './ui/Select';
 import TextInput, { controlClasses } from './ui/TextInput';
 import { fmt } from '../utils/format';
 import { localGenePos, SNP_WORKFLOW_SPECIES } from '../utils/variantMapping';
 import { reverseComplement } from '../utils/dna';
+import { SPECIES_BY_KINGDOM, KINGDOM_LABELS, type Kingdom } from '../utils/species';
 
 /** Per-rsID result of checking whether it falls inside its gene's
  * *canonical* transcript's exon span - deliberately narrower than
@@ -71,20 +73,44 @@ interface BatchResult {
 }
 
 /** One primer's NCBI BLAST check under the batch panel's BLAST section -
- * keyed `${amplicon design rsID}.fwd`/`.rev`. `sequence` is the primer as
- * BLASTed, kept so a cell can flag that its primer moved (drag/re-design)
+ * keyed `${amplicon design rsID}.fwd`/`.rev`. `sequence` and `organism`
+ * are the primer and target organism as BLASTed, kept so a cell can flag
+ * that its primer moved (drag/re-design) or the picker switched species
  * since the check ran, rather than silently showing hits for the old
- * oligo. */
+ * query. */
 interface BlastCheck {
   sequence: string;
+  organism: string;
   status: 'pending' | 'running' | 'done' | 'error';
   hits?: BlastHit[];
   error?: string;
 }
 
+/** Display label for an Ensembl species slug from the app's preset list
+ * (falls back to the raw slug). */
+function speciesLabel(slug: string): string {
+  for (const options of Object.values(SPECIES_BY_KINGDOM)) {
+    const found = options.find((s) => s.value === slug);
+    if (found) return found.label;
+  }
+  return slug;
+}
+
 /** Top-hit summary of a finished primer check in the BLAST section's
  * table - clickable for the full hit list in a modal. */
-function BlastCell({ check, currentSequence, label, onOpen }: { check: BlastCheck | undefined; currentSequence: string; label: string; onOpen: (hits: BlastHit[], title: string) => void }) {
+function BlastCell({
+  check,
+  currentSequence,
+  currentOrganism,
+  label,
+  onOpen,
+}: {
+  check: BlastCheck | undefined;
+  currentSequence: string;
+  currentOrganism: string;
+  label: string;
+  onOpen: (hits: BlastHit[], title: string) => void;
+}) {
   if (!check) return <span className="text-ink-faint">-</span>;
   if (check.status === 'pending') return <span className="text-ink-faint">queued</span>;
   if (check.status === 'running') return <span className="text-accent">BLASTing…</span>;
@@ -115,6 +141,11 @@ function BlastCell({ check, currentSequence, label, onOpen }: { check: BlastChec
       {check.sequence !== currentSequence && (
         <Badge tone="warning" title="This primer changed (dragged or re-designed) after its BLAST ran - re-run BLAST for the new sequence.">
           primer changed
+        </Badge>
+      )}
+      {check.organism !== currentOrganism && (
+        <Badge tone="warning" title={`BLASTed against ${speciesLabel(check.organism)} - the picker is now on ${speciesLabel(currentOrganism)}. Re-run for the new organism.`}>
+          other organism
         </Badge>
       )}
     </div>
@@ -374,6 +405,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [openAmpliconKey, setOpenAmpliconKey] = useState<string | null>(null);
   const [canonicalChecks, setCanonicalChecks] = useSessionState<Record<string, CanonicalCheck>>('snpBatch.canonicalChecks', {}, dropUnfinished((c) => c.status !== 'checking'));
   const [blastChecks, setBlastChecks] = useSessionState<Record<string, BlastCheck>>('snpBatch.blastChecks', {}, dropUnfinished((c) => c.status === 'done' || c.status === 'error'));
+  const [blastOrganism, setBlastOrganism] = useSessionState('snpBatch.blastOrganism', 'homo_sapiens');
   const [blasting, setBlasting] = useState(false);
   const [openBlast, setOpenBlast] = useState<{ title: string; hits: BlastHit[] } | null>(null);
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
@@ -637,17 +669,24 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
     setRunning(false);
   }
 
-  /** How many primers one `/blast_batch` request carries. The server caps
-   * a request at 100 queries; staying well under that keeps each HTTP
-   * request within one NCBI submission's ~180s worst case (a reverse
-   * proxy may cut longer requests off), while still amortizing the
+  /** How many primers one `/blast_batch` job carries. The server caps a
+   * job at 100 queries; staying well under that keeps each job within
+   * one NCBI submission's ~180s worst case, while still amortizing the
    * submit/poll round-trip across many primers. */
   const BLAST_CHUNK = 25;
 
+  /** How often the running job is polled. The server itself polls NCBI
+   * only every 10s, so this just needs to feel responsive. */
+  const BLAST_POLL_MS = 3000;
+
   /** BLASTs every designed primer (both sides of every placed amplicon,
    * merged groups once - they share their pair) against NCBI in chunks,
-   * updating each primer's row as its chunk finishes. Per-primer checks
-   * are stored under `${design rsID}.fwd`/`.rev`. */
+   * updating each primer's row as its chunk finishes. Each chunk is a
+   * server-side job polled to completion - the submit returns instantly,
+   * so no HTTP request is held open for the NCBI round-trip (which a
+   * reverse proxy would cut off with a 504). Restricted to the section's
+   * organism picker (default human). Per-primer checks are stored under
+   * `${design rsID}.fwd`/`.rev`. */
   async function runBlastAll() {
     const targets: { id: string; sequence: string }[] = [];
     for (const amp of placedAmplicons) {
@@ -658,7 +697,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
 
     setBlasting(true);
     const initial: Record<string, BlastCheck> = {};
-    for (const t of targets) initial[t.id] = { sequence: t.sequence, status: 'pending' };
+    for (const t of targets) initial[t.id] = { sequence: t.sequence, organism: blastOrganism, status: 'pending' };
     setBlastChecks(initial);
 
     for (let i = 0; i < targets.length; i += BLAST_CHUNK) {
@@ -670,18 +709,25 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
       });
 
       try {
-        const res = await blastBatch(chunk);
-        const byId = new Map(res.results.map((r) => [r.id, r]));
+        const started = await startBlastBatch(chunk, blastOrganism);
+        let job = await getBlastBatchJob(started.job_id);
+        while (job.status === 'running') {
+          await new Promise((resolve) => setTimeout(resolve, BLAST_POLL_MS));
+          job = await getBlastBatchJob(started.job_id);
+        }
+        if (job.status === 'error') throw new Error(job.error ?? 'BLAST failed');
+
+        const byId = new Map((job.results ?? []).map((r) => [r.id, r]));
         setBlastChecks((prev) => {
           const next = { ...prev };
           for (const t of chunk) {
             const r = byId.get(t.id);
             next[t.id] =
               r === undefined
-                ? { sequence: t.sequence, status: 'error', error: 'No result returned for this primer' }
+                ? { sequence: t.sequence, organism: blastOrganism, status: 'error', error: 'No result returned for this primer' }
                 : r.status === 'done'
-                  ? { sequence: t.sequence, status: 'done', hits: r.hits ?? [] }
-                  : { sequence: t.sequence, status: 'error', error: r.error ?? 'BLAST failed' };
+                  ? { sequence: t.sequence, organism: blastOrganism, status: 'done', hits: r.hits ?? [] }
+                  : { sequence: t.sequence, organism: blastOrganism, status: 'error', error: r.error ?? 'BLAST failed' };
           }
           return next;
         });
@@ -689,7 +735,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
         const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
         setBlastChecks((prev) => {
           const next = { ...prev };
-          for (const t of chunk) next[t.id] = { sequence: t.sequence, status: 'error', error: message };
+          for (const t of chunk) next[t.id] = { sequence: t.sequence, organism: blastOrganism, status: 'error', error: message };
           return next;
         });
       }
@@ -1233,13 +1279,28 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
       {placedAmplicons.length > 0 && (
         <Section title="BLAST check (NCBI)" persistKey="snpBatch.blastSectionCollapsed">
           <p className="mb-3 text-xs text-ink-muted">
-            Runs NCBI BLAST (blastn, non-redundant nucleotide database) on every designed primer - all primers go out as one multi-query submission in chunks, so the whole panel takes a few minutes rather than one BLAST per primer. A primer aligning to many different sequences or organisms may bind more than one locus; click a cell for its full hit list.
+            Runs NCBI BLAST (blastn, non-redundant nucleotide database) on every designed primer, restricted to the selected organism - all primers go out as one multi-query submission in chunks, so the whole panel takes a few minutes rather than one BLAST per primer. A primer aligning to many different sequences or loci of the organism may bind more than one place; click a cell for its full hit list.
           </p>
-          <div className="mb-3 flex flex-wrap items-center gap-3">
+          <div className="mb-3 flex flex-wrap items-end gap-3">
+            <Field label="Organism" hint="Only sequences from this organism are searched.">
+              <Select value={blastOrganism} onChange={(e) => setBlastOrganism(e.target.value)} disabled={blasting} className="w-64">
+                {(Object.keys(SPECIES_BY_KINGDOM) as Kingdom[]).map((k) => (
+                  <optgroup key={k} label={KINGDOM_LABELS[k]}>
+                    {SPECIES_BY_KINGDOM[k]
+                      .filter((s) => s.value !== '__custom__')
+                      .map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </Select>
+            </Field>
             <Button variant="primary" disabled={blasting} onClick={() => void runBlastAll()}>
               {blasting ? `BLASTing… (${blastDoneCount}/${blastTotalCount})` : `Run NCBI BLAST on all ${placedAmplicons.length * 2} primers`}
             </Button>
-            {Object.keys(blastChecks).length > 0 && !blasting && <span className="text-xs text-ink-faint">From a previous run - re-run after re-designing or dragging primers.</span>}
+            {Object.keys(blastChecks).length > 0 && !blasting && <span className="text-xs text-ink-faint">From a previous run - re-run after re-designing, dragging primers, or switching organism.</span>}
           </div>
           {Object.keys(blastChecks).length > 0 && (
             <div className="overflow-x-auto rounded-lg border border-line">
@@ -1261,6 +1322,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                         <BlastCell
                           check={blastChecks[`${amp.rsid}.fwd`]}
                           currentSequence={amp.fwd.sequence}
+                          currentOrganism={blastOrganism}
                           label={`${amp.rsid} forward primer`}
                           onOpen={(hits, title) => setOpenBlast({ title, hits })}
                         />
@@ -1269,6 +1331,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                         <BlastCell
                           check={blastChecks[`${amp.rsid}.rev`]}
                           currentSequence={amp.rev.sequence}
+                          currentOrganism={blastOrganism}
                           label={`${amp.rsid} reverse primer`}
                           onOpen={(hits, title) => setOpenBlast({ title, hits })}
                         />

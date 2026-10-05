@@ -55,6 +55,30 @@ pub struct QueryBlastResults {
     pub hits: Vec<BlastHit>,
 }
 
+/// Colloquial GenBank title prefixes, mapped to the binomial used
+/// everywhere else. Patent-division records title as "<common name> DNA
+/// ...", which the first-two-words heuristic would otherwise report as a
+/// distinct "organism" (observed live on human-only /blast_batch results:
+/// "Human DNA ..." next to "Homo sapiens ..." counted as 2 organisms).
+const TITLE_ORGANISM_ALIASES: &[(&str, &str)] = &[("human dna", "Homo sapiens")];
+
+/// Normalizes a hit title's leading organism words: strips NCBI's
+/// "PREDICTED:" annotation (RefSeq gene predictions), takes the first
+/// two whitespace-split words, and maps colloquial prefixes (see
+/// `TITLE_ORGANISM_ALIASES`) to the canonical binomial.
+fn organism_from_title(title: &str) -> String {
+    let stripped = title.strip_prefix("PREDICTED:").unwrap_or(title);
+    let words: Vec<&str> = stripped.split_whitespace().take(2).collect();
+    if words.is_empty() {
+        return "Unknown".to_string();
+    }
+    let joined = words.join(" ");
+    if let Some((_, binomial)) = TITLE_ORGANISM_ALIASES.iter().find(|(alias, _)| *alias == joined.to_lowercase()) {
+        return binomial.to_string();
+    }
+    joined
+}
+
 /// Parses the `<Hit>` children of one `Iteration_hits` node — the loop body
 /// `parse_blast_results` originally inlined, shared with
 /// `parse_blast_results_multi` below.
@@ -67,13 +91,7 @@ fn parse_hits(hits_node: Node, query_len: i64) -> Vec<BlastHit> {
         let title = find_child(hit, "Hit_def").and_then(text_of).unwrap_or_else(|| "Unknown".to_string());
         let accession = find_child(hit, "Hit_accession").and_then(text_of).unwrap_or_default();
 
-        // Organism heuristic: first two whitespace-split words of the title.
-        let parts: Vec<&str> = title.split_whitespace().collect();
-        let organism = match parts.len() {
-            0 => "Unknown".to_string(),
-            1 => parts[0].to_string(),
-            _ => format!("{} {}", parts[0], parts[1]),
-        };
+        let organism = organism_from_title(&title);
 
         // Gene-symbol heuristic: first parenthesized token, allowing hyphens/dots
         // (e.g. HLA-DQB1) — a plain \(\w+\) previously broke on such symbols.
@@ -325,6 +343,54 @@ mod tests {
     fn no_iteration_hits_returns_empty() {
         let xml = r#"<BlastOutput><BlastOutput_query-len>10</BlastOutput_query-len></BlastOutput>"#;
         assert_eq!(parse_blast_results(xml).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn organism_normalizes_predicted_and_patent_title_prefixes() {
+        // Both shapes observed live in /blast_batch results restricted to
+        // "Homo sapiens [organism]": RefSeq Gnomon predictions title as
+        // "PREDICTED: Homo sapiens ..." and patent-division records as
+        // "Human DNA ...", which used to parse as two extra "organisms"
+        // for a search that is human-only.
+        let xml = r#"<?xml version="1.0"?>
+<BlastOutput>
+  <BlastOutput_query-len>18</BlastOutput_query-len>
+  <BlastOutput_iterations>
+    <Iteration>
+      <Iteration_hits>
+        <Hit>
+          <Hit_def>PREDICTED: Homo sapiens musashi RNA binding protein 2 (MSI2), mRNA</Hit_def>
+          <Hit_accession>XR_001738056</Hit_accession>
+          <Hit_hsps>
+            <Hsp>
+              <Hsp_identity>18</Hsp_identity>
+              <Hsp_align-len>18</Hsp_align-len>
+              <Hsp_query-from>1</Hsp_query-from>
+              <Hsp_query-to>18</Hsp_query-to>
+            </Hsp>
+          </Hit_hsps>
+        </Hit>
+        <Hit>
+          <Hit_def>Human DNA sequence from patent EP0743343</Hit_def>
+          <Hit_accession>A18533</Hit_accession>
+          <Hit_hsps>
+            <Hsp>
+              <Hsp_identity>18</Hsp_identity>
+              <Hsp_align-len>18</Hsp_align-len>
+              <Hsp_query-from>1</Hsp_query-from>
+              <Hsp_query-to>18</Hsp_query-to>
+            </Hsp>
+          </Hit_hsps>
+        </Hit>
+      </Iteration_hits>
+    </Iteration>
+  </BlastOutput_iterations>
+</BlastOutput>"#;
+        let hits = parse_blast_results(xml).unwrap();
+        assert_eq!(hits[0].organism, "Homo sapiens");
+        assert_eq!(hits[1].organism, "Homo sapiens");
+        // The gene-symbol heuristic must still see through the prefix.
+        assert_eq!(hits[0].gene_symbol.as_deref(), Some("MSI2"));
     }
 
     #[test]

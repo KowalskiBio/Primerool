@@ -18,7 +18,7 @@
 //! [`crate::mathews2004::Mode::Dg`] instead of the hardcoded native tables.
 
 use crate::dimer::can_pair;
-use crate::mathews2004::{params, Mode};
+use crate::mathews2004::{Mathews2004Params as Params, Mode};
 use crate::structure_thermo::{hairpin_exterior_dangle_bonus, hairpin_loop_energy, interior_bulge_energy, stack_energy, terminal_pair_penalty};
 
 fn c(seq: &[u8], i: usize) -> char {
@@ -35,8 +35,7 @@ fn c(seq: &[u8], i: usize) -> char {
 /// later passes to `dimer_thermo` for scoring. Verified against the real
 /// fork: a plain per-pair stack/terminal-penalty sum without this
 /// undercounts a 6bp `AAAAACCCCC`/`GGGGGTTTTT` stack by 0.2 kcal/mol.
-fn inner_dangles(seq: &[u8], n1: usize, i: usize, j_loc: usize) -> f64 {
-    let p = params();
+fn inner_dangles(p: &Params, seq: &[u8], n1: usize, i: usize, j_loc: usize) -> f64 {
     let j_concat = n1 + j_loc;
     let mut total = 0.0;
     if j_concat >= n1 + 1 {
@@ -60,8 +59,7 @@ fn inner_dangles(seq: &[u8], n1: usize, i: usize, j_loc: usize) -> f64 {
 
 /// `_outer_dangles`: dangles adjacent to the *outer* terminus of pair
 /// `(i, n1+j_loc)`. See [`inner_dangles`]'s docs.
-fn outer_dangles(seq: &[u8], n1: usize, n: usize, i: usize, j_loc: usize) -> f64 {
-    let p = params();
+fn outer_dangles(p: &Params, seq: &[u8], n1: usize, n: usize, i: usize, j_loc: usize) -> f64 {
     let j_concat = n1 + j_loc;
     let mut total = 0.0;
     if i >= 1 {
@@ -100,7 +98,7 @@ const MIN_HAIRPIN_LOOP: usize = 3;
 /// [`hairpin_mfe_candidates_mathews`] (every closing pair, ranked) — same
 /// recurrence either way, only what's read back out of `inner`/`trace`
 /// differs.
-fn hairpin_mfe_fill(seq: &[u8]) -> Option<(usize, Vec<f64>, Vec<Option<(usize, usize)>>)> {
+fn hairpin_mfe_fill(p: &Params, seq: &[u8]) -> Option<(usize, Vec<f64>, Vec<Option<(usize, usize)>>)> {
     let n = seq.len();
     if n < MIN_HAIRPIN_LOOP + 2 {
         return None;
@@ -123,7 +121,7 @@ fn hairpin_mfe_fill(seq: &[u8]) -> Option<(usize, Vec<f64>, Vec<Option<(usize, u
             // Python's `_hairpin_loop_energy` — so it must NOT be added again
             // here (that was a real double-counting bug, caught by the
             // `mathews2004_parity` golden-fixture test).
-            let stop_val = hairpin_loop_energy(Mode::Dg, seq, i, j);
+            let stop_val = hairpin_loop_energy(p, Mode::Dg, seq, i, j);
 
             let mut best_continue = INF;
             let mut best_next: Option<(usize, usize)> = None;
@@ -144,7 +142,7 @@ fn hairpin_mfe_fill(seq: &[u8]) -> Option<(usize, Vec<f64>, Vec<Option<(usize, u
                     if inner_next == INF {
                         continue;
                     }
-                    let e = if nl == 0 && nr == 0 { stack_energy(Mode::Dg, seq, i, j) } else { interior_bulge_energy(Mode::Dg, seq, i, j, ip, jp, nl, nr) };
+                    let e = if nl == 0 && nr == 0 { stack_energy(p, Mode::Dg, seq, i, j) } else { interior_bulge_energy(p, Mode::Dg, seq, i, j, ip, jp, nl, nr) };
                     let cand = e + inner_next;
                     if cand < best_continue {
                         best_continue = cand;
@@ -182,8 +180,8 @@ fn hairpin_traceback(n: usize, trace: &[Option<(usize, usize)>], i: usize, j: us
     pairs
 }
 
-pub fn hairpin_mfe_mathews(seq: &[u8], dangles: u8) -> Option<(f64, Vec<(usize, usize)>)> {
-    let (n, inner, trace) = hairpin_mfe_fill(seq)?;
+pub fn hairpin_mfe_mathews(p: &Params, seq: &[u8], dangles: u8) -> Option<(f64, Vec<(usize, usize)>)> {
+    let (n, inner, trace) = hairpin_mfe_fill(p, seq)?;
     let idx = |i: usize, j: usize| i * n + j;
 
     // Ranked by val + dangle bonus (when dangles=2) so a shorter stem that
@@ -199,7 +197,7 @@ pub fn hairpin_mfe_mathews(seq: &[u8], dangles: u8) -> Option<(f64, Vec<(usize, 
             if !val.is_finite() {
                 continue;
             }
-            let ranked = if dangles == 2 { val + hairpin_exterior_dangle_bonus(Mode::Dg, seq, i, j) } else { val };
+            let ranked = if dangles == 2 { val + hairpin_exterior_dangle_bonus(p, Mode::Dg, seq, i, j) } else { val };
             if best_outer.map(|(_, _, _, b)| ranked < b).unwrap_or(true) {
                 best_outer = Some((i, j, val, ranked));
             }
@@ -214,8 +212,8 @@ pub fn hairpin_mfe_mathews(seq: &[u8], dangles: u8) -> Option<(f64, Vec<(usize, 
 /// rank theirs: closed-state energy ascending, then base-pair count
 /// descending. Needed for the same reason that one is: a subopt/ensemble
 /// view over more than just the single MFE structure.
-pub fn hairpin_mfe_candidates_mathews(seq: &[u8], dangles: u8) -> Vec<(f64, Vec<(usize, usize)>)> {
-    let Some((n, inner, trace)) = hairpin_mfe_fill(seq) else {
+pub fn hairpin_mfe_candidates_mathews(p: &Params, seq: &[u8], dangles: u8) -> Vec<(f64, Vec<(usize, usize)>)> {
+    let Some((n, inner, trace)) = hairpin_mfe_fill(p, seq) else {
         return Vec::new();
     };
     let idx = |i: usize, j: usize| i * n + j;
@@ -227,7 +225,7 @@ pub fn hairpin_mfe_candidates_mathews(seq: &[u8], dangles: u8) -> Vec<(f64, Vec<
             if !val.is_finite() {
                 continue;
             }
-            let ranked = if dangles == 2 { val + hairpin_exterior_dangle_bonus(Mode::Dg, seq, i, j) } else { val };
+            let ranked = if dangles == 2 { val + hairpin_exterior_dangle_bonus(p, Mode::Dg, seq, i, j) } else { val };
             candidates.push((ranked, val, i, j));
         }
     }
@@ -243,7 +241,7 @@ pub fn hairpin_mfe_candidates_mathews(seq: &[u8], dangles: u8) -> Vec<(f64, Vec<
 /// [`crate::dimer::dimer_mfe_candidates_dna`]. Same ranked-candidate-list
 /// contract: every antiparallel helix start state, sorted by closed-state
 /// energy ascending then base-pair count descending.
-pub fn dimer_mfe_candidates_mathews(seq1: &[u8], seq2: &[u8]) -> Vec<(f64, Vec<(usize, usize)>)> {
+pub fn dimer_mfe_candidates_mathews(p: &Params, seq1: &[u8], seq2: &[u8]) -> Vec<(f64, Vec<(usize, usize)>)> {
     let n1 = seq1.len();
     let n2 = seq2.len();
     if n1 == 0 || n2 == 0 {
@@ -266,7 +264,7 @@ pub fn dimer_mfe_candidates_mathews(seq1: &[u8], seq2: &[u8]) -> Vec<(f64, Vec<(
             }
             let j_concat = n1 + j_loc;
 
-            let stop_val = terminal_pair_penalty(Mode::Dg, seq, i, j_concat) + inner_dangles(seq, n1, i, j_loc);
+            let stop_val = terminal_pair_penalty(p, Mode::Dg, seq, i, j_concat) + inner_dangles(p, seq, n1, i, j_loc);
 
             let mut best_continue = INF;
             let mut best_next: Option<(usize, usize)> = None;
@@ -285,9 +283,9 @@ pub fn dimer_mfe_candidates_mathews(seq1: &[u8], seq2: &[u8]) -> Vec<(f64, Vec<(
                         continue;
                     }
                     let e = if nl == 0 && nr == 0 {
-                        stack_energy(Mode::Dg, seq, i, j_concat)
+                        stack_energy(p, Mode::Dg, seq, i, j_concat)
                     } else {
-                        interior_bulge_energy(Mode::Dg, seq, i, j_concat, ip, n1 + jp_loc, nl, nr)
+                        interior_bulge_energy(p, Mode::Dg, seq, i, j_concat, ip, n1 + jp_loc, nl, nr)
                     };
                     let cand = e + inner_next;
                     if cand < best_continue {
@@ -313,7 +311,7 @@ pub fn dimer_mfe_candidates_mathews(seq1: &[u8], seq2: &[u8]) -> Vec<(f64, Vec<(
                 continue;
             }
             let j_concat = n1 + j_loc;
-            let outer_val = terminal_pair_penalty(Mode::Dg, seq, i, j_concat) + outer_dangles(seq, n1, n, i, j_loc) + inner[idx(i, j_loc)];
+            let outer_val = terminal_pair_penalty(p, Mode::Dg, seq, i, j_concat) + outer_dangles(p, seq, n1, n, i, j_loc) + inner[idx(i, j_loc)];
             if !outer_val.is_finite() {
                 continue;
             }
@@ -346,7 +344,7 @@ mod tests {
         // Regression: native-table folding (`hairpin::hairpin_mfe`) picks a
         // worse 3bp-stem structure for this sequence; Mathews2004 folding
         // must pick the objectively better full 4bp GGGG/CCCC stem.
-        let (_, pairs) = hairpin_mfe_mathews(b"GGGGAAACCCC", 2).expect("should fold");
+        let (_, pairs) = hairpin_mfe_mathews(crate::mathews2004::params(), b"GGGGAAACCCC", 2).expect("should fold");
         assert_eq!(pairs.len(), 4, "pairs={pairs:?}");
         assert_eq!(pairs[0], (0, 10));
     }

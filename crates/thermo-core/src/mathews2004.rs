@@ -89,14 +89,46 @@ pub struct Mathews2004Params {
 }
 
 static PARAMS: OnceLock<Mathews2004Params> = OnceLock::new();
+static SANTALUCIA: OnceLock<Mathews2004Params> = OnceLock::new();
+
+fn parse(json: &str, name: &str) -> Mathews2004Params {
+    let raw: RawParamSet = serde_json::from_str(json).unwrap_or_else(|e| panic!("bundled {name} must parse: {e}"));
+    Mathews2004Params { dg: raw.dg, dh: raw.dh }
+}
 
 /// The bundled Mathews 2004 DNA parameter set, parsed once.
 pub fn params() -> &'static Mathews2004Params {
-    PARAMS.get_or_init(|| {
-        let raw: RawParamSet = serde_json::from_str(include_str!("../data/mathews2004-dna.json"))
-            .expect("bundled mathews2004-dna.json must parse");
-        Mathews2004Params { dg: raw.dg, dh: raw.dh }
-    })
+    PARAMS.get_or_init(|| parse(include_str!("../data/mathews2004-dna.json"), "mathews2004-dna.json"))
+}
+
+/// Strider's native SantaLucia 2004 DNA parameter set (its `parameter_set
+/// = "native"`), parsed once. Same shape and fallback rules as
+/// [`params`]: its ΔG section is empty, so every ΔG lookup uses the native
+/// tables (Strider's no-override path), and its ΔH section is Strider's
+/// `load_parameters("native").dH` (see
+/// `tests/fixtures/gen_santalucia2004_params.py`).
+pub fn santalucia2004() -> &'static Mathews2004Params {
+    SANTALUCIA.get_or_init(|| parse(include_str!("../data/santalucia2004-dna.json"), "santalucia2004-dna.json"))
+}
+
+/// Which nearest-neighbour parameter set hairpin/dimer folding and scoring
+/// use (Oligool's Mathews/SantaLucia switch).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParamSetId {
+    /// Mathews 2004 (Oligool's default, closest to IDT).
+    #[default]
+    Mathews2004,
+    /// SantaLucia 2004, Strider's native set.
+    SantaLucia2004,
+}
+
+impl ParamSetId {
+    pub fn params(self) -> &'static Mathews2004Params {
+        match self {
+            ParamSetId::Mathews2004 => params(),
+            ParamSetId::SantaLucia2004 => santalucia2004(),
+        }
+    }
 }
 
 impl Mathews2004Params {

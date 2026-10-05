@@ -11,7 +11,7 @@
 //! `ΔS = (ΔH − ΔG₃₇) / T_REF` is internally consistent — see
 //! `crate::thermo::hairpin_thermo`/`dimer_thermo`.
 
-use crate::mathews2004::{params, Mode};
+use crate::mathews2004::{Mathews2004Params as Params, Mode};
 
 fn c(seq: &[u8], i: usize) -> char {
     seq[i] as char
@@ -24,15 +24,14 @@ fn key2(seq: &[u8], i: usize, j: usize) -> String {
 /// `_stack_energy`: stacking energy for closing pair `(i,j)` on inner pair
 /// `(i+1,j-1)`. Default -1.5 on a miss (matches `_stack_energy`'s own
 /// default, distinct from the 0.0 default used at the bulge call site).
-pub(crate) fn stack_energy(mode: Mode, seq: &[u8], i: usize, j: usize) -> f64 {
+pub(crate) fn stack_energy(p: &Params, mode: Mode, seq: &[u8], i: usize, j: usize) -> f64 {
     let key = format!("{}{}{}{}", c(seq, i), c(seq, i + 1), c(seq, j - 1), c(seq, j));
-    params().stack(mode, &key).unwrap_or(-1.5)
+    p.stack(mode, &key).unwrap_or(-1.5)
 }
 
 /// `_hairpin_loop_energy`. `loop_size = j - i - 1` must be >= 3 (the DP
 /// that produces any structure walked here already enforces this).
-pub(crate) fn hairpin_loop_energy(mode: Mode, seq: &[u8], i: usize, j: usize) -> f64 {
-    let p = params();
+pub(crate) fn hairpin_loop_energy(p: &Params, mode: Mode, seq: &[u8], i: usize, j: usize) -> f64 {
     let loop_size = j - i - 1;
     let size_idx = loop_size - 1;
 
@@ -64,8 +63,7 @@ pub(crate) fn hairpin_loop_energy(mode: Mode, seq: &[u8], i: usize, j: usize) ->
 /// `_interior_bulge_energy`. Outer pair `(i,j)`, inner pair `(ip,jp)`;
 /// `nl`/`nr` unpaired bases on the left/right. DNA-only (Primerool has no
 /// RNA path).
-pub(crate) fn interior_bulge_energy(mode: Mode, seq: &[u8], i: usize, j: usize, ip: usize, jp: usize, nl: usize, nr: usize) -> f64 {
-    let p = params();
+pub(crate) fn interior_bulge_energy(p: &Params, mode: Mode, seq: &[u8], i: usize, j: usize, ip: usize, jp: usize, nl: usize, nr: usize) -> f64 {
     let tp_outer = p.terminal_penalty(mode, &key2(seq, i, j));
     let tp_inner = p.terminal_penalty(mode, &key2(seq, ip, jp));
 
@@ -140,8 +138,8 @@ fn key4(seq: &[u8], a: usize, b: usize, c_: usize, d: usize) -> String {
 }
 
 /// `_terminal_pair_penalty`.
-pub(crate) fn terminal_pair_penalty(mode: Mode, seq: &[u8], i: usize, j: usize) -> f64 {
-    params().terminal_penalty(mode, &key2(seq, i, j))
+pub(crate) fn terminal_pair_penalty(p: &Params, mode: Mode, seq: &[u8], i: usize, j: usize) -> f64 {
+    p.terminal_penalty(mode, &key2(seq, i, j))
 }
 
 /// Best single negative exterior dangle for a stem's outermost pair `(io,jo)`
@@ -154,8 +152,7 @@ pub(crate) fn terminal_pair_penalty(mode: Mode, seq: &[u8], i: usize, j: usize) 
 /// pick a longer stem that engulfs bases which would have dangled more
 /// favorably left unpaired; verified against the real fork on `GGGGAAACCCC`-
 /// and `AATACATTTTTATGATT`-shaped sequences).
-pub(crate) fn hairpin_exterior_dangle_bonus(mode: Mode, seq: &[u8], io: usize, jo: usize) -> f64 {
-    let p = params();
+pub(crate) fn hairpin_exterior_dangle_bonus(p: &Params, mode: Mode, seq: &[u8], io: usize, jo: usize) -> f64 {
     let mut best = 0.0f64;
     if io >= 1 {
         let key = format!("{}{}{}", c(seq, io), c(seq, jo), c(seq, io - 1));
@@ -180,21 +177,21 @@ pub(crate) fn hairpin_exterior_dangle_bonus(mode: Mode, seq: &[u8], io: usize, j
 /// outermost-first (as produced by `hairpin::hairpin_mfe`'s traceback).
 /// `dangles`: 0 (default) or 2 (dangling-end stacking at the closing pair —
 /// Oligool's strider call always uses 2 for hairpins).
-pub fn sum_hairpin_elements(mode: Mode, seq: &[u8], pairs: &[(usize, usize)], dangles: u8) -> f64 {
+pub fn sum_hairpin_elements(p: &Params, mode: Mode, seq: &[u8], pairs: &[(usize, usize)], dangles: u8) -> f64 {
     let mut total = 0.0;
     for w in pairs.windows(2) {
         let (i, j) = w[0];
         let (ip, jp) = w[1];
         let nl = ip - i - 1;
         let nr = j - jp - 1;
-        total += if nl == 0 && nr == 0 { stack_energy(mode, seq, i, j) } else { interior_bulge_energy(mode, seq, i, j, ip, jp, nl, nr) };
+        total += if nl == 0 && nr == 0 { stack_energy(p, mode, seq, i, j) } else { interior_bulge_energy(p, mode, seq, i, j, ip, jp, nl, nr) };
     }
     let (il, jl) = *pairs.last().expect("hairpin must have at least one pair");
-    total += hairpin_loop_energy(mode, seq, il, jl);
+    total += hairpin_loop_energy(p, mode, seq, il, jl);
 
     if dangles == 2 {
         let (io, jo) = pairs[0];
-        total += hairpin_exterior_dangle_bonus(mode, seq, io, jo);
+        total += hairpin_exterior_dangle_bonus(p, mode, seq, io, jo);
     }
     total
 }
@@ -230,8 +227,8 @@ pub fn parse_hairpin_pairs(structure: &str) -> Option<Vec<(usize, usize)>> {
 
 /// `structure_free_energy`/`structure_enthalpy`: ΔG or ΔH (kcal/mol) of a
 /// folded hairpin, selected by `mode`.
-pub fn structure_energy_hairpin(mode: Mode, seq: &[u8], pairs: &[(usize, usize)], dangles: u8) -> f64 {
-    sum_hairpin_elements(mode, seq, pairs, dangles)
+pub fn structure_energy_hairpin(p: &Params, mode: Mode, seq: &[u8], pairs: &[(usize, usize)], dangles: u8) -> f64 {
+    sum_hairpin_elements(p, mode, seq, pairs, dangles)
 }
 
 // ─── dimer (bimolecular) ────────────────────────────────────────────────────
@@ -288,7 +285,7 @@ fn to_dotbracket(n: usize, pairs: &[(usize, usize)]) -> String {
 /// duplex. `pairs` outermost-first, every pair satisfying `i < seq1_len <= j`
 /// on the concatenated `seq`. `dangles`: 0 (no exterior dangling ends,
 /// Oligool's default for dimers) or 2 (both flanks of both termini).
-pub fn sum_dimer_elements(mode: Mode, seq: &[u8], seq1_len: usize, pairs: &[(usize, usize)], dangles: u8) -> f64 {
+pub fn sum_dimer_elements(p: &Params, mode: Mode, seq: &[u8], seq1_len: usize, pairs: &[(usize, usize)], dangles: u8) -> f64 {
     let mut paired = std::collections::HashSet::new();
     for &(i, j) in pairs {
         paired.insert(i);
@@ -301,19 +298,17 @@ pub fn sum_dimer_elements(mode: Mode, seq: &[u8], seq1_len: usize, pairs: &[(usi
         let (ip, jp) = w[1];
         let nl = ip - i - 1;
         let nr = j - jp - 1;
-        total += if nl == 0 && nr == 0 { stack_energy(mode, seq, i, j) } else { interior_bulge_energy(mode, seq, i, j, ip, jp, nl, nr) };
+        total += if nl == 0 && nr == 0 { stack_energy(p, mode, seq, i, j) } else { interior_bulge_energy(p, mode, seq, i, j, ip, jp, nl, nr) };
     }
 
     let (i_out, j_out) = pairs[0];
-    total += terminal_pair_penalty(mode, seq, i_out, j_out);
+    total += terminal_pair_penalty(p, mode, seq, i_out, j_out);
     let (i_in, j_in) = *pairs.last().unwrap();
-    total += terminal_pair_penalty(mode, seq, i_in, j_in);
+    total += terminal_pair_penalty(p, mode, seq, i_in, j_in);
 
     if dangles != 2 {
         return total;
     }
-
-    let p = params();
     let n = seq.len();
     if i_out >= 1 && !paired.contains(&(i_out - 1)) {
         let key = format!("{}{}{}", c(seq, i_out), c(seq, j_out), c(seq, i_out - 1));
@@ -350,8 +345,8 @@ pub fn sum_dimer_elements(mode: Mode, seq: &[u8], seq1_len: usize, pairs: &[(usi
     total
 }
 
-pub fn structure_energy_dimer(mode: Mode, seq: &[u8], seq1_len: usize, pairs: &[(usize, usize)], dangles: u8) -> f64 {
-    sum_dimer_elements(mode, seq, seq1_len, pairs, dangles)
+pub fn structure_energy_dimer(p: &Params, mode: Mode, seq: &[u8], seq1_len: usize, pairs: &[(usize, usize)], dangles: u8) -> f64 {
+    sum_dimer_elements(p, mode, seq, seq1_len, pairs, dangles)
 }
 
 pub fn dotbracket(n: usize, pairs: &[(usize, usize)]) -> String {

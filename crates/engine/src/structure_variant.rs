@@ -20,6 +20,7 @@
 //! `analyzeStriderIndividual`-on-"Use" pattern).
 
 use crate::backend::ThermoParams;
+use thermo_core::mathews2004::ParamSetId;
 
 const SUBOPT_COUNT: usize = 5;
 const R_GAS: f64 = 1.987e-3; // kcal / (mol . K) — matches thermo_core::thermo's own constant
@@ -128,6 +129,12 @@ fn dimer_variant_from_subopt(subopt: Vec<thermo_core::thermo::DimerThermo>) -> S
 /// `seq2`: `None` skips the heterodimer entirely; `Some(partner)` computes
 /// it *in addition to* (not instead of) `seq`'s own homodimer.
 pub fn analyze_structure(seq: &str, seq2: Option<&str>, params: ThermoParams) -> FullStructureAnalysis {
+    analyze_structure_in(ParamSetId::Mathews2004, seq, seq2, params)
+}
+
+/// [`analyze_structure`] under a chosen nearest-neighbour parameter set
+/// (Mathews 2004 or SantaLucia 2004), for both folding and scoring.
+pub fn analyze_structure_in(ps: ParamSetId, seq: &str, seq2: Option<&str>, params: ThermoParams) -> FullStructureAnalysis {
     // Same molar-unit conversion and effective-Mg2+ correction as
     // `backend_native::to_molar_conc`/`effective_magnesium_m` — duplicated
     // rather than shared because those are private to that module and this
@@ -139,16 +146,16 @@ pub fn analyze_structure(seq: &str, seq2: Option<&str>, params: ThermoParams) ->
     let strand_conc_m = params.dna_conc * 1e-9;
 
     let hairpin = DualStructure {
-        with_bulge: hairpin_variant_from_subopt(thermo_core::thermo::hairpin_thermo_subopt(seq, SUBOPT_COUNT, sodium_m, magnesium_m, 2)),
-        no_bulge: hairpin_variant_from_subopt(thermo_core::thermo::hairpin_thermo_no_bulge_subopt(seq, SUBOPT_COUNT, sodium_m, magnesium_m, 2)),
+        with_bulge: hairpin_variant_from_subopt(thermo_core::thermo::hairpin_thermo_subopt_in(ps, seq, SUBOPT_COUNT, sodium_m, magnesium_m, 2)),
+        no_bulge: hairpin_variant_from_subopt(thermo_core::thermo::hairpin_thermo_no_bulge_subopt_in(ps, seq, SUBOPT_COUNT, sodium_m, magnesium_m, 2)),
     };
     let homodimer = DualStructure {
-        with_bulge: dimer_variant_from_subopt(thermo_core::thermo::dimer_thermo_subopt(seq, None, SUBOPT_COUNT, sodium_m, magnesium_m, strand_conc_m, 0)),
-        no_bulge: dimer_variant_from_subopt(thermo_core::thermo::dimer_thermo_no_bulge_subopt(seq, None, SUBOPT_COUNT, sodium_m, magnesium_m, strand_conc_m, 0)),
+        with_bulge: dimer_variant_from_subopt(thermo_core::thermo::dimer_thermo_subopt_in(ps, seq, None, SUBOPT_COUNT, sodium_m, magnesium_m, strand_conc_m, 0)),
+        no_bulge: dimer_variant_from_subopt(thermo_core::thermo::dimer_thermo_no_bulge_subopt_in(ps, seq, None, SUBOPT_COUNT, sodium_m, magnesium_m, strand_conc_m, 0)),
     };
     let heterodimer = seq2.map(|partner| DualStructure {
-        with_bulge: dimer_variant_from_subopt(thermo_core::thermo::dimer_thermo_subopt(seq, Some(partner), SUBOPT_COUNT, sodium_m, magnesium_m, strand_conc_m, 0)),
-        no_bulge: dimer_variant_from_subopt(thermo_core::thermo::dimer_thermo_no_bulge_subopt(seq, Some(partner), SUBOPT_COUNT, sodium_m, magnesium_m, strand_conc_m, 0)),
+        with_bulge: dimer_variant_from_subopt(thermo_core::thermo::dimer_thermo_subopt_in(ps, seq, Some(partner), SUBOPT_COUNT, sodium_m, magnesium_m, strand_conc_m, 0)),
+        no_bulge: dimer_variant_from_subopt(thermo_core::thermo::dimer_thermo_no_bulge_subopt_in(ps, seq, Some(partner), SUBOPT_COUNT, sodium_m, magnesium_m, strand_conc_m, 0)),
     });
 
     FullStructureAnalysis { hairpin, homodimer, heterodimer }

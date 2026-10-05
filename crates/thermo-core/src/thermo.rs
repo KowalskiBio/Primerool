@@ -9,7 +9,7 @@
 //! two are internally consistent at the 310.15 K table reference.
 
 use crate::dimer::can_pair;
-use crate::mathews2004::Mode;
+use crate::mathews2004::{Mathews2004Params as Params, Mode, ParamSetId};
 use crate::mathews2004_fold::{dimer_mfe_candidates_mathews, hairpin_mfe_candidates_mathews, hairpin_mfe_mathews};
 use crate::structure_thermo::{dotbracket, sum_dimer_elements, sum_hairpin_elements};
 use crate::{salt, ThermoError};
@@ -63,11 +63,11 @@ fn salt_dg_for_stem(n_pairs: usize, sodium_m: f64, magnesium_m: f64) -> Result<f
 /// [`hairpin_thermo_subopt`] (ditto, ranked), and [`hairpin_thermo_no_bulge`]
 /// (a single contiguous stem, no internal loop at all) — every hairpin
 /// two-state calculation once a `pairs` list is already chosen.
-fn hairpin_thermo_from_pairs(bytes: &[u8], pairs: &[(usize, usize)], sodium_m: f64, magnesium_m: f64, dangles: u8) -> Result<HairpinThermo, ThermoError> {
+fn hairpin_thermo_from_pairs(p: &Params, bytes: &[u8], pairs: &[(usize, usize)], sodium_m: f64, magnesium_m: f64, dangles: u8) -> Result<HairpinThermo, ThermoError> {
     let n = pairs.len();
 
-    let dg37_1m = sum_hairpin_elements(Mode::Dg, bytes, pairs, dangles);
-    let dh = sum_hairpin_elements(Mode::Dh, bytes, pairs, dangles);
+    let dg37_1m = sum_hairpin_elements(p, Mode::Dg, bytes, pairs, dangles);
+    let dh = sum_hairpin_elements(p, Mode::Dh, bytes, pairs, dangles);
 
     let salt_dg = salt_dg_for_stem(n, sodium_m, magnesium_m)?;
     let dg37 = dg37_1m + salt_dg;
@@ -86,21 +86,23 @@ fn hairpin_thermo_from_pairs(bytes: &[u8], pairs: &[(usize, usize)], sodium_m: f
 /// internal loops are allowed if they let more of the stem pair up overall
 /// (the true global minimum). `dangles`: Oligool's own call always passes
 /// `2` for hairpins.
-pub fn hairpin_thermo(seq: &str, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Result<HairpinThermo, ThermoError> {
+pub fn hairpin_thermo_in(ps: ParamSetId, seq: &str, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Result<HairpinThermo, ThermoError> {
+    let p = ps.params();
     let seq = normalize(seq);
     let bytes = seq.as_bytes();
-    let (_, pairs) = hairpin_mfe_mathews(bytes, dangles).ok_or_else(|| ThermoError::InvalidPairing("sequence does not fold into a hairpin".into()))?;
-    hairpin_thermo_from_pairs(bytes, &pairs, sodium_m, magnesium_m, dangles)
+    let (_, pairs) = hairpin_mfe_mathews(p, bytes, dangles).ok_or_else(|| ThermoError::InvalidPairing("sequence does not fold into a hairpin".into()))?;
+    hairpin_thermo_from_pairs(p, bytes, &pairs, sodium_m, magnesium_m, dangles)
 }
 
 /// Top `n` distinct suboptimal hairpin folds (by closed-state DP energy),
 /// each scored with the same two-state model as [`hairpin_thermo`]. Reuses
 /// [`hairpin_mfe_candidates_mathews`]'s full ranked candidate list, the same
 /// way [`dimer_thermo_subopt`] reuses the dimer DP's.
-pub fn hairpin_thermo_subopt(seq: &str, n: usize, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Vec<HairpinThermo> {
+pub fn hairpin_thermo_subopt_in(ps: ParamSetId, seq: &str, n: usize, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Vec<HairpinThermo> {
+    let p = ps.params();
     let seq = normalize(seq);
     let bytes = seq.as_bytes();
-    let candidates = hairpin_mfe_candidates_mathews(bytes, dangles);
+    let candidates = hairpin_mfe_candidates_mathews(p, bytes, dangles);
 
     let mut results = Vec::new();
     let mut seen_outer = std::collections::HashSet::new();
@@ -112,7 +114,7 @@ pub fn hairpin_thermo_subopt(seq: &str, n: usize, sodium_m: f64, magnesium_m: f6
         if !seen_outer.insert(outer) {
             continue;
         }
-        if let Ok(ht) = hairpin_thermo_from_pairs(bytes, &pairs, sodium_m, magnesium_m, dangles) {
+        if let Ok(ht) = hairpin_thermo_from_pairs(p, bytes, &pairs, sodium_m, magnesium_m, dangles) {
             results.push(ht);
         }
     }
@@ -170,13 +172,14 @@ fn hairpin_no_bulge_candidates(seq: &[u8]) -> Vec<Vec<(usize, usize)>> {
 
 /// Best single contiguous (no-bulge) hairpin stem — see
 /// [`hairpin_no_bulge_candidates`]'s docs on what "contiguous" means here.
-pub fn hairpin_thermo_no_bulge(seq: &str, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Result<HairpinThermo, ThermoError> {
+pub fn hairpin_thermo_no_bulge_in(ps: ParamSetId, seq: &str, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Result<HairpinThermo, ThermoError> {
+    let p = ps.params();
     let seq = normalize(seq);
     let bytes = seq.as_bytes();
     let candidates = hairpin_no_bulge_candidates(bytes);
     let mut best: Option<HairpinThermo> = None;
     for pairs in candidates {
-        if let Ok(ht) = hairpin_thermo_from_pairs(bytes, &pairs, sodium_m, magnesium_m, dangles) {
+        if let Ok(ht) = hairpin_thermo_from_pairs(p, bytes, &pairs, sodium_m, magnesium_m, dangles) {
             if best.as_ref().map(|b| ht.dg37 < b.dg37).unwrap_or(true) {
                 best = Some(ht);
             }
@@ -189,10 +192,11 @@ pub fn hairpin_thermo_no_bulge(seq: &str, sodium_m: f64, magnesium_m: f64, dangl
 /// counterpart of [`hairpin_thermo_subopt`], for population-fraction
 /// purposes over *this* structural model specifically (bulge-allowing and
 /// no-bulge ensembles are scored and reported separately, never mixed).
-pub fn hairpin_thermo_no_bulge_subopt(seq: &str, n: usize, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Vec<HairpinThermo> {
+pub fn hairpin_thermo_no_bulge_subopt_in(ps: ParamSetId, seq: &str, n: usize, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Vec<HairpinThermo> {
+    let p = ps.params();
     let seq = normalize(seq);
     let bytes = seq.as_bytes();
-    let mut results: Vec<HairpinThermo> = hairpin_no_bulge_candidates(bytes).into_iter().filter_map(|pairs| hairpin_thermo_from_pairs(bytes, &pairs, sodium_m, magnesium_m, dangles).ok()).collect();
+    let mut results: Vec<HairpinThermo> = hairpin_no_bulge_candidates(bytes).into_iter().filter_map(|pairs| hairpin_thermo_from_pairs(p, bytes, &pairs, sodium_m, magnesium_m, dangles).ok()).collect();
     results.sort_by(|a, b| a.dg37.partial_cmp(&b.dg37).unwrap());
     results.truncate(n);
     results
@@ -210,6 +214,7 @@ pub struct DimerThermo {
 }
 
 fn dimer_thermo_from_pairs(
+    p: &Params,
     seq1: &str,
     seq2: &str,
     pairs: Vec<(usize, usize)>,
@@ -224,11 +229,11 @@ fn dimer_thermo_from_pairs(
     let bytes = concat.as_bytes();
     let n = pairs.len();
 
-    let dg37_1m = sum_dimer_elements(Mode::Dg, bytes, n1, &pairs, dangles) + DUPLEX_INIT_DG37;
+    let dg37_1m = sum_dimer_elements(p, Mode::Dg, bytes, n1, &pairs, dangles) + DUPLEX_INIT_DG37;
     // The ΔH walk always uses dangles=0 for dimers (dangle tables are ΔG₃₇-only
     // — see `structure_thermo::sum_dimer_elements`'s docs and the fork's
     // `structure_enthalpy_dimer`, which hardcodes `dangles=0`).
-    let dh = sum_dimer_elements(Mode::Dh, bytes, n1, &pairs, 0) + DUPLEX_INIT_DH;
+    let dh = sum_dimer_elements(p, Mode::Dh, bytes, n1, &pairs, 0) + DUPLEX_INIT_DH;
 
     let salt_dg = salt_dg_for_stem(n, sodium_m, magnesium_m)?;
     let dg37 = dg37_1m + salt_dg;
@@ -255,11 +260,12 @@ fn dimer_thermo_from_pairs(
 /// `seq1` and `seq2` (self-dimer if `seq2` is `None`). `strand_conc_m`:
 /// total strand concentration in molar. `dangles`: Oligool's own call uses
 /// the default `0` for dimers.
-pub fn dimer_thermo(seq1: &str, seq2: Option<&str>, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Result<DimerThermo, ThermoError> {
+pub fn dimer_thermo_in(ps: ParamSetId, seq1: &str, seq2: Option<&str>, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Result<DimerThermo, ThermoError> {
+    let p = ps.params();
     let s1 = normalize(seq1);
     let s2 = seq2.map(normalize).unwrap_or_else(|| s1.clone());
 
-    let candidates = dimer_mfe_candidates_mathews(s1.as_bytes(), s2.as_bytes());
+    let candidates = dimer_mfe_candidates_mathews(p, s1.as_bytes(), s2.as_bytes());
     let (_, pairs) = candidates.first().ok_or_else(|| ThermoError::InvalidPairing("no dimer structure found".into()))?;
     if pairs.len() < 2 {
         return Err(ThermoError::InvalidPairing("dimer helix must contain at least two inter-strand base pairs".into()));
@@ -267,18 +273,19 @@ pub fn dimer_thermo(seq1: &str, seq2: Option<&str>, sodium_m: f64, magnesium_m: 
     let mut pairs = pairs.clone();
     pairs.sort();
 
-    dimer_thermo_from_pairs(&s1, &s2, pairs, sodium_m, magnesium_m, strand_conc_m, dangles)
+    dimer_thermo_from_pairs(p, &s1, &s2, pairs, sodium_m, magnesium_m, strand_conc_m, dangles)
 }
 
 /// Top `n` distinct suboptimal dimer alignments (by closed-state DP energy),
 /// each scored with the same two-state model as [`dimer_thermo`]. Reuses
 /// [`dimer::dimer_mfe_candidates_dna`]'s full ranked candidate list — no
 /// separate enumeration is needed, unlike primer3, which has no subopt path.
-pub fn dimer_thermo_subopt(seq1: &str, seq2: Option<&str>, n: usize, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Vec<DimerThermo> {
+pub fn dimer_thermo_subopt_in(ps: ParamSetId, seq1: &str, seq2: Option<&str>, n: usize, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Vec<DimerThermo> {
+    let p = ps.params();
     let s1 = normalize(seq1);
     let s2 = seq2.map(normalize).unwrap_or_else(|| s1.clone());
 
-    let candidates = dimer_mfe_candidates_mathews(s1.as_bytes(), s2.as_bytes());
+    let candidates = dimer_mfe_candidates_mathews(p, s1.as_bytes(), s2.as_bytes());
 
     let mut results = Vec::new();
     let mut seen_outer = std::collections::HashSet::new();
@@ -295,7 +302,7 @@ pub fn dimer_thermo_subopt(seq1: &str, seq2: Option<&str>, n: usize, sodium_m: f
         }
         let mut sorted_pairs = pairs;
         sorted_pairs.sort();
-        if let Ok(dt) = dimer_thermo_from_pairs(&s1, &s2, sorted_pairs, sodium_m, magnesium_m, strand_conc_m, dangles) {
+        if let Ok(dt) = dimer_thermo_from_pairs(p, &s1, &s2, sorted_pairs, sodium_m, magnesium_m, strand_conc_m, dangles) {
             results.push(dt);
         }
     }
@@ -346,14 +353,15 @@ fn dimer_no_bulge_candidates(seq1: &[u8], seq2: &[u8]) -> Vec<Vec<(usize, usize)
 
 /// Best single contiguous (no-bulge) inter-strand helix — see
 /// [`dimer_no_bulge_candidates`]'s docs on what "contiguous" means here.
-pub fn dimer_thermo_no_bulge(seq1: &str, seq2: Option<&str>, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Result<DimerThermo, ThermoError> {
+pub fn dimer_thermo_no_bulge_in(ps: ParamSetId, seq1: &str, seq2: Option<&str>, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Result<DimerThermo, ThermoError> {
+    let p = ps.params();
     let s1 = normalize(seq1);
     let s2 = seq2.map(normalize).unwrap_or_else(|| s1.clone());
     let candidates = dimer_no_bulge_candidates(s1.as_bytes(), s2.as_bytes());
 
     let mut best: Option<DimerThermo> = None;
     for pairs in candidates {
-        if let Ok(dt) = dimer_thermo_from_pairs(&s1, &s2, pairs, sodium_m, magnesium_m, strand_conc_m, dangles) {
+        if let Ok(dt) = dimer_thermo_from_pairs(p, &s1, &s2, pairs, sodium_m, magnesium_m, strand_conc_m, dangles) {
             if best.as_ref().map(|b| dt.dg37 < b.dg37).unwrap_or(true) {
                 best = Some(dt);
             }
@@ -366,16 +374,65 @@ pub fn dimer_thermo_no_bulge(seq1: &str, seq2: Option<&str>, sodium_m: f64, magn
 /// counterpart of [`dimer_thermo_subopt`], for population-fraction purposes
 /// over *this* structural model specifically (bulge-allowing and no-bulge
 /// ensembles are scored and reported separately, never mixed).
-pub fn dimer_thermo_no_bulge_subopt(seq1: &str, seq2: Option<&str>, n: usize, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Vec<DimerThermo> {
+pub fn dimer_thermo_no_bulge_subopt_in(ps: ParamSetId, seq1: &str, seq2: Option<&str>, n: usize, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Vec<DimerThermo> {
+    let p = ps.params();
     let s1 = normalize(seq1);
     let s2 = seq2.map(normalize).unwrap_or_else(|| s1.clone());
     let mut results: Vec<DimerThermo> = dimer_no_bulge_candidates(s1.as_bytes(), s2.as_bytes())
         .into_iter()
-        .filter_map(|pairs| dimer_thermo_from_pairs(&s1, &s2, pairs, sodium_m, magnesium_m, strand_conc_m, dangles).ok())
+        .filter_map(|pairs| dimer_thermo_from_pairs(p, &s1, &s2, pairs, sodium_m, magnesium_m, strand_conc_m, dangles).ok())
         .collect();
     results.sort_by(|a, b| a.dg37.partial_cmp(&b.dg37).unwrap());
     results.truncate(n);
     results
+}
+
+/// [`hairpin_thermo_in`] under the Mathews 2004 parameter set (Oligool's and
+/// Primerool's default).
+pub fn hairpin_thermo(seq: &str, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Result<HairpinThermo, ThermoError> {
+    hairpin_thermo_in(ParamSetId::Mathews2004, seq, sodium_m, magnesium_m, dangles)
+}
+
+/// [`hairpin_thermo_subopt_in`] under the Mathews 2004 parameter set (Oligool's and
+/// Primerool's default).
+pub fn hairpin_thermo_subopt(seq: &str, n: usize, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Vec<HairpinThermo> {
+    hairpin_thermo_subopt_in(ParamSetId::Mathews2004, seq, n, sodium_m, magnesium_m, dangles)
+}
+
+/// [`hairpin_thermo_no_bulge_in`] under the Mathews 2004 parameter set (Oligool's and
+/// Primerool's default).
+pub fn hairpin_thermo_no_bulge(seq: &str, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Result<HairpinThermo, ThermoError> {
+    hairpin_thermo_no_bulge_in(ParamSetId::Mathews2004, seq, sodium_m, magnesium_m, dangles)
+}
+
+/// [`hairpin_thermo_no_bulge_subopt_in`] under the Mathews 2004 parameter set (Oligool's and
+/// Primerool's default).
+pub fn hairpin_thermo_no_bulge_subopt(seq: &str, n: usize, sodium_m: f64, magnesium_m: f64, dangles: u8) -> Vec<HairpinThermo> {
+    hairpin_thermo_no_bulge_subopt_in(ParamSetId::Mathews2004, seq, n, sodium_m, magnesium_m, dangles)
+}
+
+/// [`dimer_thermo_in`] under the Mathews 2004 parameter set (Oligool's and
+/// Primerool's default).
+pub fn dimer_thermo(seq1: &str, seq2: Option<&str>, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Result<DimerThermo, ThermoError> {
+    dimer_thermo_in(ParamSetId::Mathews2004, seq1, seq2, sodium_m, magnesium_m, strand_conc_m, dangles)
+}
+
+/// [`dimer_thermo_subopt_in`] under the Mathews 2004 parameter set (Oligool's and
+/// Primerool's default).
+pub fn dimer_thermo_subopt(seq1: &str, seq2: Option<&str>, n: usize, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Vec<DimerThermo> {
+    dimer_thermo_subopt_in(ParamSetId::Mathews2004, seq1, seq2, n, sodium_m, magnesium_m, strand_conc_m, dangles)
+}
+
+/// [`dimer_thermo_no_bulge_in`] under the Mathews 2004 parameter set (Oligool's and
+/// Primerool's default).
+pub fn dimer_thermo_no_bulge(seq1: &str, seq2: Option<&str>, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Result<DimerThermo, ThermoError> {
+    dimer_thermo_no_bulge_in(ParamSetId::Mathews2004, seq1, seq2, sodium_m, magnesium_m, strand_conc_m, dangles)
+}
+
+/// [`dimer_thermo_no_bulge_subopt_in`] under the Mathews 2004 parameter set (Oligool's and
+/// Primerool's default).
+pub fn dimer_thermo_no_bulge_subopt(seq1: &str, seq2: Option<&str>, n: usize, sodium_m: f64, magnesium_m: f64, strand_conc_m: f64, dangles: u8) -> Vec<DimerThermo> {
+    dimer_thermo_no_bulge_subopt_in(ParamSetId::Mathews2004, seq1, seq2, n, sodium_m, magnesium_m, strand_conc_m, dangles)
 }
 
 #[cfg(test)]

@@ -307,6 +307,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [tmMax, setTmMax] = useSessionState('snpBatch.tmMax', '');
   const [gcMin, setGcMin] = useSessionState('snpBatch.gcMin', '');
   const [gcMax, setGcMax] = useSessionState('snpBatch.gcMax', '');
+  const [showAdvanced, setShowAdvanced] = useSessionState('snpBatch.showAdvanced', false);
   const [results, setResults] = useSessionState<Record<string, BatchResult>>('snpBatch.results', {}, dropUnfinished((r) => r.status === 'done' || r.status === 'error'));
   const [running, setRunning] = useState(false);
   const [openGene, setOpenGene] = useState<string | null>(null);
@@ -434,6 +435,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
     if (gc_min !== undefined && gc_max !== undefined && gc_min > gc_max) return 'GC min is above GC max.';
     return null;
   })();
+  const rangeSet = parsedRange !== null && parsedRange !== 'invalid';
   const advancedCount = [tmMin, tmOpt, tmMax, gcMin, gcMax].filter((v) => v.trim()).length;
 
   async function runBatch() {
@@ -873,87 +875,87 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
 
         {blocks && blocks.length > 0 && (
           <>
-            <div className="mb-3 flex flex-wrap items-end gap-4 border-t border-line pt-3">
-              <Field
-                label="Amplicon size (bp)"
-                hint={
-                  parsedRange && parsedRange !== 'invalid'
-                    ? `Primers are placed wherever around each SNP fits ${formatRange(parsedRange)} best.`
-                    : 'A range (130-150) or an exact size (150); blank = no size target.'
-                }
-              >
+            <div className="mb-1.5 flex flex-wrap items-end gap-3 border-t border-line pt-3">
+              <Field label="Amplicon size (bp)">
                 <TextInput
                   inputMode="numeric"
-                  placeholder="e.g. 130-150 or 150"
+                  placeholder="130-150 or 150"
                   value={ampliconSize}
                   onChange={(e) => setAmpliconSize(e.target.value)}
                   aria-invalid={parsedRange === 'invalid'}
-                  className="w-56 tabular-nums"
+                  title="A range (130-150) or an exact size (150); blank = no size target"
+                  className="w-40 tabular-nums"
                 />
               </Field>
-              <Field label="Merge SNPs within (bp on the same gene; 0 = never)">
+              <Field label="Merge SNPs within (bp)">
                 <TextInput
                   type="number"
                   min={0}
-                  placeholder="e.g. 20"
+                  placeholder="20"
                   value={mergeDistance}
                   onChange={(e) => setMergeDistance(e.target.value)}
-                  className="w-56 tabular-nums"
+                  title="SNPs on the same gene this close share one primer pair; 0 = never merge"
+                  className="w-32 tabular-nums"
                 />
               </Field>
+              <Button variant="primary" disabled={running || settingsError !== null} onClick={() => void runBatch()}>
+                {running ? `Designing… (${doneCount + errorCount}/${blocks.length})` : `Design primers for all ${blocks.length} SNPs`}
+              </Button>
+              {Object.keys(results).length > 0 && !running && <Button onClick={exportCsv}>Export CSV</Button>}
+              <Button variant="ghost" aria-expanded={showAdvanced} onClick={() => setShowAdvanced((v) => !v)}>
+                Advanced {showAdvanced ? '▴' : '▾'}
+                {advancedCount > 0 && <span className="text-accent">({advancedCount})</span>}
+              </Button>
             </div>
+            <p className="mb-3 text-xs text-ink-faint">
+              {parsedRange && parsedRange !== 'invalid'
+                ? `Primers are placed wherever around each SNP fits ${formatRange(parsedRange)} best.`
+                : 'Amplicon size: a range (130-150) or an exact size (150); blank = no size target. Merge: 0 = never.'}
+            </p>
 
-            <details className="mb-3">
-              <summary className="cursor-pointer select-none text-xs text-ink-muted">
-                Advanced settings{advancedCount > 0 && <span className="text-accent"> ({advancedCount} set)</span>}
-              </summary>
-              <div className="mt-2 flex flex-wrap items-start gap-4">
-                <Field label="Primer Tm (°C)" hint="Min / optimum / max; blank = 52 / 62 / 68.">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-20"><TextInput type="number" step="0.5" placeholder="52" aria-label="Tm min" value={tmMin} onChange={(e) => setTmMin(e.target.value)} className="tabular-nums" /></div>
-                    <div className="w-20"><TextInput type="number" step="0.5" placeholder="62" aria-label="Tm optimum" value={tmOpt} onChange={(e) => setTmOpt(e.target.value)} className="tabular-nums" /></div>
-                    <div className="w-20"><TextInput type="number" step="0.5" placeholder="68" aria-label="Tm max" value={tmMax} onChange={(e) => setTmMax(e.target.value)} className="tabular-nums" /></div>
-                  </div>
-                </Field>
-                <Field label="Primer GC content (%)" hint="Min / max; the midpoint is preferred. Blank = 20 / 80.">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-20"><TextInput type="number" min={0} max={100} placeholder="20" aria-label="GC min" value={gcMin} onChange={(e) => setGcMin(e.target.value)} className="tabular-nums" /></div>
-                    <span className="text-ink-faint">–</span>
-                    <div className="w-20"><TextInput type="number" min={0} max={100} placeholder="80" aria-label="GC max" value={gcMax} onChange={(e) => setGcMax(e.target.value)} className="tabular-nums" /></div>
-                  </div>
-                </Field>
-                <Field
-                  label="Primer search window (bp from target)"
-                  hint={parsedRange && parsedRange !== 'invalid' ? 'Ignored while an amplicon size is set - the size decides the window.' : 'Blank = full 200 bp flank.'}
-                >
-                  <TextInput
-                    type="number"
-                    min={1}
-                    placeholder="e.g. 130"
-                    value={flankWindow}
-                    onChange={(e) => setFlankWindow(e.target.value)}
-                    disabled={!!parsedRange && parsedRange !== 'invalid'}
-                    className="w-40 tabular-nums disabled:opacity-50"
-                  />
-                </Field>
-                {(tmMin || tmOpt || tmMax || gcMin || gcMax) && (
-                  <Button size="sm" className="self-center" onClick={() => { setTmMin(''); setTmOpt(''); setTmMax(''); setGcMin(''); setGcMax(''); }}>
-                    Reset Tm/GC
-                  </Button>
-                )}
+            {showAdvanced && (
+              <div className="mb-3 rounded-md border border-line bg-surface p-3">
+                <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+                  <Field label="Primer Tm min / opt / max (°C)">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-20"><TextInput type="number" step="0.5" placeholder="52" aria-label="Tm min" value={tmMin} onChange={(e) => setTmMin(e.target.value)} className="tabular-nums" /></div>
+                      <div className="w-20"><TextInput type="number" step="0.5" placeholder="62" aria-label="Tm optimum" value={tmOpt} onChange={(e) => setTmOpt(e.target.value)} className="tabular-nums" /></div>
+                      <div className="w-20"><TextInput type="number" step="0.5" placeholder="68" aria-label="Tm max" value={tmMax} onChange={(e) => setTmMax(e.target.value)} className="tabular-nums" /></div>
+                    </div>
+                  </Field>
+                  <Field label="Primer GC (%)">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-20"><TextInput type="number" min={0} max={100} placeholder="20" aria-label="GC min" value={gcMin} onChange={(e) => setGcMin(e.target.value)} className="tabular-nums" /></div>
+                      <span className="text-ink-faint">–</span>
+                      <div className="w-20"><TextInput type="number" min={0} max={100} placeholder="80" aria-label="GC max" value={gcMax} onChange={(e) => setGcMax(e.target.value)} className="tabular-nums" /></div>
+                    </div>
+                  </Field>
+                  <Field label="Search window (bp)">
+                    <TextInput
+                      type="number"
+                      min={1}
+                      placeholder="200"
+                      value={flankWindow}
+                      onChange={(e) => setFlankWindow(e.target.value)}
+                      disabled={rangeSet}
+                      title={rangeSet ? 'Ignored while an amplicon size is set - the size decides the window' : 'How far from the SNP primers may sit; blank = full 200 bp flank'}
+                      className="w-28 tabular-nums disabled:opacity-50"
+                    />
+                  </Field>
+                  {(tmMin || tmOpt || tmMax || gcMin || gcMax) && (
+                    <Button variant="ghost" onClick={() => { setTmMin(''); setTmOpt(''); setTmMax(''); setGcMin(''); setGcMax(''); }}>
+                      Reset Tm/GC
+                    </Button>
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-ink-faint">
+                  Blank = defaults: Tm 52 / 62 / 68 °C, GC 20–80 % (the midpoint is preferred), full 200 bp flank.
+                  {rangeSet && ' The search window is ignored while an amplicon size is set.'}
+                </p>
               </div>
-            </details>
+            )}
 
             {settingsError && <div role="alert" className="mb-3 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-xs font-medium text-danger">{settingsError}</div>}
-
-            <div className="mb-3 flex flex-wrap items-center gap-3">
-              <Button variant="primary" disabled={running || settingsError !== null} onClick={() => void runBatch()}>
-                {running ? `Designing… (${doneCount + errorCount}/${blocks.length})` : `Design flanking primers for all ${blocks.length} SNPs`}
-              </Button>
-              {Object.keys(results).length > 0 && !running && (
-                <Button onClick={exportCsv}>Export CSV</Button>
-              )}
-            </div>
 
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full text-left text-xs text-ink-muted">

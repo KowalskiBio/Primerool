@@ -78,24 +78,29 @@ pub async fn submit_blast(client: &reqwest::Client, sequence: &str, database: &s
 /// E<10 cutoff. Hence standard blastn (word 11), `EXPECT=1000` and no
 /// low-complexity filtering — verified against live NCBI with a 20nt
 /// primer that returns 0 hits the default way and 10 this way.
-pub async fn submit_primer_blast(client: &reqwest::Client, sequence: &str, database: &str, hitlist_size: u32, api_key: Option<&str>) -> Result<SubmitResult, BlastError> {
+///
+/// `organism` restricts the search to one organism via ENTREZ_QUERY
+/// (e.g. "Homo sapiens [organism]"), so a specificity check reports hits
+/// in the target organism only; `None` searches everything.
+pub async fn submit_primer_blast(client: &reqwest::Client, sequence: &str, database: &str, hitlist_size: u32, organism: Option<&str>, api_key: Option<&str>) -> Result<SubmitResult, BlastError> {
     let hitlist_size_s = hitlist_size.to_string();
-    let params = with_api_key(
-        vec![
-            ("CMD", "Put"),
-            ("PROGRAM", "blastn"),
-            ("DATABASE", database),
-            ("QUERY", sequence),
-            ("HITLIST_SIZE", &hitlist_size_s),
-            ("EXPECT", "1000"),
-            ("FILTER", "off"),
-            ("FORMAT_TYPE", "XML"),
-            ("MEGABLAST", "off"),
-            ("tool", "primeroonline"),
-        ],
-        api_key,
-    );
-    submit_params(client, params).await
+    let entrez_query = organism.map(|o| format!("{o} [organism]"));
+    let mut params = vec![
+        ("CMD", "Put"),
+        ("PROGRAM", "blastn"),
+        ("DATABASE", database),
+        ("QUERY", sequence),
+        ("HITLIST_SIZE", &hitlist_size_s),
+        ("EXPECT", "1000"),
+        ("FILTER", "off"),
+        ("FORMAT_TYPE", "XML"),
+        ("MEGABLAST", "off"),
+        ("tool", "primeroonline"),
+    ];
+    if let Some(query) = &entrez_query {
+        params.push(("ENTREZ_QUERY", query));
+    }
+    submit_params(client, with_api_key(params, api_key)).await
 }
 
 async fn submit_params(client: &reqwest::Client, params: Vec<(&str, &str)>) -> Result<SubmitResult, BlastError> {
@@ -169,18 +174,18 @@ pub async fn run_blast(client: &reqwest::Client, sequence: &str, api_key: Option
 /// reports one `<Iteration>` per query, so N primers cost one
 /// submit/poll/fetch round-trip (~30-180s total) instead of one per
 /// primer. Uses `submit_primer_blast`'s short-oligo parameters (see its
-/// doc for why megablast defaults would return nothing for a primer).
-/// Each query's hits come back keyed by its FASTA header (`id`). Callers
-/// must supply ids that are unique and safe as a FASTA header (no
-/// whitespace, `>`, or `|` — the last because NCBI reinterprets
-/// pipe-separated deflines); `/blast_batch` enforces that.
-pub async fn run_blast_batch(client: &reqwest::Client, queries: &[(String, String)], api_key: Option<&str>) -> Result<Vec<parse::QueryBlastResults>, BlastError> {
+/// doc for why megablast defaults would return nothing for a primer) and
+/// its `organism` restriction. Each query's hits come back keyed by its
+/// FASTA header (`id`). Callers must supply ids that are unique and safe
+/// as a FASTA header (no whitespace, `>`, or `|` — the last because NCBI
+/// reinterprets pipe-separated deflines); `/blast_batch` enforces that.
+pub async fn run_blast_batch(client: &reqwest::Client, queries: &[(String, String)], organism: Option<&str>, api_key: Option<&str>) -> Result<Vec<parse::QueryBlastResults>, BlastError> {
     let fasta = queries
         .iter()
         .map(|(id, sequence)| format!(">{id}\n{sequence}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let submitted = submit_primer_blast(client, &fasta, "nt", 10, api_key).await?;
+    let submitted = submit_primer_blast(client, &fasta, "nt", 10, organism, api_key).await?;
     poll_blast(client, &submitted.rid, MAX_WAIT, api_key).await?;
     let xml = get_blast_results(client, &submitted.rid, api_key).await?;
     parse::parse_blast_results_multi(&xml)

@@ -246,7 +246,20 @@ pub static BINOMIAL_TO_ENSEMBL: &[(&str, &str)] = &[
     ("leishmania major", "leishmania_major"),
     ("toxoplasma gondii", "toxoplasma_gondii_me49"),
     ("dictyostelium discoideum", "dictyostelium_discoideum"),
+    // Viruses
+    ("sars-cov-2", "sars_cov_2"),
 ];
+
+/// Reverse of `BINOMIAL_TO_ENSEMBL`: the NCBI organism name to restrict a
+/// BLAST search to, given one of the app's Ensembl species slugs. `None`
+/// for a slug the table doesn't know (callers then treat the input as an
+/// already-spelled-out organism name).
+pub fn ensembl_slug_to_organism(slug: &str) -> Option<String> {
+    BINOMIAL_TO_ENSEMBL
+        .iter()
+        .find(|(_, s)| *s == slug)
+        .map(|(name, _)| name.to_string())
+}
 
 #[cfg(test)]
 mod tests {

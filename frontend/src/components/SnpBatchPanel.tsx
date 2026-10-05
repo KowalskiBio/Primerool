@@ -7,6 +7,7 @@ import { getSequence } from '../api/sequence';
 import { getBlastBatchJob, startBlastBatch, type BlastHit } from '../api/blast';
 import { ApiError } from '../api/client';
 import SnpAmpliconMap, { type PlacedAmplicon } from './SnpAmpliconMap';
+import PrimerSequence from './PrimerSequence';
 import SnpGeneMapModal from './SnpGeneMapModal';
 import PrimerStructureModal from './PrimerStructureModal';
 import AmpliconDetailModal from './AmpliconDetailModal';
@@ -1196,7 +1197,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                         <td className="break-all px-2 py-2 font-mono">
                           {r?.fwd ? (
                             <>
-                              {r.fwd.sequence} ({fmt(r.fwd.tm)}°C)
+                              <PrimerSequence sequence={r.fwd.sequence} label="Forward primer" /> ({fmt(r.fwd.tm)}°C)
                               {r.fwd.manual && (
                                 <span title="Manually repositioned by dragging this amplicon's start on the map - Tm recalculated for this position" className="ml-1 text-accent">
                                   ★
@@ -1210,7 +1211,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                         <td className="break-all px-2 py-2 font-mono">
                           {r?.rev ? (
                             <>
-                              {r.rev.sequence} ({fmt(r.rev.tm)}°C)
+                              <PrimerSequence sequence={r.rev.sequence} label="Reverse primer" /> ({fmt(r.rev.tm)}°C)
                               {r.rev.manual && (
                                 <span title="Manually repositioned by dragging this amplicon's end on the map - Tm recalculated for this position" className="ml-1 text-accent">
                                   ★

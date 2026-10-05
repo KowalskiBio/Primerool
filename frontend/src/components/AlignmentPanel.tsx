@@ -9,7 +9,7 @@ import { parseMultiFasta } from '../utils/fasta';
 import AlignmentView from './AlignmentView';
 import { cleanDNA } from '../utils/dna';
 import ResultsTable from './ResultsTable';
-import CopyableSequence from './CopyableSequence';
+import PrimerSequence from './PrimerSequence';
 import Button from './ui/Button';
 import Checkbox from './ui/Checkbox';
 import Field from './ui/Field';
@@ -269,7 +269,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
                 rows={candidates}
                 keyOf={(c, i) => `${i}-${c.sequence}`}
                 columns={[
-                  { header: "Sequence (5'→3')", render: (c) => <CopyableSequence sequence={c.sequence} label="primer" />, className: 'font-mono text-ink' },
+                  { header: "Sequence (5'→3')", render: (c) => <PrimerSequence sequence={c.sequence} />, className: 'font-mono text-ink' },
                   { header: 'Start', render: (c) => c.start },
                   { header: 'End', render: (c) => c.end },
                   { header: 'Tm', render: (c) => fmt(c.tm) },
@@ -287,8 +287,8 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
                 rows={pairs}
                 keyOf={(p, i) => `${i}-${p.left.sequence}`}
                 columns={[
-                  { header: 'Left', render: (p) => <CopyableSequence sequence={p.left.sequence} label="forward primer" />, className: 'font-mono text-ink' },
-                  { header: 'Right', render: (p) => <CopyableSequence sequence={p.right.sequence} label="reverse primer" />, className: 'font-mono text-ink' },
+                  { header: 'Left', render: (p) => <PrimerSequence sequence={p.left.sequence} label="Forward primer" />, className: 'font-mono text-ink' },
+                  { header: 'Right', render: (p) => <PrimerSequence sequence={p.right.sequence} label="Reverse primer" />, className: 'font-mono text-ink' },
                   { header: 'Product', render: (p) => `${p.product_size} bp` },
                   { header: 'Left Tm', render: (p) => fmt(p.left.tm) },
                   { header: 'Right Tm', render: (p) => fmt(p.right.tm) },

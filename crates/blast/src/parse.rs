@@ -33,6 +33,18 @@ pub struct BlastHit {
     /// so it is omitted from serialization on real BLAST hits.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direct: Option<bool>,
+    /// The best HSP's aligned query (`Hsp_qseq`), target (`Hsp_hseq`, in
+    /// the query's orientation even on a minus-strand hit) and match line
+    /// (`Hsp_midline`: `|` identity, space mismatch) - gaps are `-`. What
+    /// lets a primer's hit be judged by *where* it mismatches (a 3'-end
+    /// mismatch blocks extension), not just its overall identity. Absent on
+    /// synthetic direct-accession hits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qseq: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hseq: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub midline: Option<String>,
 }
 
 fn find_child<'a, 'input>(node: Node<'a, 'input>, tag: &str) -> Option<Node<'a, 'input>> {
@@ -141,6 +153,11 @@ fn parse_hits(hits_node: Node, query_len: i64) -> Vec<BlastHit> {
             hit_to: get_text("Hsp_hit-to").and_then(|s| s.parse().ok()).unwrap_or(0),
             query_len,
             direct: None,
+            qseq: get_text("Hsp_qseq"),
+            hseq: get_text("Hsp_hseq"),
+            // Not `get_text`: a midline can start or end with a mismatch,
+            // i.e. a space, and must keep it to stay column-aligned.
+            midline: find_child(best_hsp, "Hsp_midline").map(|n| n.text().unwrap_or("").to_string()),
         });
     }
 
@@ -484,6 +501,23 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].hits, Vec::new());
         assert_eq!(results[1].hits, Vec::new());
+    }
+
+    #[test]
+    fn keeps_hsp_alignment_strings_with_edge_spaces() {
+        // A midline starting and ending in a mismatch (a space) must keep
+        // both spaces, or it falls out of column with qseq/hseq.
+        let xml = r#"<BlastOutput><BlastOutput_query-len>8</BlastOutput_query-len><BlastOutput_iterations><Iteration><Iteration_hits>
+<Hit><Hit_def>Homo sapiens chromosome 1</Hit_def><Hit_accession>NC_000001</Hit_accession><Hit_hsps><Hsp>
+<Hsp_identity>6</Hsp_identity><Hsp_align-len>8</Hsp_align-len><Hsp_query-from>1</Hsp_query-from><Hsp_query-to>8</Hsp_query-to>
+<Hsp_hit-from>108</Hsp_hit-from><Hsp_hit-to>101</Hsp_hit-to>
+<Hsp_qseq>ACGTACGT</Hsp_qseq><Hsp_hseq>TCGTACGA</Hsp_hseq><Hsp_midline> |||||| </Hsp_midline>
+</Hsp></Hit_hsps></Hit>
+</Iteration_hits></Iteration></BlastOutput_iterations></BlastOutput>"#;
+        let hits = parse_blast_results(xml).unwrap();
+        assert_eq!(hits[0].qseq.as_deref(), Some("ACGTACGT"));
+        assert_eq!(hits[0].hseq.as_deref(), Some("TCGTACGA"));
+        assert_eq!(hits[0].midline.as_deref(), Some(" |||||| "));
     }
 
     #[test]

@@ -104,6 +104,9 @@ pub async fn blast_sequence(State(state): State<AppState>, Json(req): Json<Blast
                     hit_to: 0,
                     query_len: 0,
                     direct: Some(true),
+                    qseq: None,
+                    hseq: None,
+                    midline: None,
                 };
                 return Ok(Json(BlastSequenceResponse { hits: vec![BlastHitJson { hit, ensembl_species }] }));
             }

@@ -197,6 +197,12 @@ pub async fn run_blast(client: &reqwest::Client, sequence: &str, api_key: Option
     parse::parse_blast_results(&xml)
 }
 
+/// Hits kept per primer query. A specificity check is about the hits
+/// *after* the intended target: with only 10, a primer's own gene (its
+/// transcripts, clones and assemblies in `nt`) fills the list before any
+/// secondary target can show up.
+const BATCH_HITLIST_SIZE: u32 = 50;
+
 /// Full BLAST pipeline for a whole batch of short-oligo (primer) queries
 /// in ONE submission: NCBI's URL API accepts a multi-FASTA QUERY and
 /// reports one `<Iteration>` per query, so N primers cost one
@@ -213,7 +219,7 @@ pub async fn run_blast_batch(client: &reqwest::Client, queries: &[(String, Strin
         .map(|(id, sequence)| format!(">{id}\n{sequence}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let submitted = submit_primer_blast(client, &fasta, "nt", 10, organism, api_key).await?;
+    let submitted = submit_primer_blast(client, &fasta, "nt", BATCH_HITLIST_SIZE, organism, api_key).await?;
     poll_blast(client, &submitted.rid, submitted.rtoe, MAX_WAIT_BATCH, api_key).await?;
     let xml = get_blast_results(client, &submitted.rid, api_key).await?;
     parse::parse_blast_results_multi(&xml)

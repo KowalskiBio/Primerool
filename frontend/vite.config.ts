@@ -19,6 +19,7 @@ export default defineConfig({
       '/search_gene': 'http://127.0.0.1:5050',
       '/get_sequence': 'http://127.0.0.1:5050',
       '/blast_sequence': 'http://127.0.0.1:5050',
+      '/blast_batch': 'http://127.0.0.1:5050',
       '/design_primers': 'http://127.0.0.1:5050',
       '/design_from_sequence': 'http://127.0.0.1:5050',
       '/design_probe': 'http://127.0.0.1:5050',

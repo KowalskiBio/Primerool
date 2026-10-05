@@ -110,7 +110,7 @@ function BlastCell({
   currentSequence: string;
   currentOrganism: string;
   label: string;
-  onOpen: (hits: BlastHit[], title: string) => void;
+  onOpen: (hits: BlastHit[], title: string, primer: string) => void;
 }) {
   if (!check) return <span className="text-ink-faint">-</span>;
   if (check.status === 'pending') return <span className="text-ink-faint">queued</span>;
@@ -133,7 +133,7 @@ function BlastCell({
         <button
           type="button"
           className="text-left text-ink hover:text-accent hover:underline"
-          onClick={() => onOpen(hits, label)}
+          onClick={() => onOpen(hits, label, check.sequence)}
           title={`Show all ${hits.length} hit(s) for ${label}`}
         >
           <em>{hits[0].organism}</em> · {hits[0].identity_pct}% id · {hits.length} hit{hits.length === 1 ? '' : 's'} · {organisms} organism{organisms === 1 ? '' : 's'}
@@ -408,7 +408,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [blastChecks, setBlastChecks] = useSessionState<Record<string, BlastCheck>>('snpBatch.blastChecks', {}, dropUnfinished((c) => c.status === 'done' || c.status === 'error'));
   const [blastOrganism, setBlastOrganism] = useRememberedSessionState('snpBatch.blastOrganism', 'homo_sapiens');
   const [blasting, setBlasting] = useState(false);
-  const [openBlast, setOpenBlast] = useState<{ title: string; hits: BlastHit[] } | null>(null);
+  const [openBlast, setOpenBlast] = useState<{ title: string; hits: BlastHit[]; primer: string } | null>(null);
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
   // work checks this before each write so a stale check from a superseded
   // import can't clobber a fresh one (same purpose as the `cancelled` flag
@@ -1197,7 +1197,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                         <td className="break-all px-2 py-2 font-mono">
                           {r?.fwd ? (
                             <>
-                              <PrimerSequence sequence={r.fwd.sequence} label="Forward primer" /> ({fmt(r.fwd.tm)}°C)
+                              <PrimerSequence sequence={r.fwd.sequence} label="Forward primer" organism={blastOrganism} /> ({fmt(r.fwd.tm)}°C)
                               {r.fwd.manual && (
                                 <span title="Manually repositioned by dragging this amplicon's start on the map - Tm recalculated for this position" className="ml-1 text-accent">
                                   ★
@@ -1211,7 +1211,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                         <td className="break-all px-2 py-2 font-mono">
                           {r?.rev ? (
                             <>
-                              <PrimerSequence sequence={r.rev.sequence} label="Reverse primer" /> ({fmt(r.rev.tm)}°C)
+                              <PrimerSequence sequence={r.rev.sequence} label="Reverse primer" organism={blastOrganism} /> ({fmt(r.rev.tm)}°C)
                               {r.rev.manual && (
                                 <span title="Manually repositioned by dragging this amplicon's end on the map - Tm recalculated for this position" className="ml-1 text-accent">
                                   ★
@@ -1325,7 +1325,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                           currentSequence={amp.fwd.sequence}
                           currentOrganism={blastOrganism}
                           label={`${amp.rsid} forward primer`}
-                          onOpen={(hits, title) => setOpenBlast({ title, hits })}
+                          onOpen={(hits, title, primer) => setOpenBlast({ title, hits, primer })}
                         />
                       </td>
                       <td className="px-2 py-2">
@@ -1334,7 +1334,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                           currentSequence={amp.rev.sequence}
                           currentOrganism={blastOrganism}
                           label={`${amp.rsid} reverse primer`}
-                          onOpen={(hits, title) => setOpenBlast({ title, hits })}
+                          onOpen={(hits, title, primer) => setOpenBlast({ title, hits, primer })}
                         />
                       </td>
                     </tr>
@@ -1354,7 +1354,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
           (openBlast.hits.length === 0 ? (
             <p className="text-sm text-ink-muted">No BLAST hits found.</p>
           ) : (
-            <BlastResultsTable hits={openBlast.hits} />
+            <BlastResultsTable hits={openBlast.hits} primer={openBlast.primer} />
           ))}
       </Modal>
     </>

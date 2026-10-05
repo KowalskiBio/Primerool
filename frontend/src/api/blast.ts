@@ -21,6 +21,12 @@ export interface BlastHit {
   /** Only present on synthetic hits produced by direct accession
       resolution (no BLAST round-trip). */
   direct?: boolean;
+  /** The best HSP's aligned query, target (in the query's orientation) and
+   * match line (`|` identity, space mismatch; gaps are `-`). Absent on
+   * direct-accession hits and on results saved before they existed. */
+  qseq?: string;
+  hseq?: string;
+  midline?: string;
   ensembl_species: string;
 }
 

@@ -1,18 +1,20 @@
 import { useState, type MouseEvent } from 'react';
 import SequenceContextMenu from './SequenceContextMenu';
-import BlastModal from './BlastModal';
+import PrimerBlastModal from './PrimerBlastModal';
 
 interface Props {
   sequence: string;
   /** Names the oligo in the menu heading, e.g. "Forward primer". */
   label?: string;
+  /** Organism slug a BLAST from the menu starts restricted to. */
+  organism?: string;
   className?: string;
 }
 
 /** A primer's sequence in a results table. Right-clicking it opens the
  * same menu the sequence map uses, offering to copy just that one oligo
  * or BLAST it - so each primer of a pair can be checked on its own. */
-export default function PrimerSequence({ sequence, label = 'Primer', className = '' }: Props) {
+export default function PrimerSequence({ sequence, label = 'Primer', organism = 'homo_sapiens', className = '' }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [blastSeq, setBlastSeq] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -68,7 +70,7 @@ export default function PrimerSequence({ sequence, label = 'Primer', className =
             onClose={() => setMenu(null)}
           />
         )}
-        {blastSeq && <BlastModal sequence={blastSeq} onClose={() => setBlastSeq(null)} />}
+        {blastSeq && <PrimerBlastModal primer={blastSeq} label={label} organism={organism} onClose={() => setBlastSeq(null)} />}
       </span>
     </>
   );

@@ -103,3 +103,32 @@ export function useSessionState<T>(key: string | null, init: T | (() => T), revi
 export function dropUnfinished<V>(finished: (v: V) => boolean): (saved: Record<string, V>) => Record<string, V> {
   return (saved) => Object.fromEntries(Object.entries(saved).filter(([, v]) => finished(v)));
 }
+
+const REMEMBER_PREFIX = 'primerool.remember.';
+
+/** `useSessionState` for a setting worth carrying across visits (an
+ * amplicon size, a merge distance): a restored session still wins, but a
+ * fresh start begins from the value last used in this browser instead of
+ * the built-in default. Per-browser convenience only - storage may be
+ * unavailable, in which case it behaves exactly like `useSessionState`. */
+export function useRememberedSessionState<T>(key: string, init: T): [T, Dispatch<SetStateAction<T>>] {
+  const [value, setValue] = useSessionState<T>(key, () => {
+    try {
+      const raw = localStorage.getItem(REMEMBER_PREFIX + key);
+      if (raw !== null) return JSON.parse(raw) as T;
+    } catch {
+      // storage unavailable or a corrupt entry - fall back to the default
+    }
+    return init;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(REMEMBER_PREFIX + key, JSON.stringify(value));
+    } catch {
+      // storage unavailable or full - the session still holds the value
+    }
+  }, [key, value]);
+
+  return [value, setValue];
+}

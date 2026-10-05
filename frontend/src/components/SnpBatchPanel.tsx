@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { dropUnfinished, useSessionState } from '../session/sessionContext';
+import { dropUnfinished, useRememberedSessionState, useSessionState } from '../session/sessionContext';
 import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
 import { analyzePrimer, designFlanking, type FlankingOptions } from '../api/design';
 import { searchGene } from '../api/gene';
@@ -384,15 +384,15 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [importing, setImporting] = useState(false);
   const [pastedText, setPastedText] = useSessionState('snpBatch.pastedText', '');
 
-  const [flankWindow, setFlankWindow] = useSessionState('snpBatch.flankWindow', '130');
-  const [mergeDistance, setMergeDistance] = useSessionState('snpBatch.mergeDistance', '20');
-  const [ampliconSize, setAmpliconSize] = useSessionState('snpBatch.ampliconSize', '');
-  const [tmMin, setTmMin] = useSessionState('snpBatch.tmMin', '');
-  const [tmOpt, setTmOpt] = useSessionState('snpBatch.tmOpt', '');
-  const [tmMax, setTmMax] = useSessionState('snpBatch.tmMax', '');
-  const [gcMin, setGcMin] = useSessionState('snpBatch.gcMin', '');
-  const [gcMax, setGcMax] = useSessionState('snpBatch.gcMax', '');
-  const [showAdvanced, setShowAdvanced] = useSessionState('snpBatch.showAdvanced', false);
+  const [flankWindow, setFlankWindow] = useRememberedSessionState('snpBatch.flankWindow', '130');
+  const [mergeDistance, setMergeDistance] = useRememberedSessionState('snpBatch.mergeDistance', '20');
+  const [ampliconSize, setAmpliconSize] = useRememberedSessionState('snpBatch.ampliconSize', '');
+  const [tmMin, setTmMin] = useRememberedSessionState('snpBatch.tmMin', '');
+  const [tmOpt, setTmOpt] = useRememberedSessionState('snpBatch.tmOpt', '');
+  const [tmMax, setTmMax] = useRememberedSessionState('snpBatch.tmMax', '');
+  const [gcMin, setGcMin] = useRememberedSessionState('snpBatch.gcMin', '');
+  const [gcMax, setGcMax] = useRememberedSessionState('snpBatch.gcMax', '');
+  const [showAdvanced, setShowAdvanced] = useRememberedSessionState('snpBatch.showAdvanced', false);
   const [results, setResults] = useSessionState<Record<string, BatchResult>>('snpBatch.results', {}, dropUnfinished((r) => r.status === 'done' || r.status === 'error'));
   const [running, setRunning] = useState(false);
   const [openGene, setOpenGene] = useState<string | null>(null);
@@ -405,7 +405,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [openAmpliconKey, setOpenAmpliconKey] = useState<string | null>(null);
   const [canonicalChecks, setCanonicalChecks] = useSessionState<Record<string, CanonicalCheck>>('snpBatch.canonicalChecks', {}, dropUnfinished((c) => c.status !== 'checking'));
   const [blastChecks, setBlastChecks] = useSessionState<Record<string, BlastCheck>>('snpBatch.blastChecks', {}, dropUnfinished((c) => c.status === 'done' || c.status === 'error'));
-  const [blastOrganism, setBlastOrganism] = useSessionState('snpBatch.blastOrganism', 'homo_sapiens');
+  const [blastOrganism, setBlastOrganism] = useRememberedSessionState('snpBatch.blastOrganism', 'homo_sapiens');
   const [blasting, setBlasting] = useState(false);
   const [openBlast, setOpenBlast] = useState<{ title: string; hits: BlastHit[] } | null>(null);
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async

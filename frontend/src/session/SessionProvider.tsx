@@ -69,7 +69,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       hasContent,
       save: () => {
         const state = store.snapshot();
-        if (!hasSessionContent(state)) throw new Error('Nothing to save yet - search a gene or load a sequence first.');
+        if (!hasSessionContent(state)) throw new Error('Nothing to save yet - search a gene, load a sequence or import a SNP batch first.');
         downloadSession(buildSession(state));
         clearAutosave();
       },

@@ -23,10 +23,17 @@ export interface PrimeroolSession {
   state: SessionState;
 }
 
-/** Whether a session holds any real work - a searched gene or a loaded
- * sequence. Panel defaults alone (an untouched app) don't count. */
+/** How many SNP blocks the batch importer holds (0 when none). */
+function snpBatchCount(state: SessionState): number {
+  const blocks = state['snpBatch.blocks'];
+  return Array.isArray(blocks) ? blocks.length : 0;
+}
+
+/** Whether a session holds any real work - a searched gene, a loaded
+ * sequence, or an imported SNP batch (which needs neither). Panel defaults
+ * alone (an untouched app) don't count. */
 export function hasSessionContent(state: SessionState): boolean {
-  return Boolean(state['app.geneName']) || Boolean(state['app.sequenceData']);
+  return Boolean(state['app.geneName']) || Boolean(state['app.sequenceData']) || snpBatchCount(state) > 0;
 }
 
 function sequenceOf(state: SessionState): SequenceData | null {
@@ -39,7 +46,8 @@ export function sessionName(state: SessionState): string {
   const seq = sequenceOf(state);
   const gene = seq?.gene_name || (typeof state['app.geneName'] === 'string' ? state['app.geneName'] : '');
   const transcript = seq && seq.transcript_id !== 'custom' ? seq.transcript_name || seq.transcript_id : '';
-  return [gene, transcript].filter(Boolean).join(' ') || 'Primerool session';
+  const snps = snpBatchCount(state);
+  return [gene, transcript].filter(Boolean).join(' ') || (snps > 0 ? `SNP batch (${snps} SNPs)` : 'Primerool session');
 }
 
 export function buildSession(state: SessionState): PrimeroolSession {
@@ -118,6 +126,7 @@ export function summarizeSession(session: PrimeroolSession): { label: string; va
       value: seq ? `${seq.transcript_id === 'custom' ? 'custom sequence' : seq.transcript_name || seq.transcript_id} · ${(seq.upstream_len + seq.gene_len + seq.downstream_len).toLocaleString('en-US')} bp` : 'not loaded',
     },
     { label: 'Primers & probes', value: String(picks) },
+    ...(snpBatchCount(state) > 0 ? [{ label: 'SNP batch', value: `${snpBatchCount(state)} SNPs` }] : []),
     { label: 'Saved', value: new Date(session.savedAt).toLocaleString() },
   ];
   return rows;

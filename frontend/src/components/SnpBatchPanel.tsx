@@ -12,6 +12,8 @@ import SnpGeneMapModal from './SnpGeneMapModal';
 import PrimerStructureModal from './PrimerStructureModal';
 import AmpliconDetailModal from './AmpliconDetailModal';
 import BlastResultsTable from './BlastResultsTable';
+import SharedTargetsModal from './SharedTargetsModal';
+import { findSharedTargets, isOffTargetProduct, type SharedTarget } from '../utils/primerPairHits';
 import Section from './ui/Section';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
@@ -150,6 +152,48 @@ function BlastCell({
         </Badge>
       )}
     </div>
+  );
+}
+
+/** Whether a pair's two primers both hit some sequence other than the
+ * gene of interest closely enough, facing each other, to amplify it -
+ * clickable for every shared target with both alignments. */
+function SharedTargetsCell({
+  fwd,
+  rev,
+  gene,
+  designedSize,
+  onOpen,
+}: {
+  fwd: BlastCheck | undefined;
+  rev: BlastCheck | undefined;
+  gene: string;
+  designedSize: number | null;
+  onOpen: (targets: SharedTarget[]) => void;
+}) {
+  if (fwd?.status !== 'done' || rev?.status !== 'done') return <span className="text-ink-faint">-</span>;
+  const targets = findSharedTargets(fwd.sequence, fwd.hits ?? [], rev.sequence, rev.hits ?? [], gene, designedSize);
+  const off = targets.filter((t) => !t.onTarget);
+  const products = off.filter(isOffTargetProduct).length;
+  const likelyTarget = off.filter((t) => t.sameSizeAsTarget && (t.verdict === 'amplifies' || t.verdict === 'weak')).length;
+  const noProduct = off.length - products - likelyTarget;
+  return (
+    <button type="button" className="flex flex-wrap items-center gap-1.5 text-left hover:underline" onClick={() => onOpen(targets)} title="Show every sequence both primers hit, with both alignments">
+      {products > 0 ? (
+        <Badge tone="danger">
+          {products} possible off-target product{products === 1 ? '' : 's'}
+        </Badge>
+      ) : (
+        <Badge tone="success">no off-target product</Badge>
+      )}
+      {likelyTarget > 0 && <span className="text-ink-faint">{likelyTarget} likely the target locus</span>}
+      {noProduct > 0 && (
+        <span className="text-ink-faint">
+          {likelyTarget > 0 && '· '}
+          {noProduct} shared hit{noProduct === 1 ? '' : 's'} can&rsquo;t amplify
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -409,6 +453,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [blastOrganism, setBlastOrganism] = useRememberedSessionState('snpBatch.blastOrganism', 'homo_sapiens');
   const [blasting, setBlasting] = useState(false);
   const [openBlast, setOpenBlast] = useState<{ title: string; hits: BlastHit[]; primer: string } | null>(null);
+  const [openShared, setOpenShared] = useState<{ title: string; gene: string; targets: SharedTarget[] } | null>(null);
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
   // work checks this before each write so a stale check from a superseded
   // import can't clobber a fresh one (same purpose as the `cancelled` flag
@@ -1312,6 +1357,9 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                     <th className="border-b border-line px-2 py-2 font-medium">rsID(s)</th>
                     <th className="border-b border-line px-2 py-2 font-medium">Forward - top hit</th>
                     <th className="border-b border-line px-2 py-2 font-medium">Reverse - top hit</th>
+                    <th className="border-b border-line px-2 py-2 font-medium" title="Both primers hit the same sequence, facing each other within 4 kb - a possible PCR product other than the gene of interest">
+                      Both primers elsewhere
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1337,6 +1385,15 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                           onOpen={(hits, title, primer) => setOpenBlast({ title, hits, primer })}
                         />
                       </td>
+                      <td className="px-2 py-2">
+                        <SharedTargetsCell
+                          fwd={blastChecks[`${amp.rsid}.fwd`]}
+                          rev={blastChecks[`${amp.rsid}.rev`]}
+                          gene={amp.gene}
+                          designedSize={amp.productSize}
+                          onOpen={(targets) => setOpenShared({ title: `${amp.rsid} primer pair`, gene: amp.gene, targets })}
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1349,6 +1406,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
       <SnpGeneMapModal gene={openGene} blocks={openGeneBlocks} selectedSpecies={selectedSpecies} onClose={() => setOpenGene(null)} />
       <PrimerStructureModal pair={openPrimer} onClose={() => setOpenPrimer(null)} />
       <AmpliconDetailModal amplicon={openAmpliconData} selectedSpecies={selectedSpecies} onPrimerEdit={handleAmpliconDetailEdit} onClose={() => setOpenAmpliconKey(null)} />
+      <SharedTargetsModal targets={openShared?.targets ?? null} title={openShared?.title ?? ''} gene={openShared?.gene ?? ''} onClose={() => setOpenShared(null)} />
       <Modal open={openBlast !== null} onClose={() => setOpenBlast(null)} title={openBlast ? `BLAST hits — ${openBlast.title}` : ''}>
         {openBlast &&
           (openBlast.hits.length === 0 ? (

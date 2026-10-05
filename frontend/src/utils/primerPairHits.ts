@@ -4,8 +4,13 @@
 // definition of an unintended product. Each primer's own 3'-end verdict
 // (see `primerAlignment.ts`) then decides whether that product is likely.
 
-import type { BlastHit } from '../api/blast';
+import type { BlastHit, HitFlanks } from '../api/blast';
 import { assessPrimerHit, type PrimerHitAssessment, type PrimingLevel } from './primerAlignment';
+
+/** A hit's fetched flanks (see `useHitFlanks`), when known - fills in the
+ * primer ends BLAST left unaligned before a hit is judged. */
+export type FlanksOf = (hit: BlastHit) => HitFlanks | null | undefined;
+const noFlanks: FlanksOf = () => undefined;
 
 /** Longest product counted as amplifiable (Primer-BLAST's default). */
 export const MAX_PRODUCT_BP = 4000;
@@ -81,6 +86,7 @@ export function findSharedTargets(
   revHits: BlastHit[],
   gene: string,
   designedSize: number | null,
+  flanksOf: FlanksOf = noFlanks,
 ): SharedTarget[] {
   const revByAccession = new Map(revHits.map((h) => [h.accession, h]));
   const shared: SharedTarget[] = [];
@@ -90,8 +96,8 @@ export function findSharedTargets(
     const rh = revByAccession.get(fh.accession);
     if (!rh || seen.has(fh.accession)) continue;
     seen.add(fh.accession);
-    const fwd = { hit: fh, assessment: assessPrimerHit(fwdPrimer, fh) };
-    const rev = { hit: rh, assessment: assessPrimerHit(revPrimer, rh) };
+    const fwd = { hit: fh, assessment: assessPrimerHit(fwdPrimer, fh, flanksOf(fh)) };
+    const rev = { hit: rh, assessment: assessPrimerHit(revPrimer, rh, flanksOf(rh)) };
     const size = productSize(fh, fwdPrimer.length, rh, revPrimer.length);
     const levels = [fwd.assessment?.level ?? 'risk', rev.assessment?.level ?? 'risk'];
     const verdict: SharedTargetVerdict =
@@ -138,10 +144,10 @@ const SEVERITY: Record<PrimingLevel, number> = { perfect: 0, risk: 1, weak: 2, u
  * skipping the gene of interest and `locusAccessions` (sequences the pair
  * amplifies at the designed size, i.e. clones of the target locus). Ties
  * go to fewer mismatches at the 3' end, then overall, then E-value. */
-export function rankOffTargetHits(primer: string, hits: BlastHit[], gene: string, locusAccessions: ReadonlySet<string>): RankedHit[] {
+export function rankOffTargetHits(primer: string, hits: BlastHit[], gene: string, locusAccessions: ReadonlySet<string>, flanksOf: FlanksOf = noFlanks): RankedHit[] {
   return hits
     .filter((h) => !isGeneHit(h, gene) && !locusAccessions.has(h.accession))
-    .map((hit) => ({ hit, assessment: assessPrimerHit(primer, hit) }))
+    .map((hit) => ({ hit, assessment: assessPrimerHit(primer, hit, flanksOf(hit)) }))
     .sort((a, b) => {
       const sa = a.assessment ? SEVERITY[a.assessment.level] : SEVERITY.risk;
       const sb = b.assessment ? SEVERITY[b.assessment.level] : SEVERITY.risk;

@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { BlastHit } from '../api/blast';
-import { MAX_PRODUCT_BP, rankOffTargetHits, type RankedHit, type SharedTarget, type SharedTargetVerdict } from '../utils/primerPairHits';
+import type { PrimerHitAssessment } from '../utils/primerAlignment';
+import { findSharedTargets, MAX_PRODUCT_BP, rankOffTargetHits, type RankedHit, type SharedTarget, type SharedTargetVerdict } from '../utils/primerPairHits';
+import { flankKey, useHitFlanks } from '../utils/useHitFlanks';
 import Modal from './ui/Modal';
 import Badge from './ui/Badge';
 import PrimerHitAlignment from './PrimerHitAlignment';
@@ -8,7 +10,7 @@ import PrimerHitAlignment from './PrimerHitAlignment';
 const VERDICT: Record<SharedTargetVerdict, { label: string; tone: 'danger' | 'warning' | 'success' | 'neutral' }> = {
   amplifies: { label: 'Can amplify', tone: 'danger' },
   weak: { label: 'Weak product', tone: 'warning' },
-  blocked: { label: "Blocked by 3′ mismatches", tone: 'success' },
+  blocked: { label: 'Blocked by 3′ mismatches', tone: 'success' },
   'no-product': { label: 'No product', tone: 'neutral' },
 };
 
@@ -22,22 +24,44 @@ interface PrimerHits {
   hits: BlastHit[];
 }
 
-interface Props {
-  /** The pair's shared targets, or `null` to keep the modal closed. */
-  targets: SharedTarget[] | null;
-  /** Each primer's own BLAST hits - for its top off-target hits, which
-   * matter even where the other primer doesn't bind. */
-  fwd: PrimerHits | null;
-  rev: PrimerHits | null;
+/** One primer pair's BLAST results, as the dialog needs them. */
+export interface PairBlast {
   title: string;
   gene: string;
+  /** The designed amplicon's length - a shared target giving a product of
+   * this size is the target locus itself (see `findSharedTargets`). */
+  designedSize: number | null;
+  fwd: PrimerHits;
+  rev: PrimerHits;
+}
+
+interface Props {
+  /** The pair to show, or `null` to keep the modal closed. */
+  pair: PairBlast | null;
   onClose: () => void;
 }
 
-/** One primer's off-target hits, worst first: the top few, the rest on
- * demand. */
-function OffTargetList({ name, ranked }: { name: string; ranked: RankedHit[] }) {
-  const [showAll, setShowAll] = useState(false);
+/** A short E-value: `2e-3`, `0.52`, `12`. */
+function shortEvalue(e: number | null): string {
+  if (e === null) return '-';
+  if (e >= 10) return String(Math.round(e));
+  if (e >= 0.01) return e.toPrecision(2);
+  return e.toExponential(0).replace('e+', 'e');
+}
+
+/** Coverage, identity over the whole primer and E-value, in one line. */
+function HitStats({ hit, assessment }: { hit: BlastHit; assessment: PrimerHitAssessment | null }) {
+  const len = assessment ? Math.max(...assessment.columns.map((c) => c.qPos)) : hit.query_len;
+  const matches = assessment ? assessment.columns.filter((c) => c.kind === 'match').length : null;
+  return (
+    <span className="whitespace-nowrap font-mono text-[11px] text-ink-muted tabular-nums" title="BLAST query cover · identical bases over the whole primer · E-value">
+      cover {hit.query_cover}% · id {matches ?? '?'}/{len} · E {shortEvalue(hit.evalue)}
+    </span>
+  );
+}
+
+/** One primer's off-target hits, worst first - the top few, or all. */
+function OffTargetList({ name, ranked, showAll }: { name: string; ranked: RankedHit[]; showAll: boolean }) {
   const shown = showAll ? ranked : ranked.slice(0, TOP_OFF_TARGETS);
   return (
     <div className="min-w-0">
@@ -62,6 +86,7 @@ function OffTargetList({ name, ranked }: { name: string; ranked: RankedHit[] }) 
                 <a href={`https://www.ncbi.nlm.nih.gov/nuccore/${hit.accession}`} target="_blank" rel="noreferrer" className="font-mono text-accent hover:underline">
                   {hit.accession}
                 </a>
+                <HitStats hit={hit} assessment={assessment} />
               </div>
               <p className="mb-1.5 text-xs text-ink-muted" title={hit.title}>
                 {hit.title}
@@ -69,11 +94,6 @@ function OffTargetList({ name, ranked }: { name: string; ranked: RankedHit[] }) 
               {assessment && <PrimerHitAlignment hit={hit} assessment={assessment} />}
             </div>
           ))}
-          {ranked.length > TOP_OFF_TARGETS && (
-            <button type="button" onClick={() => setShowAll((v) => !v)} className="justify-self-start text-xs text-accent hover:underline">
-              {showAll ? `Show top ${TOP_OFF_TARGETS} only` : `Show all ${ranked.length}`}
-            </button>
-          )}
         </div>
       )}
     </div>
@@ -109,9 +129,16 @@ function TargetCard({ t }: { t: SharedTarget }) {
           ] as const
         ).map(([name, side]) => (
           <div key={name}>
-            <div className="mb-0.5 text-[11px] font-medium uppercase tracking-wider text-ink-faint">
+            <div className="mb-0.5 flex flex-wrap items-center gap-x-2 text-[11px] font-medium uppercase tracking-wider text-ink-faint">
               {name}
-              {side.assessment && <span className="ml-2 normal-case tracking-normal">{side.assessment.label} - {side.assessment.reason}</span>}
+              {side.assessment && (
+                <span className="normal-case tracking-normal">
+                  {side.assessment.label} - {side.assessment.reason}
+                </span>
+              )}
+              <span className="normal-case tracking-normal">
+                <HitStats hit={side.hit} assessment={side.assessment} />
+              </span>
             </div>
             {side.assessment ? <PrimerHitAlignment hit={side.hit} assessment={side.assessment} /> : <span className="text-xs text-ink-faint">No alignment returned - re-run BLAST to get one.</span>}
           </div>
@@ -121,30 +148,62 @@ function TargetCard({ t }: { t: SharedTarget }) {
   );
 }
 
-/** Every sequence both primers of one pair hit, each with the product the
- * pair would make there - off-target products first, then the gene of
- * interest's own records. */
-export default function SharedTargetsModal({ targets, fwd, rev, title, gene, onClose }: Props) {
-  const off = (targets ?? []).filter((t) => !t.onTarget);
-  const on = (targets ?? []).filter((t) => t.onTarget);
+/** One primer pair's BLAST off-targets: each primer's worst hits other
+ * than the gene of interest, then every sequence both primers hit with the
+ * product the pair would make there. Primer ends BLAST left unaligned are
+ * filled in from NCBI as they arrive (see `useHitFlanks`), re-judging and
+ * re-ranking the hits. */
+export default function SharedTargetsModal({ pair, onClose }: Props) {
+  const [showAll, setShowAll] = useState(false);
+  const allHits = useMemo(() => (pair ? [...pair.fwd.hits, ...pair.rev.hits] : []), [pair]);
+  const { flanks, needed, resolved } = useHitFlanks(allHits, pair !== null);
+  const flanksOf = (hit: BlastHit) => flanks[flankKey(hit)];
+
+  const targets = pair ? findSharedTargets(pair.fwd.primer, pair.fwd.hits, pair.rev.primer, pair.rev.hits, pair.gene, pair.designedSize, flanksOf) : [];
+  const off = targets.filter((t) => !t.onTarget);
+  const on = targets.filter((t) => t.onTarget);
   // Sequences the pair amplifies at the designed size are the target locus
   // itself (a BAC/PAC clone of it) - not "wrong" hits for either primer.
-  const locus = new Set((targets ?? []).filter((t) => t.sameSizeAsTarget).map((t) => t.accession));
+  const locus = new Set(targets.filter((t) => t.sameSizeAsTarget).map((t) => t.accession));
+  const fwdRanked = pair ? rankOffTargetHits(pair.fwd.primer, pair.fwd.hits, pair.gene, locus, flanksOf) : [];
+  const revRanked = pair ? rankOffTargetHits(pair.rev.primer, pair.rev.hits, pair.gene, locus, flanksOf) : [];
+  const hidden = Math.max(0, fwdRanked.length - TOP_OFF_TARGETS) + Math.max(0, revRanked.length - TOP_OFF_TARGETS);
+  const gene = pair?.gene ?? '';
+
   return (
-    <Modal open={targets !== null} onClose={onClose} title={`BLAST off-targets - ${title}`}>
+    <Modal
+      open={pair !== null}
+      onClose={() => {
+        setShowAll(false);
+        onClose();
+      }}
+      title={pair ? `BLAST off-targets - ${pair.title}` : ''}
+    >
       <h3 className="mb-1 text-sm font-semibold text-ink">Top off-target hits per primer</h3>
       <p className="mb-3 text-xs text-ink-muted">
         Each primer&rsquo;s hits other than {gene} and its locus, most likely to prime first: perfect matches, then intact 3′ ends, then weak, then blocked. A primer binding elsewhere alone makes no
-        product, but it competes for primer and can pair with a third site.
+        product, but it competes for primer and can pair with a third site. Per hit: BLAST query cover, identical bases over the whole primer, E-value.
       </p>
-      <div className="mb-6 grid gap-4 lg:grid-cols-2">
-        {fwd && <OffTargetList name="Forward" ranked={rankOffTargetHits(fwd.primer, fwd.hits, gene, locus)} />}
-        {rev && <OffTargetList name="Reverse" ranked={rankOffTargetHits(rev.primer, rev.hits, gene, locus)} />}
+      {needed > resolved && (
+        <p role="status" className="mb-3 text-xs text-accent">
+          Fetching the bases opposite unaligned primer ends from NCBI ({resolved}/{needed}) - verdicts and order update as they arrive.
+        </p>
+      )}
+      <div className="mb-3 grid gap-4 lg:grid-cols-2">
+        <OffTargetList name="Forward" ranked={fwdRanked} showAll={showAll} />
+        <OffTargetList name="Reverse" ranked={revRanked} showAll={showAll} />
       </div>
-      <h3 className="mb-1 text-sm font-semibold text-ink">Sequences both primers hit, other than {gene} ({off.length})</h3>
+      {hidden > 0 && (
+        <button type="button" onClick={() => setShowAll((v) => !v)} className="mb-6 text-xs font-medium text-accent hover:underline">
+          {showAll ? `Show the top ${TOP_OFF_TARGETS} per primer only` : `Show all ${fwdRanked.length + revRanked.length} off-target hits (both primers)`}
+        </button>
+      )}
+      <h3 className="mb-1 mt-3 text-sm font-semibold text-ink">
+        Sequences both primers hit, other than {gene} ({off.length})
+      </h3>
       <p className="mb-3 text-xs text-ink-muted">
-        Sequences both primers hit. A product needs the two bound on opposite strands, 3′ ends facing, at most {MAX_PRODUCT_BP.toLocaleString()} bp apart, and both able to prime (fewer than 2 mismatches in each
-        primer&rsquo;s 3′-terminal 5 nt). Only each primer&rsquo;s best alignment per sequence is known, so a second binding site on the same long sequence would be missed.
+        A product needs the two bound on opposite strands, 3′ ends facing, at most {MAX_PRODUCT_BP.toLocaleString()} bp apart, and both able to prime (fewer than 2 mismatches in each primer&rsquo;s 3′-terminal 5
+        nt). Only each primer&rsquo;s best alignment per sequence is known, so a second binding site on the same long sequence would be missed.
       </p>
       {off.length === 0 ? (
         <p className="mb-4 text-sm text-ink-muted">No other sequence is hit by both primers.</p>

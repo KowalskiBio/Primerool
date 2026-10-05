@@ -20,6 +20,7 @@ export default defineConfig({
       '/get_sequence': 'http://127.0.0.1:5050',
       '/blast_sequence': 'http://127.0.0.1:5050',
       '/blast_batch': 'http://127.0.0.1:5050',
+      '/blast_hit_flanks': 'http://127.0.0.1:5050',
       '/design_primers': 'http://127.0.0.1:5050',
       '/design_from_sequence': 'http://127.0.0.1:5050',
       '/design_probe': 'http://127.0.0.1:5050',

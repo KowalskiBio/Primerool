@@ -13,7 +13,8 @@ import PrimerStructureModal from './PrimerStructureModal';
 import AmpliconDetailModal from './AmpliconDetailModal';
 import BlastResultsTable from './BlastResultsTable';
 import SharedTargetsModal, { type PairBlast } from './SharedTargetsModal';
-import { findSharedTargets, isOffTargetProduct } from '../utils/primerPairHits';
+import { findSharedTargets, type SharedTarget } from '../utils/primerPairHits';
+import { flankKey, useHitFlanks } from '../utils/useHitFlanks';
 import Section from './ui/Section';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
@@ -155,9 +156,53 @@ function BlastCell({
   );
 }
 
-/** Whether a pair's two primers both hit some sequence other than the
- * gene of interest closely enough, facing each other, to amplify it -
- * clickable for every shared target with both alignments. */
+/** How many off-target amplicons the overview cell names before "+N more". */
+const AMPLICONS_LISTED = 3;
+
+/** The chromosome a BLAST hit title names, if any: "... on chromosome
+ * 22q13.1", "Homo sapiens 12 PAC ...", "BAC clone RP11-624A4 from 4, ...". */
+function titleChromosome(title: string): string | null {
+  const m = title.match(/chromosome\s+([0-9]{1,2}|X|Y)(?![0-9])/i) ?? title.match(/sapiens\s+([0-9]{1,2}|X|Y)\s+(?:BAC|PAC)\b/i) ?? title.match(/\bfrom\s+([0-9]{1,2}|X|Y)\s*,/i);
+  return m?.[1]?.toUpperCase() ?? null;
+}
+
+/** One off-target amplicon site for the overview: records of the same
+ * genomic site (a RefSeqGene and a BAC clone covering it) give the pair
+ * the exact same product size, so records are grouped by it. */
+interface AmpliconSite {
+  label: string;
+  size: number;
+  /** Only possible despite a 3'-end mismatch on one of the primers. */
+  mismatched3: boolean;
+  records: SharedTarget[];
+}
+
+function ampliconSites(off: SharedTarget[]): AmpliconSite[] {
+  const groups = new Map<number, SharedTarget[]>();
+  for (const t of off) {
+    if (t.productSize === null || t.sameSizeAsTarget) continue;
+    groups.set(t.productSize, [...(groups.get(t.productSize) ?? []), t]);
+  }
+  return [...groups.values()]
+    .map((records): AmpliconSite => {
+      const symbol = records.map((r) => r.fwd.hit.gene_symbol ?? r.rev.hit.gene_symbol).find(Boolean);
+      const chrom = records.map((r) => titleChromosome(r.title)).find(Boolean);
+      return {
+        label: symbol ?? (chrom ? `chr${chrom}` : records[0].accession),
+        size: records[0].productSize ?? 0,
+        mismatched3: records.every((r) => r.verdict === 'blocked'),
+        records,
+      };
+    })
+    .sort((a, b) => Number(a.mismatched3) - Number(b.mismatched3) || a.size - b.size);
+}
+
+/** The pair-level answer in the BLAST overview: is there any sequence
+ * other than the gene of interest where BOTH primers bind, on opposite
+ * strands facing each other, close enough to make a PCR product? Names
+ * those sites with their product size; clickable for the full detail. The
+ * primer ends BLAST left unaligned are fetched for these few hits so a
+ * 3'-end mismatch is judged on the real bases. */
 function SharedTargetsCell({
   fwd,
   rev,
@@ -171,28 +216,47 @@ function SharedTargetsCell({
   designedSize: number | null;
   onOpen: (fwd: BlastCheck, rev: BlastCheck) => void;
 }) {
-  if (fwd?.status !== 'done' || rev?.status !== 'done') return <span className="text-ink-faint">-</span>;
-  const targets = findSharedTargets(fwd.sequence, fwd.hits ?? [], rev.sequence, rev.hits ?? [], gene, designedSize);
-  const off = targets.filter((t) => !t.onTarget);
-  const products = off.filter(isOffTargetProduct).length;
-  const likelyTarget = off.filter((t) => t.sameSizeAsTarget && (t.verdict === 'amplifies' || t.verdict === 'weak')).length;
-  const noProduct = off.length - products - likelyTarget;
+  const ready = fwd?.status === 'done' && rev?.status === 'done';
+  // Only the hits on a sequence both primers hit can form a product - the
+  // only ones worth fetching flanks for here.
+  const sharedHits = useMemo(() => {
+    if (!ready) return [];
+    const revAcc = new Set((rev.hits ?? []).map((h) => h.accession));
+    const fwdAcc = new Set((fwd.hits ?? []).map((h) => h.accession));
+    return [...(fwd.hits ?? []).filter((h) => revAcc.has(h.accession)), ...(rev.hits ?? []).filter((h) => fwdAcc.has(h.accession))];
+  }, [ready, fwd, rev]);
+  const { flanks } = useHitFlanks(sharedHits, ready);
+
+  if (!ready) return <span className="text-ink-faint">-</span>;
+  const targets = findSharedTargets(fwd.sequence, fwd.hits ?? [], rev.sequence, rev.hits ?? [], gene, designedSize, (h) => flanks[flankKey(h)]);
+  const sites = ampliconSites(targets.filter((t) => !t.onTarget));
+  const likely = sites.filter((s) => !s.mismatched3);
   return (
-    <button type="button" className="flex flex-wrap items-center gap-1.5 text-left hover:underline" onClick={() => onOpen(fwd, rev)} title="Show each primer's top off-target hits and every sequence both primers hit, with alignments">
-      {products > 0 ? (
-        <Badge tone="danger">
-          {products} possible off-target product{products === 1 ? '' : 's'}
-        </Badge>
+    <button
+      type="button"
+      className="flex flex-wrap items-center gap-1.5 text-left"
+      onClick={() => onOpen(fwd, rev)}
+      title="Open both primers' off-target hits and every sequence both primers hit, with alignments"
+    >
+      {sites.length === 0 ? (
+        <Badge tone="success">None</Badge>
       ) : (
-        <Badge tone="success">no off-target product</Badge>
+        <>
+          {sites.slice(0, AMPLICONS_LISTED).map((site) => (
+            <Badge
+              key={`${site.label}-${site.size}`}
+              tone={site.mismatched3 ? 'warning' : 'danger'}
+              title={`${site.records.map((r) => `${r.accession}: ${r.title}`).join('\n')}${site.mismatched3 ? '\nBoth primers bind, but one has a 3′-end mismatch here - unlikely to extend.' : ''}`}
+              className="whitespace-nowrap"
+            >
+              {site.label} · {site.size.toLocaleString()} bp{site.mismatched3 ? ' · 3′ mismatch' : ''}
+            </Badge>
+          ))}
+          {sites.length > AMPLICONS_LISTED && <span className="text-ink-muted">+{sites.length - AMPLICONS_LISTED} more</span>}
+          {likely.length === 0 && <span className="text-ink-faint">(all blocked by 3′ mismatches)</span>}
+        </>
       )}
-      {likelyTarget > 0 && <span className="text-ink-faint">{likelyTarget} likely the target locus</span>}
-      {noProduct > 0 && (
-        <span className="text-ink-faint">
-          {likelyTarget > 0 && '· '}
-          {noProduct} shared hit{noProduct === 1 ? '' : 's'} can&rsquo;t amplify
-        </span>
-      )}
+      <span className="text-accent hover:underline">details</span>
     </button>
   );
 }
@@ -1357,8 +1421,11 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                     <th className="border-b border-line px-2 py-2 font-medium">rsID(s)</th>
                     <th className="border-b border-line px-2 py-2 font-medium">Forward - top hit</th>
                     <th className="border-b border-line px-2 py-2 font-medium">Reverse - top hit</th>
-                    <th className="border-b border-line px-2 py-2 font-medium" title="Both primers hit the same sequence, facing each other within 4 kb - a possible PCR product other than the gene of interest">
-                      Both primers elsewhere
+                    <th
+                      className="border-b border-line px-2 py-2 font-medium"
+                      title="Sequences other than the gene of interest (and its own locus) where BOTH primers bind, on opposite strands with 3′ ends facing, at most 4 kb apart - i.e. a possible second PCR product"
+                    >
+                      Off-target amplicons (both primers)
                     </th>
                   </tr>
                 </thead>

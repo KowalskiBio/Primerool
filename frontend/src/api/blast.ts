@@ -51,7 +51,7 @@ export interface BlastBatchResult {
 
 /** Starts a batch BLAST of many named sequences as ONE multi-query NCBI
  * submission. Returns immediately with a job id — the NCBI round-trip
- * (~30-180s) happens server-side, and the results are polled via
+ * (~30-300s) happens server-side, and the results are polled via
  * `getBlastBatchJob` (a synchronous response would be cut off by a
  * reverse proxy's ~60s timeout with a 504). Batches larger than the
  * server's per-request cap (100) must be chunked by the caller.

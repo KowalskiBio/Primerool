@@ -14,9 +14,21 @@ use regex::Regex;
 
 const BLAST_URL: &str = "https://blast.ncbi.nlm.nih.gov/blast/Blast.cgi";
 
-// NCBI usage policy: >=10s between any calls, >=60s between polls for the same RID.
-const POLL_INTERVAL: Duration = Duration::from_secs(10);
+// NCBI usage policy (blast.ncbi.nlm.nih.gov/doc/blast-help/developerinfo.html):
+// >=10s between any calls, and no polling of the same RID more often than
+// once a minute, waiting for the submission's RTOE first. Over-polling is
+// documented to make NCBI DELAY the results: observed live as batch chunks
+// that either completed by poll 1-2 (~13-25s) or sat in Status=WAITING
+// past a 180s budget with nothing in between.
+const POLL_INTERVAL: Duration = Duration::from_secs(60);
+/// Poll budget for the single-query pipeline (`run_blast`), whose caller
+/// (`/blast_sequence`) holds an HTTP request open for the duration.
 const MAX_WAIT: Duration = Duration::from_secs(180);
+/// Poll budget for the multi-query batch pipeline (`run_blast_batch`):
+/// its caller serves the wait as a background job polled by the client,
+/// so it can afford to outwait NCBI's slower queue without a proxy
+/// cutting anything off.
+const MAX_WAIT_BATCH: Duration = Duration::from_secs(300);
 
 #[derive(Debug, thiserror::Error)]
 pub enum BlastError {
@@ -117,15 +129,31 @@ async fn submit_params(client: &reqwest::Client, params: Vec<(&str, &str)>) -> R
     Ok(SubmitResult { rid, rtoe })
 }
 
-/// Poll NCBI BLAST for job completion. Sleeps `POLL_INTERVAL` (10s) between
-/// checks — deliberately does NOT sleep the initial `rtoe` estimate
-/// upfront, so fast completions are caught earlier while still respecting
-/// NCBI's ">=10s between polls" policy, matching the Python comment.
-pub async fn poll_blast(client: &reqwest::Client, rid: &str, max_wait: Duration, api_key: Option<&str>) -> Result<(), BlastError> {
-    let mut elapsed = Duration::ZERO;
-    while elapsed < max_wait {
-        tokio::time::sleep(POLL_INTERVAL).await;
-        elapsed += POLL_INTERVAL;
+/// Cumulative offsets (from submission) at which `poll_blast` contacts
+/// NCBI about one RID, as a pure function so the cadence is unit-testable
+/// without network or clock.
+fn poll_schedule(rtoe: u64, max_wait: Duration) -> Vec<Duration> {
+    let first = Duration::from_secs(rtoe).max(Duration::from_secs(10)).min(max_wait);
+    let mut schedule = vec![first];
+    while let Some(&last) = schedule.last() {
+        let next = last + POLL_INTERVAL;
+        if next >= max_wait {
+            break;
+        }
+        schedule.push(next);
+    }
+    schedule
+}
+
+/// Poll NCBI BLAST for job completion. Contacts the server on the schedule
+/// `poll_schedule` lays out (see its doc for the NCBI usage policy behind
+/// the cadence), and gives up with `BlastError::TimedOut` once `max_wait`
+/// has elapsed without a READY/FAILED/UNKNOWN verdict.
+pub async fn poll_blast(client: &reqwest::Client, rid: &str, rtoe: u64, max_wait: Duration, api_key: Option<&str>) -> Result<(), BlastError> {
+    let mut prev = Duration::ZERO;
+    for offset in poll_schedule(rtoe, max_wait) {
+        tokio::time::sleep(offset - prev).await;
+        prev = offset;
 
         let resp = client
             .get(BLAST_URL)
@@ -164,7 +192,7 @@ pub async fn get_blast_results(client: &reqwest::Client, rid: &str, api_key: Opt
 /// sense of taking a long time) — may take up to ~3 minutes.
 pub async fn run_blast(client: &reqwest::Client, sequence: &str, api_key: Option<&str>) -> Result<Vec<parse::BlastHit>, BlastError> {
     let submitted = submit_blast(client, sequence, "nt", 10, api_key).await?;
-    poll_blast(client, &submitted.rid, MAX_WAIT, api_key).await?;
+    poll_blast(client, &submitted.rid, submitted.rtoe, MAX_WAIT, api_key).await?;
     let xml = get_blast_results(client, &submitted.rid, api_key).await?;
     parse::parse_blast_results(&xml)
 }
@@ -172,7 +200,7 @@ pub async fn run_blast(client: &reqwest::Client, sequence: &str, api_key: Option
 /// Full BLAST pipeline for a whole batch of short-oligo (primer) queries
 /// in ONE submission: NCBI's URL API accepts a multi-FASTA QUERY and
 /// reports one `<Iteration>` per query, so N primers cost one
-/// submit/poll/fetch round-trip (~30-180s total) instead of one per
+/// submit/poll/fetch round-trip (~30-300s total) instead of one per
 /// primer. Uses `submit_primer_blast`'s short-oligo parameters (see its
 /// doc for why megablast defaults would return nothing for a primer) and
 /// its `organism` restriction. Each query's hits come back keyed by its
@@ -186,7 +214,7 @@ pub async fn run_blast_batch(client: &reqwest::Client, queries: &[(String, Strin
         .collect::<Vec<_>>()
         .join("\n");
     let submitted = submit_primer_blast(client, &fasta, "nt", 10, organism, api_key).await?;
-    poll_blast(client, &submitted.rid, MAX_WAIT, api_key).await?;
+    poll_blast(client, &submitted.rid, submitted.rtoe, MAX_WAIT_BATCH, api_key).await?;
     let xml = get_blast_results(client, &submitted.rid, api_key).await?;
     parse::parse_blast_results_multi(&xml)
 }
@@ -202,5 +230,33 @@ mod tests {
         let rtoe_re = Regex::new(r"RTOE = (\d+)").unwrap();
         assert_eq!(rid_re.captures(text).unwrap().get(1).unwrap().as_str(), "ABC123XYZ");
         assert_eq!(rtoe_re.captures(text).unwrap().get(1).unwrap().as_str(), "42");
+    }
+
+    #[test]
+    fn poll_schedule_follows_ncbi_usage_policy() {
+        // Regression test for the SNP-batch timeouts: poll_blast used to
+        // poll the same RID every 10s, violating NCBI's "no more often
+        // than once a minute per RID" guideline sixfold. NCBI's documented
+        // enforcement for over-polling is delaying the results, which
+        // surfaced as chunks completing in <=25s (ready by poll 1-2) or
+        // never within the budget, nothing in between.
+        for rtoe in [0, 5, 30, 45] {
+            for &budget in [&MAX_WAIT, &MAX_WAIT_BATCH] {
+                let schedule = poll_schedule(rtoe, budget);
+                assert!(
+                    schedule.windows(2).all(|w| w[1] - w[0] >= Duration::from_secs(60)),
+                    "same-RID polls must be >=60s apart for rtoe={rtoe}: {schedule:?}"
+                );
+                assert!(
+                    schedule.iter().all(|&t| t <= budget),
+                    "polls must stay within the budget for rtoe={rtoe}: {schedule:?}"
+                );
+            }
+        }
+        // The RTOE is NCBI's own estimate of when results will be ready;
+        // the first poll must not predate it (nor the 10s floor between
+        // any two calls to their servers).
+        assert_eq!(poll_schedule(30, MAX_WAIT).first(), Some(&Duration::from_secs(30)));
+        assert_eq!(poll_schedule(0, MAX_WAIT).first(), Some(&Duration::from_secs(10)));
     }
 }

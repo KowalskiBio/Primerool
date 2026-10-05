@@ -41,21 +41,15 @@ interface Props {
   onClose: () => void;
 }
 
-/** A short E-value: `2e-3`, `0.52`, `12`. */
-function shortEvalue(e: number | null): string {
-  if (e === null) return '-';
-  if (e >= 10) return String(Math.round(e));
-  if (e >= 0.01) return e.toPrecision(2);
-  return e.toExponential(0).replace('e+', 'e');
-}
-
-/** Coverage, identity over the whole primer and E-value, in one line. */
+/** Coverage and identity over the whole primer, in one line. (No
+ * E-value: a perfect 20-nt match already scores E ~ 1 against `nt`, so it
+ * says little about a primer hit.) */
 function HitStats({ hit, assessment }: { hit: BlastHit; assessment: PrimerHitAssessment | null }) {
   const len = assessment ? Math.max(...assessment.columns.map((c) => c.qPos)) : hit.query_len;
   const matches = assessment ? assessment.columns.filter((c) => c.kind === 'match').length : null;
   return (
-    <span className="whitespace-nowrap font-mono text-[11px] text-ink-muted tabular-nums" title="BLAST query cover · identical bases over the whole primer · E-value">
-      cover {hit.query_cover}% · id {matches ?? '?'}/{len} · E {shortEvalue(hit.evalue)}
+    <span className="whitespace-nowrap font-mono text-[11px] text-ink-muted tabular-nums" title="BLAST query cover · identical bases over the whole primer">
+      cover {hit.query_cover}% · id {matches ?? '?'}/{len}
     </span>
   );
 }
@@ -182,7 +176,7 @@ export default function SharedTargetsModal({ pair, onClose }: Props) {
       <h3 className="mb-1 text-sm font-semibold text-ink">Top off-target hits per primer</h3>
       <p className="mb-3 text-xs text-ink-muted">
         Each primer&rsquo;s hits other than {gene} and its locus, most likely to prime first: perfect matches, then intact 3′ ends, then weak, then blocked. A primer binding elsewhere alone makes no
-        product, but it competes for primer and can pair with a third site. Per hit: BLAST query cover, identical bases over the whole primer, E-value.
+        product, but it competes for primer and can pair with a third site. Per hit: BLAST query cover and identical bases over the whole primer.
       </p>
       {needed > resolved && (
         <p role="status" className="mb-3 text-xs text-accent">

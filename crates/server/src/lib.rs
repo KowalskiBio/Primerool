@@ -65,6 +65,7 @@ pub fn build_router(state: state::AppState) -> Router {
         .route("/get_sequence", post(routes::sequence::get_sequence))
         .route("/blast_sequence", post(routes::blast::blast_sequence))
         .route("/blast_batch", post(routes::blast::blast_batch))
+        .route("/blast_batch_status/:job_id", get(routes::blast::blast_batch_status))
         .route("/design_primers", post(routes::design_primers::design_primers))
         .route("/design_from_sequence", post(routes::design_from_sequence::design_from_sequence))
         .route("/design_probe", post(routes::design_probe::design_probe))

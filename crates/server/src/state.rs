@@ -13,11 +13,19 @@ pub struct AppState {
     pub ensembl: Arc<EnsemblProvider>,
     pub ncbi: Arc<NcbiProvider>,
     pub http_client: reqwest::Client,
+    /// Background `/blast_batch` jobs (see `routes::blast::BlastJobStore`)
+    /// — in-process only, jobs die with the server.
+    pub blast_jobs: Arc<crate::routes::blast::BlastJobStore>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
-        Self { ensembl: Arc::new(EnsemblProvider::new()), ncbi: Arc::new(NcbiProvider::new()), http_client: reqwest::Client::new() }
+        Self {
+            ensembl: Arc::new(EnsemblProvider::new()),
+            ncbi: Arc::new(NcbiProvider::new()),
+            http_client: reqwest::Client::new(),
+            blast_jobs: Arc::new(crate::routes::blast::BlastJobStore::default()),
+        }
     }
 }
 

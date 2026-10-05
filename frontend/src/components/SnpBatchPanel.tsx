@@ -13,8 +13,9 @@ import PrimerStructureModal from './PrimerStructureModal';
 import AmpliconDetailModal from './AmpliconDetailModal';
 import BlastResultsTable from './BlastResultsTable';
 import SharedTargetsModal, { type PairBlast } from './SharedTargetsModal';
-import { findSharedTargets, type SharedTarget } from '../utils/primerPairHits';
-import { flankKey, useHitFlanks } from '../utils/useHitFlanks';
+import { ampliconSites, findSharedTargets } from '../utils/primerPairHits';
+import { cachedHitFlanks, flankKey, prefetchHitFlanks, useHitFlanks } from '../utils/useHitFlanks';
+import { buildBlastHitsCsv, buildBlastReportHtml, downloadText, hitsNeedingFlanks, type ReportPair, type ReportPrimer } from '../utils/blastReport';
 import Section from './ui/Section';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
@@ -158,44 +159,6 @@ function BlastCell({
 
 /** How many off-target amplicons the overview cell names before "+N more". */
 const AMPLICONS_LISTED = 3;
-
-/** The chromosome a BLAST hit title names, if any: "... on chromosome
- * 22q13.1", "Homo sapiens 12 PAC ...", "BAC clone RP11-624A4 from 4, ...". */
-function titleChromosome(title: string): string | null {
-  const m = title.match(/chromosome\s+([0-9]{1,2}|X|Y)(?![0-9])/i) ?? title.match(/sapiens\s+([0-9]{1,2}|X|Y)\s+(?:BAC|PAC)\b/i) ?? title.match(/\bfrom\s+([0-9]{1,2}|X|Y)\s*,/i);
-  return m?.[1]?.toUpperCase() ?? null;
-}
-
-/** One off-target amplicon site for the overview: records of the same
- * genomic site (a RefSeqGene and a BAC clone covering it) give the pair
- * the exact same product size, so records are grouped by it. */
-interface AmpliconSite {
-  label: string;
-  size: number;
-  /** Only possible despite a 3'-end mismatch on one of the primers. */
-  mismatched3: boolean;
-  records: SharedTarget[];
-}
-
-function ampliconSites(off: SharedTarget[]): AmpliconSite[] {
-  const groups = new Map<number, SharedTarget[]>();
-  for (const t of off) {
-    if (t.productSize === null || t.sameSizeAsTarget) continue;
-    groups.set(t.productSize, [...(groups.get(t.productSize) ?? []), t]);
-  }
-  return [...groups.values()]
-    .map((records): AmpliconSite => {
-      const symbol = records.map((r) => r.fwd.hit.gene_symbol ?? r.rev.hit.gene_symbol).find(Boolean);
-      const chrom = records.map((r) => titleChromosome(r.title)).find(Boolean);
-      return {
-        label: symbol ?? (chrom ? `chr${chrom}` : records[0].accession),
-        size: records[0].productSize ?? 0,
-        mismatched3: records.every((r) => r.verdict === 'blocked'),
-        records,
-      };
-    })
-    .sort((a, b) => Number(a.mismatched3) - Number(b.mismatched3) || a.size - b.size);
-}
 
 /** The pair-level answer in the BLAST overview: is there any sequence
  * other than the gene of interest where BOTH primers bind, on opposite
@@ -518,6 +481,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [blasting, setBlasting] = useState(false);
   const [openBlast, setOpenBlast] = useState<{ title: string; hits: BlastHit[]; primer: string } | null>(null);
   const [openShared, setOpenShared] = useState<PairBlast | null>(null);
+  const [reportProgress, setReportProgress] = useState<{ kind: 'html' | 'csv'; done: number; total: number } | null>(null);
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
   // work checks this before each write so a stale check from a superseded
   // import can't clobber a fresh one (same purpose as the `cancelled` flag
@@ -797,6 +761,55 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
    * reverse proxy would cut off with a 504). Restricted to the section's
    * organism picker (default human). Per-primer checks are stored under
    * `${design rsID}.fwd`/`.rev`. */
+  /** The BLAST check as report input: every placed amplicon's pair, each
+   * primer as it was BLASTed (flagged when the design or organism has
+   * changed since). */
+  function reportPairs(): ReportPair[] {
+    const primer = (check: BlastCheck | undefined, current: string): ReportPrimer => ({
+      sequence: check?.sequence ?? current,
+      status: check?.status ?? 'pending',
+      hits: check?.hits ?? [],
+      error: check?.error,
+      staleNote:
+        check && check.sequence !== current
+          ? `Primer changed after this BLAST (now ${current}) - re-run BLAST.`
+          : check && check.organism !== blastOrganism
+            ? `BLASTed against ${speciesLabel(check.organism)}, not the selected ${speciesLabel(blastOrganism)}.`
+            : undefined,
+    });
+    return placedAmplicons.map((amp) => ({
+      label: amp.rsid,
+      gene: amp.gene,
+      location: `${amp.chrom}:${amp.ampStart.toLocaleString('en-US')}-${amp.ampEnd.toLocaleString('en-US')}`,
+      designedSize: amp.productSize,
+      fwd: primer(blastChecks[`${amp.rsid}.fwd`], amp.fwd.sequence),
+      rev: primer(blastChecks[`${amp.rsid}.rev`], amp.rev.sequence),
+    }));
+  }
+
+  /** Downloads the BLAST check as an HTML report or a CSV of every hit -
+   * first fetching the real bases at the unaligned primer ends (for the
+   * report, of the hits its verdicts and ranking depend on; for the CSV,
+   * of every hit). Cached, so a repeat export is instant. */
+  async function exportBlastReport(kind: 'html' | 'csv') {
+    const pairs = reportPairs();
+    setReportProgress({ kind, done: 0, total: 0 });
+    try {
+      // The report judges only the hits it shows; the CSV lists every hit.
+      const needed = kind === 'html' ? hitsNeedingFlanks(pairs, cachedHitFlanks) : pairs.flatMap((pair) => [...pair.fwd.hits, ...pair.rev.hits]);
+      await prefetchHitFlanks(needed, (done, total) => setReportProgress({ kind, done, total }));
+      const d = new Date();
+      const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+      if (kind === 'html') {
+        downloadText(`primer-blast-report_${stamp}.html`, buildBlastReportHtml(pairs, { organism: speciesLabel(blastOrganism), generatedAt: d }, cachedHitFlanks), 'text/html');
+      } else {
+        downloadText(`primer-blast-hits_${stamp}.csv`, buildBlastHitsCsv(pairs, cachedHitFlanks), 'text/csv');
+      }
+    } finally {
+      setReportProgress(null);
+    }
+  }
+
   async function runBlastAll() {
     const targets: { id: string; sequence: string }[] = [];
     for (const amp of placedAmplicons) {
@@ -1412,6 +1425,21 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
             </Button>
             {Object.keys(blastChecks).length > 0 && !blasting && <span className="text-xs text-ink-faint">From a previous run - re-run after re-designing, dragging primers, or switching organism.</span>}
           </div>
+          {Object.keys(blastChecks).length > 0 && !blasting && (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Button size="sm" disabled={reportProgress !== null} onClick={() => void exportBlastReport('html')} title="A self-contained page: summary, off-target amplicons and each primer's top off-target hits with alignments - print it to PDF from the browser">
+                {reportProgress?.kind === 'html' ? 'Preparing report…' : 'Download report (HTML)'}
+              </Button>
+              <Button size="sm" disabled={reportProgress !== null} onClick={() => void exportBlastReport('csv')} title="One row per BLAST hit of every primer, with verdicts and alignments - for filtering in a spreadsheet">
+                {reportProgress?.kind === 'csv' ? 'Preparing CSV…' : 'Download hits (CSV)'}
+              </Button>
+              {reportProgress && reportProgress.total > 0 && (
+                <span role="status" className="text-xs text-accent">
+                  Fetching unaligned primer-end bases from NCBI ({reportProgress.done}/{reportProgress.total})…
+                </span>
+              )}
+            </div>
+          )}
           {Object.keys(blastChecks).length > 0 && (
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full text-left text-xs text-ink-muted">

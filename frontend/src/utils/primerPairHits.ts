@@ -159,3 +159,41 @@ export function rankOffTargetHits(primer: string, hits: BlastHit[], gene: string
       );
     });
 }
+
+/** The chromosome a BLAST hit title names, if any: "... on chromosome
+ * 22q13.1", "Homo sapiens 12 PAC ...", "BAC clone RP11-624A4 from 4, ...". */
+export function titleChromosome(title: string): string | null {
+  const m = title.match(/chromosome\s+([0-9]{1,2}|X|Y)(?![0-9])/i) ?? title.match(/sapiens\s+([0-9]{1,2}|X|Y)\s+(?:BAC|PAC)\b/i) ?? title.match(/\bfrom\s+([0-9]{1,2}|X|Y)\s*,/i);
+  return m?.[1]?.toUpperCase() ?? null;
+}
+
+/** One off-target amplicon site: records of the same
+ * genomic site (a RefSeqGene and a BAC clone covering it) give the pair
+ * the exact same product size, so records are grouped by it. */
+export interface AmpliconSite {
+  label: string;
+  size: number;
+  /** Only possible despite a 3'-end mismatch on one of the primers. */
+  mismatched3: boolean;
+  records: SharedTarget[];
+}
+
+export function ampliconSites(off: SharedTarget[]): AmpliconSite[] {
+  const groups = new Map<number, SharedTarget[]>();
+  for (const t of off) {
+    if (t.productSize === null || t.sameSizeAsTarget) continue;
+    groups.set(t.productSize, [...(groups.get(t.productSize) ?? []), t]);
+  }
+  return [...groups.values()]
+    .map((records): AmpliconSite => {
+      const symbol = records.map((r) => r.fwd.hit.gene_symbol ?? r.rev.hit.gene_symbol).find(Boolean);
+      const chrom = records.map((r) => titleChromosome(r.title)).find(Boolean);
+      return {
+        label: symbol ?? (chrom ? `chr${chrom}` : records[0].accession),
+        size: records[0].productSize ?? 0,
+        mismatched3: records.every((r) => r.verdict === 'blocked'),
+        records,
+      };
+    })
+    .sort((a, b) => Number(a.mismatched3) - Number(b.mismatched3) || a.size - b.size);
+}

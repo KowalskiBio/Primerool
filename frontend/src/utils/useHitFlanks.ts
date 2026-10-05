@@ -4,8 +4,8 @@ import { fetchBlastHitFlanks, type BlastHit, type HitFlanks } from '../api/blast
 /** Fetched hit flanks, cached per hit identity (accession + both
  * coordinate pairs): re-opening a primer's results, or the same hit
  * appearing again (in another table or dialog), never refetches. A failed
- * fetch is cached as `null` — the affected primer ends just stay
- * unaligned. */
+ * (or empty) fetch is cached as `null` — the affected primer ends just
+ * stay unaligned. */
 const flankCache = new Map<string, HitFlanks | null>();
 
 export function flankKey(hit: BlastHit): string {
@@ -17,6 +17,77 @@ export function flankKey(hit: BlastHit): string {
  * mismatching bases. */
 function hasDanglingEnds(hit: BlastHit): boolean {
   return Boolean(hit.qseq && hit.hseq && (hit.query_from > 1 || hit.query_to < hit.query_len));
+}
+
+/** Minimum spacing between flank requests. Each one is an NCBI efetch,
+ * and NCBI allows 3 requests/s without an API key - two loops fetching at
+ * once (the overview column and a report export) went over it, and the
+ * failures came back as empty flanks. */
+const MIN_GAP_MS = 400;
+/** Pause before the one retry of an empty answer - NCBI's rate limiting
+ * also surfaces as one, and usually clears within a second. */
+const RETRY_EMPTY_AFTER_MS = 1200;
+let queue: Promise<unknown> = Promise.resolve();
+let lastRequestAt = 0;
+const inFlight = new Map<string, Promise<HitFlanks | null>>();
+
+/** Fetches one hit's flanks through a single app-wide queue (spaced by
+ * `MIN_GAP_MS`, duplicate requests shared) into the cache. An empty
+ * result - a failed fetch upstream, or no sequence there (a hit at the
+ * very end of its record) - is retried once, then cached as `null` like
+ * an error, so it shows as unaligned rather than as a successful fetch. */
+function fetchFlanksQueued(hit: BlastHit): Promise<HitFlanks | null> {
+  const key = flankKey(hit);
+  if (flankCache.has(key)) return Promise.resolve(flankCache.get(key) ?? null);
+  const pending = inFlight.get(key);
+  if (pending) return pending;
+  const job = queue.then(async () => {
+    let result: HitFlanks | null = null;
+    for (let attempt = 0; attempt < 2 && result === null; attempt++) {
+      const wait = lastRequestAt + (attempt ? RETRY_EMPTY_AFTER_MS : MIN_GAP_MS) - Date.now();
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      lastRequestAt = Date.now();
+      try {
+        const f = await fetchBlastHitFlanks(hit);
+        result = f.five || f.three ? f : null;
+      } catch {
+        result = null;
+      }
+    }
+    flankCache.set(key, result);
+    inFlight.delete(key);
+    return result;
+  });
+  queue = job.catch(() => undefined);
+  inFlight.set(key, job);
+  return job;
+}
+
+/** A hit's flanks if already fetched (`null` = fetch failed), else
+ * `undefined` - the synchronous lookup a report builder uses after
+ * `prefetchHitFlanks`. */
+export function cachedHitFlanks(hit: BlastHit): HitFlanks | null | undefined {
+  return flankCache.get(flankKey(hit));
+}
+
+/** Fetches (sequentially, into the shared cache) the flanks of every one
+ * of `hits` that has dangling ends and isn't cached yet - for a caller
+ * that needs them all before it can proceed, like a report export.
+ * `onProgress(done, total)` follows along. Never rejects: a failed fetch
+ * is cached as `null`, like the hook does. */
+export async function prefetchHitFlanks(hits: BlastHit[], onProgress?: (done: number, total: number) => void): Promise<void> {
+  const keys = new Set<string>();
+  const pending = hits.filter((h) => {
+    const key = flankKey(h);
+    if (!hasDanglingEnds(h) || flankCache.has(key) || keys.has(key)) return false;
+    keys.add(key);
+    return true;
+  });
+  onProgress?.(0, pending.length);
+  for (let i = 0; i < pending.length; i++) {
+    await fetchFlanksQueued(pending[i]);
+    onProgress?.(i + 1, pending.length);
+  }
 }
 
 export interface HitFlankState {
@@ -45,14 +116,7 @@ export function useHitFlanks(hits: BlastHit[], enabled: boolean): HitFlankState 
     let cancelled = false;
     (async () => {
       for (const hit of pending) {
-        const key = flankKey(hit);
-        if (!flankCache.has(key)) {
-          try {
-            flankCache.set(key, await fetchBlastHitFlanks(hit));
-          } catch {
-            flankCache.set(key, null);
-          }
-        }
+        await fetchFlanksQueued(hit);
         if (cancelled) return;
         sync();
       }

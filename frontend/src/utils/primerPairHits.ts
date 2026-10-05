@@ -5,7 +5,7 @@
 // (see `primerAlignment.ts`) then decides whether that product is likely.
 
 import type { BlastHit } from '../api/blast';
-import { assessPrimerHit, type PrimerHitAssessment } from './primerAlignment';
+import { assessPrimerHit, type PrimerHitAssessment, type PrimingLevel } from './primerAlignment';
 
 /** Longest product counted as amplifiable (Primer-BLAST's default). */
 export const MAX_PRODUCT_BP = 4000;
@@ -123,4 +123,33 @@ export function findSharedTargets(
  * designed amplicon's own size, and both primers able to prime. */
 export function isOffTargetProduct(t: SharedTarget): boolean {
   return !t.onTarget && !t.sameSizeAsTarget && (t.verdict === 'amplifies' || t.verdict === 'weak');
+}
+
+export interface RankedHit {
+  hit: BlastHit;
+  assessment: PrimerHitAssessment | null;
+}
+
+/** Worst first: a perfect match elsewhere outranks one that can still
+ * prime, then weak, then 3'-blocked. No alignment counts as "can prime". */
+const SEVERITY: Record<PrimingLevel, number> = { perfect: 0, risk: 1, weak: 2, unlikely: 3 };
+
+/** One primer's hits other than the target, most likely to prime first -
+ * skipping the gene of interest and `locusAccessions` (sequences the pair
+ * amplifies at the designed size, i.e. clones of the target locus). Ties
+ * go to fewer mismatches at the 3' end, then overall, then E-value. */
+export function rankOffTargetHits(primer: string, hits: BlastHit[], gene: string, locusAccessions: ReadonlySet<string>): RankedHit[] {
+  return hits
+    .filter((h) => !isGeneHit(h, gene) && !locusAccessions.has(h.accession))
+    .map((hit) => ({ hit, assessment: assessPrimerHit(primer, hit) }))
+    .sort((a, b) => {
+      const sa = a.assessment ? SEVERITY[a.assessment.level] : SEVERITY.risk;
+      const sb = b.assessment ? SEVERITY[b.assessment.level] : SEVERITY.risk;
+      return (
+        sa - sb ||
+        (a.assessment?.threePrimeMismatches ?? 0) - (b.assessment?.threePrimeMismatches ?? 0) ||
+        (a.assessment?.mismatches ?? 0) - (b.assessment?.mismatches ?? 0) ||
+        (a.hit.evalue ?? Infinity) - (b.hit.evalue ?? Infinity)
+      );
+    });
 }

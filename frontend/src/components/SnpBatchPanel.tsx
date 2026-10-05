@@ -169,7 +169,7 @@ function SharedTargetsCell({
   rev: BlastCheck | undefined;
   gene: string;
   designedSize: number | null;
-  onOpen: (targets: SharedTarget[]) => void;
+  onOpen: (targets: SharedTarget[], fwd: BlastCheck, rev: BlastCheck) => void;
 }) {
   if (fwd?.status !== 'done' || rev?.status !== 'done') return <span className="text-ink-faint">-</span>;
   const targets = findSharedTargets(fwd.sequence, fwd.hits ?? [], rev.sequence, rev.hits ?? [], gene, designedSize);
@@ -178,7 +178,7 @@ function SharedTargetsCell({
   const likelyTarget = off.filter((t) => t.sameSizeAsTarget && (t.verdict === 'amplifies' || t.verdict === 'weak')).length;
   const noProduct = off.length - products - likelyTarget;
   return (
-    <button type="button" className="flex flex-wrap items-center gap-1.5 text-left hover:underline" onClick={() => onOpen(targets)} title="Show every sequence both primers hit, with both alignments">
+    <button type="button" className="flex flex-wrap items-center gap-1.5 text-left hover:underline" onClick={() => onOpen(targets, fwd, rev)} title="Show each primer's top off-target hits and every sequence both primers hit, with alignments">
       {products > 0 ? (
         <Badge tone="danger">
           {products} possible off-target product{products === 1 ? '' : 's'}
@@ -453,7 +453,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [blastOrganism, setBlastOrganism] = useRememberedSessionState('snpBatch.blastOrganism', 'homo_sapiens');
   const [blasting, setBlasting] = useState(false);
   const [openBlast, setOpenBlast] = useState<{ title: string; hits: BlastHit[]; primer: string } | null>(null);
-  const [openShared, setOpenShared] = useState<{ title: string; gene: string; targets: SharedTarget[] } | null>(null);
+  const [openShared, setOpenShared] = useState<{ title: string; gene: string; targets: SharedTarget[]; fwd: BlastCheck; rev: BlastCheck } | null>(null);
   // Bumped on every new import - `checkCanonicalCoverage`'s in-flight async
   // work checks this before each write so a stale check from a superseded
   // import can't clobber a fresh one (same purpose as the `cancelled` flag
@@ -1391,7 +1391,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                           rev={blastChecks[`${amp.rsid}.rev`]}
                           gene={amp.gene}
                           designedSize={amp.productSize}
-                          onOpen={(targets) => setOpenShared({ title: `${amp.rsid} primer pair`, gene: amp.gene, targets })}
+                          onOpen={(targets, fwd, rev) => setOpenShared({ title: `${amp.rsid} primer pair`, gene: amp.gene, targets, fwd, rev })}
                         />
                       </td>
                     </tr>
@@ -1406,7 +1406,14 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
       <SnpGeneMapModal gene={openGene} blocks={openGeneBlocks} selectedSpecies={selectedSpecies} onClose={() => setOpenGene(null)} />
       <PrimerStructureModal pair={openPrimer} onClose={() => setOpenPrimer(null)} />
       <AmpliconDetailModal amplicon={openAmpliconData} selectedSpecies={selectedSpecies} onPrimerEdit={handleAmpliconDetailEdit} onClose={() => setOpenAmpliconKey(null)} />
-      <SharedTargetsModal targets={openShared?.targets ?? null} title={openShared?.title ?? ''} gene={openShared?.gene ?? ''} onClose={() => setOpenShared(null)} />
+      <SharedTargetsModal
+        targets={openShared?.targets ?? null}
+        fwd={openShared ? { primer: openShared.fwd.sequence, hits: openShared.fwd.hits ?? [] } : null}
+        rev={openShared ? { primer: openShared.rev.sequence, hits: openShared.rev.hits ?? [] } : null}
+        title={openShared?.title ?? ''}
+        gene={openShared?.gene ?? ''}
+        onClose={() => setOpenShared(null)}
+      />
       <Modal open={openBlast !== null} onClose={() => setOpenBlast(null)} title={openBlast ? `BLAST hits — ${openBlast.title}` : ''}>
         {openBlast &&
           (openBlast.hits.length === 0 ? (

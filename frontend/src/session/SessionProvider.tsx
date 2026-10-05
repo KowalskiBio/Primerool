@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { buildSession, downloadSession, hasSessionContent, migrateSession, parseSessionText, type PrimeroolSession } from './session';
+import { buildSession, downloadSession, hasSessionContent, migrateSession, parseSessionText, withoutBlastHits, type PrimeroolSession } from './session';
 import { createSessionStore, SessionControlsContext, SessionStoreContext, type SessionControls } from './sessionContext';
 
 const AUTOSAVE_KEY = 'primerool.session.autosave';
@@ -46,8 +46,15 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
         try {
           localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(buildSession(state)));
         } catch {
-          // over quota (a large intron-inclusive sequence) or storage
-          // unavailable - the explicit Save still works
+          // Over quota (a large intron-inclusive sequence, a big SNP batch's
+          // BLAST hits): keep everything but the re-runnable BLAST results
+          // rather than nothing. Storage unavailable - the explicit Save
+          // still works.
+          try {
+            localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(buildSession(withoutBlastHits(state))));
+          } catch {
+            // still too large or storage unavailable
+          }
         }
       }, AUTOSAVE_DELAY_MS);
     });
@@ -69,7 +76,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       hasContent,
       save: () => {
         const state = store.snapshot();
-        if (!hasSessionContent(state)) throw new Error('Nothing to save yet - search a gene, load a sequence or import a SNP batch first.');
+        if (!hasSessionContent(state)) throw new Error('Nothing to save yet - search a gene, load or paste a sequence, or import a SNP batch first.');
         downloadSession(buildSession(state));
         clearAutosave();
       },

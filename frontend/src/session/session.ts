@@ -29,11 +29,30 @@ function snpBatchCount(state: SessionState): number {
   return Array.isArray(blocks) ? blocks.length : 0;
 }
 
+function hasText(state: SessionState, key: string): boolean {
+  const v = state[key];
+  return typeof v === 'string' && v.trim() !== '';
+}
+
 /** Whether a session holds any real work - a searched gene, a loaded
- * sequence, or an imported SNP batch (which needs neither). Panel defaults
- * alone (an untouched app) don't count. */
+ * sequence, or paste-mode work (a pasted sequence, a pasted or imported
+ * SNP batch), which needs neither. Panel defaults alone (an untouched app)
+ * don't count. */
 export function hasSessionContent(state: SessionState): boolean {
-  return Boolean(state['app.geneName']) || Boolean(state['app.sequenceData']) || snpBatchCount(state) > 0;
+  return (
+    Boolean(state['app.geneName']) ||
+    Boolean(state['app.sequenceData']) ||
+    snpBatchCount(state) > 0 ||
+    hasText(state, 'input.fastaInput') ||
+    hasText(state, 'snpBatch.pastedText')
+  );
+}
+
+/** A copy of `state` without its bulkiest re-runnable results (BLAST hit
+ * lists) - what the autosave falls back to when the full session doesn't
+ * fit in browser storage. */
+export function withoutBlastHits(state: SessionState): SessionState {
+  return Object.fromEntries(Object.entries(state).filter(([key]) => key !== 'input.blastHits' && key !== 'snpBatch.blastChecks'));
 }
 
 function sequenceOf(state: SessionState): SequenceData | null {
@@ -47,7 +66,7 @@ export function sessionName(state: SessionState): string {
   const gene = seq?.gene_name || (typeof state['app.geneName'] === 'string' ? state['app.geneName'] : '');
   const transcript = seq && seq.transcript_id !== 'custom' ? seq.transcript_name || seq.transcript_id : '';
   const snps = snpBatchCount(state);
-  return [gene, transcript].filter(Boolean).join(' ') || (snps > 0 ? `SNP batch (${snps} SNPs)` : 'Primerool session');
+  return [gene, transcript].filter(Boolean).join(' ') || (snps > 0 ? `SNP batch (${snps} SNPs)` : hasText(state, 'input.fastaInput') ? 'Pasted sequence' : 'Primerool session');
 }
 
 export function buildSession(state: SessionState): PrimeroolSession {

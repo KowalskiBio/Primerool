@@ -17,8 +17,11 @@ export default function PrimerSequence({ sequence, label = 'Primer', className =
   const [blastSeq, setBlastSeq] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const stop = (e: MouseEvent) => e.stopPropagation();
+
   function openMenu(e: MouseEvent) {
     e.preventDefault();
+    e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY });
   }
 
@@ -40,27 +43,33 @@ export default function PrimerSequence({ sequence, label = 'Primer', className =
         {sequence}
       </span>
       {copied && <span className="ml-1.5 font-sans text-[11px] text-ink-muted">Copied</span>}
-      {menu && (
-        <SequenceContextMenu
-          x={menu.x}
-          y={menu.y}
-          heading={`${label} · ${sequence.length} bp`}
-          entries={[
-            { shortcut: 'C', label: 'Copy sequence', disabledReason: navigator.clipboard ? null : 'Clipboard unavailable in this browser', onRun: copy },
-            {
-              shortcut: 'B',
-              label: 'BLAST sequence',
-              disabledReason: null,
-              onRun: () => {
-                setMenu(null);
-                setBlastSeq(sequence);
+      {/* The menu and BLAST dialog render inside a table row that has its
+       * own click handler (e.g. the SNP batch row opens its amplicon
+       * detail) - React bubbles their clicks up to it, so stop them here.
+       * `contents` keeps this wrapper out of layout. */}
+      <span className="contents font-sans" onClick={stop} onMouseDown={stop} onContextMenu={stop}>
+        {menu && (
+          <SequenceContextMenu
+            x={menu.x}
+            y={menu.y}
+            heading={`${label} · ${sequence.length} bp`}
+            entries={[
+              { shortcut: 'C', label: 'Copy sequence', disabledReason: navigator.clipboard ? null : 'Clipboard unavailable in this browser', onRun: copy },
+              {
+                shortcut: 'B',
+                label: 'BLAST sequence',
+                disabledReason: null,
+                onRun: () => {
+                  setMenu(null);
+                  setBlastSeq(sequence);
+                },
               },
-            },
-          ]}
-          onClose={() => setMenu(null)}
-        />
-      )}
-      {blastSeq && <BlastModal sequence={blastSeq} onClose={() => setBlastSeq(null)} />}
+            ]}
+            onClose={() => setMenu(null)}
+          />
+        )}
+        {blastSeq && <BlastModal sequence={blastSeq} onClose={() => setBlastSeq(null)} />}
+      </span>
     </>
   );
 }

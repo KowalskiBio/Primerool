@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Field from './ui/Field';
 import TextInput from './ui/TextInput';
 import Select from './ui/Select';
@@ -28,12 +29,7 @@ export default function IdtSettingsPanel({ credentials, onChange }: Props) {
           />
         </Field>
         <Field label="Client Secret">
-          <TextInput
-            type="password"
-            autoComplete="off"
-            value={credentials.clientSecret}
-            onChange={(e) => onChange({ ...credentials, clientSecret: e.target.value })}
-          />
+          <SecretInput value={credentials.clientSecret} onChange={(v) => onChange({ ...credentials, clientSecret: v })} />
         </Field>
         <Field label="Username">
           <TextInput
@@ -45,12 +41,7 @@ export default function IdtSettingsPanel({ credentials, onChange }: Props) {
           />
         </Field>
         <Field label="Password">
-          <TextInput
-            type="password"
-            autoComplete="off"
-            value={credentials.password}
-            onChange={(e) => onChange({ ...credentials, password: e.target.value })}
-          />
+          <SecretInput value={credentials.password} onChange={(v) => onChange({ ...credentials, password: v })} />
         </Field>
         <Field label="Region" className="max-w-64">
           <Select value={credentials.region} onChange={(e) => onChange({ ...credentials, region: e.target.value as 'us' | 'eu' })}>
@@ -59,6 +50,25 @@ export default function IdtSettingsPanel({ credentials, onChange }: Props) {
           </Select>
         </Field>
       </div>
+    </div>
+  );
+}
+
+/** A password field with a show/hide toggle, so a user can check what's
+ * stored before relying on it. */
+function SecretInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="relative">
+      <TextInput type={shown ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={value} onChange={(e) => onChange(e.target.value)} className="pr-14" />
+      <button
+        type="button"
+        onClick={() => setShown((s) => !s)}
+        aria-pressed={shown}
+        className="absolute inset-y-0 right-0 px-3 text-xs font-medium text-ink-muted hover:text-ink"
+      >
+        {shown ? 'Hide' : 'Show'}
+      </button>
     </div>
   );
 }

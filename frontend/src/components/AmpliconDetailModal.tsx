@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { PlacedAmplicon } from './SnpAmpliconMap';
 import type { SequenceData } from '../api/sequence';
 import { EMPTY_SELECTIONS, type Selection, type Selections } from '../utils/regionMapping';
@@ -115,20 +115,6 @@ export default function AmpliconDetailModal({ amplicon, onPrimerEdit, selectedSp
     setLiveFor(liveKey);
   }
 
-  // Scrolls to this amplicon's first variant once its gene loads (or a
-  // different transcript is picked) - keyed on stable ids, not the
-  // `amplicon`/`data` object references themselves, so an unrelated
-  // re-render elsewhere in the app can't yank the user's own scroll
-  // position back here mid-browse.
-  useEffect(() => {
-    if (!data || !amplicon) return;
-    const rsid = amplicon.variants[0]?.rsid;
-    if (!rsid) return;
-    const el = document.querySelector(`[data-variant-rsid="${CSS.escape(rsid)}"]`);
-    el?.scrollIntoView({ block: 'center', behavior: 'auto' });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.transcript_id, amplicon?.rsid]);
-
   function handleSelect(key: keyof Selections, value: Selection | null) {
     setLiveSelections((prev) => ({ ...prev, [key]: value }));
     if (!value || !amplicon || !data || value.analysis === undefined) return; // still awaiting SequenceViewer's own recompute
@@ -201,6 +187,9 @@ export default function AmpliconDetailModal({ amplicon, onPrimerEdit, selectedSp
             // replace this amplicon's primers.
             pickKinds={['general']}
             variantMarkers={variantMarkers}
+            // Opens centered on this amplicon's SNP rather than the top of
+            // the gene, so it never has to be searched for.
+            focusVariantRsid={amplicon.variants[0]?.rsid}
             species={SNP_WORKFLOW_SPECIES}
             apiSource={apiSourceUsed ?? undefined}
             selectedSpecies={selectedSpecies}

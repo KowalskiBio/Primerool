@@ -699,6 +699,10 @@ interface Props {
   /** Read-only markers (e.g. a gene's known SNPs) decorated onto the gene
    * block - see `VariantMarker`. */
   variantMarkers?: VariantMarker[];
+  /** The rsID of a `variantMarkers` entry to keep centered in view - set
+   * by a viewer opened to show one SNP (the amplicon detail modal), so the
+   * user lands on it instead of searching the gene for it. */
+  focusVariantRsid?: string;
   /** Species + source the loaded `data` was fetched from, when the caller
    * knows them - what "Find in sequence" resolves an rsID query against
    * first (a hit in this species can be placed on the map below). Absent
@@ -717,7 +721,7 @@ interface Props {
   persistKey?: string;
 }
 
-export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, probeEditable = null, pickKinds = ALL_PICK_KINDS, variantMarkers = [], species, apiSource, selectedSpecies, persistKey }: Props) {
+export default function SequenceViewer({ data, selections, truncateIntrons, onSelect, probeEditable = null, pickKinds = ALL_PICK_KINDS, variantMarkers = [], focusVariantRsid, species, apiSource, selectedSpecies, persistKey }: Props) {
   const interactive = Boolean(onSelect);
 
   // External-ID header links (GenBank/Gene/transcript/assembly) - resolved
@@ -1057,6 +1061,16 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     const el = containerRef.current.querySelector(`[data-search-idx="${scrollToIdx}"]`);
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [scrollToIdx, searchMatches]);
+
+  // Re-centers on `focusVariantRsid` whenever the rows re-wrap, not just
+  // once on load: the first render lays rows out at DEFAULT_LINE_WIDTH and
+  // the measured width only arrives a render later, so a single scroll
+  // made then lands wherever the SNP *was* before every row re-wrapped.
+  useEffect(() => {
+    if (!focusVariantRsid || !containerRef.current) return;
+    const el = containerRef.current.querySelector(`[data-variant-rsid="${CSS.escape(focusVariantRsid)}"]`);
+    el?.scrollIntoView({ block: 'center', behavior: 'auto' });
+  }, [focusVariantRsid, lineWidth, truncateIntrons, data.transcript_id]);
 
   /** Scroll only explicit, never from the searchKey-typing reset. */
   function scrollToMatch(idx: number) {

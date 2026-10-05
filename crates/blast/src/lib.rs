@@ -67,7 +67,38 @@ pub async fn submit_blast(client: &reqwest::Client, sequence: &str, database: &s
         ],
         api_key,
     );
+    submit_params(client, params).await
+}
 
+/// Submit a short-oligo (primer) BLAST search. `submit_blast`'s defaults
+/// are tuned for identifying a long sequence and drop exactly what a
+/// primer-specificity check looks for in a 18-30nt query: megablast's
+/// 28-word finds no seed at all below that length, and a perfect 20nt
+/// match only scores ~40 bits (E ~ 20 against core_nt), above the default
+/// E<10 cutoff. Hence standard blastn (word 11), `EXPECT=1000` and no
+/// low-complexity filtering — verified against live NCBI with a 20nt
+/// primer that returns 0 hits the default way and 10 this way.
+pub async fn submit_primer_blast(client: &reqwest::Client, sequence: &str, database: &str, hitlist_size: u32, api_key: Option<&str>) -> Result<SubmitResult, BlastError> {
+    let hitlist_size_s = hitlist_size.to_string();
+    let params = with_api_key(
+        vec![
+            ("CMD", "Put"),
+            ("PROGRAM", "blastn"),
+            ("DATABASE", database),
+            ("QUERY", sequence),
+            ("HITLIST_SIZE", &hitlist_size_s),
+            ("EXPECT", "1000"),
+            ("FILTER", "off"),
+            ("FORMAT_TYPE", "XML"),
+            ("MEGABLAST", "off"),
+            ("tool", "primeroonline"),
+        ],
+        api_key,
+    );
+    submit_params(client, params).await
+}
+
+async fn submit_params(client: &reqwest::Client, params: Vec<(&str, &str)>) -> Result<SubmitResult, BlastError> {
     // POST (not GET) to support long sequences (>2kb), matching Python.
     let resp = client.post(BLAST_URL).form(&params).timeout(Duration::from_secs(30)).send().await?;
     let text = resp.text().await?;
@@ -131,6 +162,28 @@ pub async fn run_blast(client: &reqwest::Client, sequence: &str, api_key: Option
     poll_blast(client, &submitted.rid, MAX_WAIT, api_key).await?;
     let xml = get_blast_results(client, &submitted.rid, api_key).await?;
     parse::parse_blast_results(&xml)
+}
+
+/// Full BLAST pipeline for a whole batch of short-oligo (primer) queries
+/// in ONE submission: NCBI's URL API accepts a multi-FASTA QUERY and
+/// reports one `<Iteration>` per query, so N primers cost one
+/// submit/poll/fetch round-trip (~30-180s total) instead of one per
+/// primer. Uses `submit_primer_blast`'s short-oligo parameters (see its
+/// doc for why megablast defaults would return nothing for a primer).
+/// Each query's hits come back keyed by its FASTA header (`id`). Callers
+/// must supply ids that are unique and safe as a FASTA header (no
+/// whitespace, `>`, or `|` — the last because NCBI reinterprets
+/// pipe-separated deflines); `/blast_batch` enforces that.
+pub async fn run_blast_batch(client: &reqwest::Client, queries: &[(String, String)], api_key: Option<&str>) -> Result<Vec<parse::QueryBlastResults>, BlastError> {
+    let fasta = queries
+        .iter()
+        .map(|(id, sequence)| format!(">{id}\n{sequence}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let submitted = submit_primer_blast(client, &fasta, "nt", 10, api_key).await?;
+    poll_blast(client, &submitted.rid, MAX_WAIT, api_key).await?;
+    let xml = get_blast_results(client, &submitted.rid, api_key).await?;
+    parse::parse_blast_results_multi(&xml)
 }
 
 #[cfg(test)]

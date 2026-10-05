@@ -47,21 +47,18 @@ fn text_of(node: Node) -> Option<String> {
     node.text().map(|s| s.to_string())
 }
 
-pub fn parse_blast_results(xml_data: &str) -> Result<Vec<BlastHit>, BlastError> {
-    // NCBI's BLAST XML output carries a `<!DOCTYPE BlastOutput PUBLIC ...>`
-    // declaration; Python's ElementTree ignores external DTDs by default,
-    // so allow (but don't resolve/fetch) one here too, matching behavior.
-    let opts = ParsingOptions { allow_dtd: true, ..ParsingOptions::default() };
-    let doc = Document::parse_with_options(xml_data, opts).map_err(|e| BlastError::XmlParse(e.to_string()))?;
-    let root = doc.root_element();
+/// One query's slice of a multi-query BLAST result: the FASTA header that
+/// query was submitted under (`query_def`) plus that query's hits.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct QueryBlastResults {
+    pub query_def: String,
+    pub hits: Vec<BlastHit>,
+}
 
-    let hits_node = match find_descendant(root, "Iteration_hits") {
-        Some(n) => n,
-        None => return Ok(Vec::new()),
-    };
-
-    let query_len: i64 = find_descendant(root, "BlastOutput_query-len").and_then(text_of).and_then(|s| s.parse().ok()).unwrap_or(0);
-
+/// Parses the `<Hit>` children of one `Iteration_hits` node — the loop body
+/// `parse_blast_results` originally inlined, shared with
+/// `parse_blast_results_multi` below.
+fn parse_hits(hits_node: Node, query_len: i64) -> Vec<BlastHit> {
     let gene_re = Regex::new(r"\(([\w\-.]+)\)").unwrap();
 
     let mut results = Vec::new();
@@ -129,6 +126,52 @@ pub fn parse_blast_results(xml_data: &str) -> Result<Vec<BlastHit>, BlastError> 
         });
     }
 
+    results
+}
+
+/// Parses a single-query BLAST XML document — the first `Iteration_hits`
+/// in document order with the global `BlastOutput_query-len`, exactly the
+/// fields the Python original read (a multi-query document would simply
+/// return the first query's hits here; use `parse_blast_results_multi`
+/// for those).
+pub fn parse_blast_results(xml_data: &str) -> Result<Vec<BlastHit>, BlastError> {
+    // NCBI's BLAST XML output carries a `<!DOCTYPE BlastOutput PUBLIC ...>`
+    // declaration; Python's ElementTree ignores external DTDs by default,
+    // so allow (but don't resolve/fetch) one here too, matching behavior.
+    let opts = ParsingOptions { allow_dtd: true, ..ParsingOptions::default() };
+    let doc = Document::parse_with_options(xml_data, opts).map_err(|e| BlastError::XmlParse(e.to_string()))?;
+    let root = doc.root_element();
+
+    let hits_node = match find_descendant(root, "Iteration_hits") {
+        Some(n) => n,
+        None => return Ok(Vec::new()),
+    };
+
+    let query_len: i64 = find_descendant(root, "BlastOutput_query-len").and_then(text_of).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+    Ok(parse_hits(hits_node, query_len))
+}
+
+/// Parses a multi-query BLAST XML document (one submitted as a multi-FASTA
+/// QUERY, so NCBI reports one `<Iteration>` per query): each query's hits
+/// come back keyed by its `Iteration_query-def` — the FASTA header it was
+/// submitted under — with query cover computed against that query's own
+/// `Iteration_query-len` rather than any document-global length.
+pub fn parse_blast_results_multi(xml_data: &str) -> Result<Vec<QueryBlastResults>, BlastError> {
+    let opts = ParsingOptions { allow_dtd: true, ..ParsingOptions::default() };
+    let doc = Document::parse_with_options(xml_data, opts).map_err(|e| BlastError::XmlParse(e.to_string()))?;
+    let root = doc.root_element();
+
+    let mut results = Vec::new();
+    for iteration in root.descendants().filter(|c| c.is_element() && c.has_tag_name("Iteration")) {
+        let query_def = find_child(iteration, "Iteration_query-def").and_then(text_of).unwrap_or_default();
+        let query_len: i64 = find_child(iteration, "Iteration_query-len").and_then(text_of).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let hits = match find_child(iteration, "Iteration_hits") {
+            Some(n) => parse_hits(n, query_len),
+            None => Vec::new(),
+        };
+        results.push(QueryBlastResults { query_def, hits });
+    }
     Ok(results)
 }
 
@@ -292,5 +335,80 @@ mod tests {
     #[test]
     fn invalid_xml_returns_parse_error() {
         assert!(parse_blast_results("<not valid xml").is_err());
+    }
+
+    #[test]
+    fn multi_parser_splits_hits_per_query_def() {
+        let xml = r#"<?xml version="1.0"?>
+<BlastOutput>
+  <BlastOutput_query-len>25</BlastOutput_query-len>
+  <BlastOutput_iterations>
+    <Iteration>
+      <Iteration_query-def>rs1.fwd</Iteration_query-def>
+      <Iteration_query-len>25</Iteration_query-len>
+      <Iteration_hits>
+        <Hit>
+          <Hit_def>Homo sapiens tumor protein p53 (TP53), mRNA</Hit_def>
+          <Hit_accession>NM_000546</Hit_accession>
+          <Hit_hsps>
+            <Hsp>
+              <Hsp_identity>25</Hsp_identity>
+              <Hsp_align-len>25</Hsp_align-len>
+              <Hsp_query-from>1</Hsp_query-from>
+              <Hsp_query-to>25</Hsp_query-to>
+            </Hsp>
+          </Hit_hsps>
+        </Hit>
+      </Iteration_hits>
+    </Iteration>
+    <Iteration>
+      <Iteration_query-def>rs1.rev</Iteration_query-def>
+      <Iteration_query-len>20</Iteration_query-len>
+      <Iteration_hits>
+        <Hit>
+          <Hit_def>Bos taurus (CSN2) gene</Hit_def>
+          <Hit_accession>NM_001003662</Hit_accession>
+          <Hit_hsps>
+            <Hsp>
+              <Hsp_identity>10</Hsp_identity>
+              <Hsp_align-len>20</Hsp_align-len>
+              <Hsp_query-from>1</Hsp_query-from>
+              <Hsp_query-to>10</Hsp_query-to>
+            </Hsp>
+          </Hit_hsps>
+        </Hit>
+      </Iteration_hits>
+    </Iteration>
+  </BlastOutput_iterations>
+</BlastOutput>"#;
+        let results = parse_blast_results_multi(xml).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].query_def, "rs1.fwd");
+        assert_eq!(results[0].hits.len(), 1);
+        assert_eq!(results[0].hits[0].organism, "Homo sapiens");
+        // Query cover must use this iteration's own query length (25), not
+        // the document-global first-query length.
+        assert_eq!(results[0].hits[0].query_cover, 100.0);
+        assert_eq!(results[1].query_def, "rs1.rev");
+        assert_eq!(results[1].hits[0].query_cover, 50.0);
+    }
+
+    #[test]
+    fn multi_parser_iteration_without_hits_is_empty_not_dropped() {
+        let xml = r#"<BlastOutput><BlastOutput_iterations>
+            <Iteration><Iteration_query-def>rs2.fwd</Iteration_query-def><Iteration_query-len>22</Iteration_query-len></Iteration>
+            <Iteration><Iteration_query-def>rs2.rev</Iteration_query-def><Iteration_query-len>22</Iteration_query-len>
+              <Iteration_hits><Hit><Hit_def>No HSP Hit</Hit_def></Hit></Iteration_hits>
+            </Iteration>
+        </BlastOutput_iterations></BlastOutput>"#;
+        let results = parse_blast_results_multi(xml).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].hits, Vec::new());
+        assert_eq!(results[1].hits, Vec::new());
+    }
+
+    #[test]
+    fn multi_parser_no_iterations_is_empty() {
+        assert_eq!(parse_blast_results_multi(r#"<BlastOutput></BlastOutput>"#).unwrap(), Vec::new());
     }
 }

@@ -133,7 +133,7 @@ pub async fn blast_sequence(State(state): State<AppState>, Json(req): Json<Blast
 }
 
 /// Upper bound on one `/blast_batch` request. The whole request is one
-/// multi-query NCBI submission with a shared 300s worst-case poll budget
+/// multi-query NCBI submission with a shared 600s worst-case poll budget
 /// (see `blast::run_blast_batch`), so an unbounded query list would both
 /// stretch that budget thin across queries and risk a multi-megabyte
 /// submission; the frontend chunks larger batches itself.
@@ -191,7 +191,7 @@ struct JobCell {
 
 /// In-memory store of `/blast_batch` jobs, shared through `AppState`.
 /// The route used to answer one request only after the whole NCBI
-/// round-trip (~30-300s), which a reverse proxy in front of the server
+/// round-trip (~30-600s), which a reverse proxy in front of the server
 /// (nginx's ~60s default) cuts off with a 504 — the job API answers the
 /// POST immediately and the client polls `GET /blast_batch_status/:id`
 /// instead, so no request is held open for the BLAST's duration. Jobs

@@ -815,7 +815,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
 
   /** How many primers one `/blast_batch` job carries. The server caps a
    * job at 100 queries; staying well under that keeps each job within
-   * one NCBI submission's ~300s worst case, while still amortizing the
+   * one NCBI submission's ~600s worst case, while still amortizing the
    * submit/poll round-trip across many primers. */
   const BLAST_CHUNK = 25;
 

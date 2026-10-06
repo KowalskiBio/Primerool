@@ -27,8 +27,12 @@ const MAX_WAIT: Duration = Duration::from_secs(180);
 /// Poll budget for the multi-query batch pipeline (`run_blast_batch`):
 /// its caller serves the wait as a background job polled by the client,
 /// so it can afford to outwait NCBI's slower queue without a proxy
-/// cutting anything off.
-const MAX_WAIT_BATCH: Duration = Duration::from_secs(300);
+/// cutting anything off. 600s, not a "few minutes": NCBI's public queue
+/// leaves a submission in Status=WAITING past 300s often enough under
+/// load (observed live 2026-10-06), and a timeout forces the user into a
+/// blind retry that re-queues BEHIND everyone anyway — a longer budget
+/// finishes jobs a retry never could.
+const MAX_WAIT_BATCH: Duration = Duration::from_secs(600);
 
 #[derive(Debug, thiserror::Error)]
 pub enum BlastError {
@@ -206,7 +210,7 @@ const BATCH_HITLIST_SIZE: u32 = 50;
 /// Full BLAST pipeline for a whole batch of short-oligo (primer) queries
 /// in ONE submission: NCBI's URL API accepts a multi-FASTA QUERY and
 /// reports one `<Iteration>` per query, so N primers cost one
-/// submit/poll/fetch round-trip (~30-300s total) instead of one per
+/// submit/poll/fetch round-trip (~30-600s total) instead of one per
 /// primer. Uses `submit_primer_blast`'s short-oligo parameters (see its
 /// doc for why megablast defaults would return nothing for a primer) and
 /// its `organism` restriction. Each query's hits come back keyed by its

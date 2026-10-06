@@ -32,6 +32,19 @@ export default function PrimerBlastModal({ primer, label, organism: initialOrgan
   const runKey = primer ? `${primer}:${organism}` : null;
   const listed = Object.values(SPECIES_BY_KINGDOM).some((options) => options.some((s) => s.value === organism));
 
+  // Seconds spent on the current run - a visible counter so a slow NCBI
+  // queue reads as "waiting on NCBI", not a frozen modal (the server's
+  // poll budget allows a job to legitimately sit in NCBI's WAITING queue
+  // for minutes).
+  const [elapsed, setElapsed] = useState(0);
+  const doneForTimer = runKey !== null && resultFor === runKey;
+  useEffect(() => {
+    if (!runKey || doneForTimer) return;
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 500);
+    return () => clearInterval(t);
+  }, [runKey, doneForTimer]);
+
   useEffect(() => {
     if (!primer) return;
     let cancelled = false;
@@ -62,7 +75,7 @@ export default function PrimerBlastModal({ primer, label, organism: initialOrgan
     };
   }, [primer, organism]);
 
-  const done = runKey !== null && resultFor === runKey;
+  const done = doneForTimer;
 
   return (
     <Modal open={primer !== null} onClose={onClose} title={primer ? `BLAST - ${label} (${primer.length} nt)` : ''}>
@@ -90,7 +103,7 @@ export default function PrimerBlastModal({ primer, label, organism: initialOrgan
       )}
       {!done && (
         <p role="status" className="text-sm text-ink-muted">
-          Running NCBI BLAST… this usually takes 30 s to a few minutes.
+          Running NCBI BLAST… {elapsed < 60 ? 'this usually takes 30 s to a few minutes' : "NCBI's queue is slow right now - still waiting"} ({elapsed} s).
         </p>
       )}
       {done && error && (

@@ -1127,7 +1127,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
 
   // Right-click menu over a selected stretch (primer/probe picks, BLAST,
   // structures) and the set-then-analyze step drag commits share with it.
-  const pickMenu = useMapPickMenu({ data, selections, onSelect, pickKinds, rsSuggestion });
+  const pickMenu = useMapPickMenu({ data, selections, onSelect, pickKinds, rsSuggestion, organism: species || selectedSpecies || undefined });
   const commitSelection = pickMenu.commitSelection;
 
   useEffect(() => {

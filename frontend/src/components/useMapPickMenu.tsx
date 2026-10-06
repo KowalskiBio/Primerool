@@ -8,6 +8,7 @@ import SequenceContextMenu from './SequenceContextMenu';
 import ArmsTwinDialog from './ArmsTwinDialog';
 import AlleleProbeDialog from './AlleleProbeDialog';
 import BlastModal from './BlastModal';
+import PrimerBlastModal from './PrimerBlastModal';
 import PrimerStructureModal from './PrimerStructureModal';
 
 interface Options {
@@ -25,6 +26,9 @@ interface Options {
    * gets the genomic map's picks (general, ARMS, probe), not only junction
    * ones. */
   translatePick?: (pick: MapPick) => MapPick;
+  /** Organism slug a primer's BLAST starts restricted to (changeable in
+   * its dialog); human when unknown. */
+  organism?: string;
 }
 
 /** Heading labels for the per-pick menu, for picks with no user-given
@@ -50,9 +54,10 @@ const PICK_LABELS: Record<keyof Selections, string> = {
  *
  * Also owns `commitSelection` - set a pick, then fill in its Strider
  * analysis - which both maps' drag-resize reuses. */
-export function useMapPickMenu({ data, selections, onSelect, pickKinds, rsSuggestion, translatePick }: Options) {
+export function useMapPickMenu({ data, selections, onSelect, pickKinds, rsSuggestion, translatePick, organism = 'homo_sapiens' }: Options) {
   const [menu, setMenu] = useState<{ x: number; y: number; target: MapPick | { error: string } | { pickKey: keyof Selections } } | null>(null);
   const [blastSeq, setBlastSeq] = useState<string | null>(null);
+  const [primerBlast, setPrimerBlast] = useState<{ seq: string; label: string } | null>(null);
   const [structureSeq, setStructureSeq] = useState<string | null>(null);
   const [armsRequest, setArmsRequest] = useState<ArmsTwinRequest | null>(null);
   const [alleleRequest, setAlleleRequest] = useState<AlleleProbeRequest | null>(null);
@@ -100,14 +105,18 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds, rsSugges
     };
   }
 
-  /** The menu over a rendered primer/probe span: BLAST and secondary
-   * structures on the pick's own sequence (see `buildPrimerMenu`). */
+  /** The menu over a rendered primer/probe span: copy, BLAST and
+   * secondary structures on the pick's own sequence (see
+   * `buildPrimerMenu`). Its BLAST is the primer-tuned, organism-restricted
+   * search - a selected stretch's BLAST (below) stays the general one. */
+  const pickLabel = menu && 'pickKey' in menu.target ? (selections[menu.target.pickKey]?.name ?? PICK_LABELS[menu.target.pickKey]) : '';
   const primerMenu =
     menu && 'pickKey' in menu.target && selections[menu.target.pickKey]
       ? buildPrimerMenu(
           selections[menu.target.pickKey]!,
-          selections[menu.target.pickKey]!.name ?? PICK_LABELS[menu.target.pickKey],
-          afterMenu((seq: string) => setBlastSeq(seq)),
+          pickLabel,
+          afterMenu((seq: string) => void navigator.clipboard?.writeText(seq).catch(() => undefined)),
+          afterMenu((seq: string) => setPrimerBlast({ seq, label: pickLabel })),
           afterMenu((seq: string) => setStructureSeq(seq)),
         )
       : null;
@@ -160,6 +169,7 @@ export function useMapPickMenu({ data, selections, onSelect, pickKinds, rsSugges
         }}
       />
       <BlastModal sequence={blastSeq} onClose={() => setBlastSeq(null)} />
+      {primerBlast && <PrimerBlastModal primer={primerBlast.seq} label={primerBlast.label} organism={organism} onClose={() => setPrimerBlast(null)} />}
       <PrimerStructureModal pair={structureSeq ? { label: `${structureSeq.length} bp selection`, forward: structureSeq } : null} onClose={() => setStructureSeq(null)} />
     </>
   );

@@ -400,13 +400,20 @@ export function buildPickMenu(ctx: PickMenuContext): { heading: string; entries:
 }
 
 /** Heading + entries for the right-click menu on a rendered primer/probe
- * span (no text selection needed): BLAST and secondary structures on the
- * pick's own sequence. No length gates - a rendered pick already passed
- * the primer-length limits when it was made. */
-export function buildPrimerMenu(sel: Selection, label: string, openBlast: (seq: string) => void, openStructures: (seq: string) => void): { heading: string; entries: MenuEntry[] } {
+ * span (no text selection needed): copy, BLAST and secondary structures on
+ * the pick's own sequence (5'->3', as ordered). No length gates - a
+ * rendered pick already passed the primer-length limits when it was made. */
+export function buildPrimerMenu(
+  sel: Selection,
+  label: string,
+  copySequence: (seq: string) => void,
+  openBlast: (seq: string) => void,
+  openStructures: (seq: string) => void,
+): { heading: string; entries: MenuEntry[] } {
   return {
     heading: `${label} · ${sel.primerSeq.length} bp`,
     entries: [
+      { shortcut: 'C', label: 'Copy sequence', disabledReason: navigator.clipboard ? null : 'Clipboard unavailable in this browser', onRun: () => copySequence(sel.primerSeq) },
       { shortcut: 'B', label: 'BLAST', disabledReason: null, onRun: () => openBlast(sel.primerSeq) },
       { shortcut: 'S', label: 'Secondary structures', disabledReason: null, onRun: () => openStructures(sel.primerSeq) },
     ],

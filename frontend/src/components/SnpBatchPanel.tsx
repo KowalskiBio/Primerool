@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { dropUnfinished, useRememberedSessionState, useSessionState } from '../session/sessionContext';
 import { importSnpDocx, importSnpText, type SnpBlock } from '../api/snpImport';
 import { analyzePrimer, designFlanking, type FlankingOptions } from '../api/design';
@@ -9,6 +10,7 @@ import { ApiError } from '../api/client';
 import SnpAmpliconMap, { type PlacedAmplicon } from './SnpAmpliconMap';
 import PrimerSequence from './PrimerSequence';
 import SnpGeneMapModal from './SnpGeneMapModal';
+import SequenceContextMenu, { type MenuEntry } from './SequenceContextMenu';
 import PrimerStructureModal from './PrimerStructureModal';
 import AmpliconDetailModal from './AmpliconDetailModal';
 import BlastResultsTable from './BlastResultsTable';
@@ -231,6 +233,57 @@ function SharedTargetsCell({
       )}
       <span className="text-accent hover:underline">details</span>
     </button>
+  );
+}
+
+/** Small centred prompt for one row's free-text note - the
+ * `ArmsTwinDialog` small-dialog pattern, not the app's full-height
+ * `Modal`. Keyed on the rsID where it's rendered so each opening starts
+ * from that row's current note. */
+function RowNoteDialog({ rsid, initial, onSave, onClose }: { rsid: string; initial: string; onSave: (text: string) => void; onClose: () => void }) {
+  const [text, setText] = useState(initial);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Note for ${rsid}`}
+        className="w-full max-w-md rounded-lg border border-line bg-surface p-5 text-sm text-ink shadow-2xl"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSave(text);
+        }}
+      >
+        <h2 className="mb-1 text-sm font-semibold">
+          Note for <span className="font-mono">{rsid}</span>
+        </h2>
+        <p className="mb-3 text-xs text-ink-muted">Shown in the table's Primer notes column and included in the CSV export. Saving an empty note removes it.</p>
+        <textarea autoFocus rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. re-order with longer 5' flank" className={`${controlClasses} mb-4 resize-y p-3 text-sm`} />
+        <div className="flex justify-end gap-2">
+          <Button type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary">
+            Save note
+          </Button>
+        </div>
+      </form>
+    </div>,
+    document.body,
   );
 }
 
@@ -487,6 +540,13 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   const [openAmpliconKey, setOpenAmpliconKey] = useState<string | null>(null);
   const [canonicalChecks, setCanonicalChecks] = useSessionState<Record<string, CanonicalCheck>>('snpBatch.canonicalChecks', {}, dropUnfinished((c) => c.status !== 'checking'));
   const [blastChecks, setBlastChecks] = useSessionState<Record<string, BlastCheck>>('snpBatch.blastChecks', {}, dropUnfinished((c) => c.status === 'done' || c.status === 'error'));
+  /** Free-text row notes (right-click a table row), keyed by rsID. Kept
+   * out of `BatchResult` (which a re-design replaces wholesale) so notes
+   * survive re-runs, and keyed by rsID specifically so they also apply
+   * again when a report containing the same rsID is re-imported. */
+  const [userNotes, setUserNotes] = useSessionState<Record<string, string>>('snpBatch.userNotes', {});
+  const [noteMenu, setNoteMenu] = useState<{ rsid: string; x: number; y: number } | null>(null);
+  const [noteEditRsid, setNoteEditRsid] = useState<string | null>(null);
   const [blastOrganism, setBlastOrganism] = useRememberedSessionState('snpBatch.blastOrganism', 'homo_sapiens');
   const [blasting, setBlasting] = useState(false);
   const [openBlast, setOpenBlast] = useState<{ title: string; hits: BlastHit[]; primer: string } | null>(null);
@@ -1049,6 +1109,17 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
     });
   }
 
+  /** Writes a row's note; a blank note deletes the entry instead. */
+  function saveUserNote(rsid: string, text: string) {
+    const trimmed = text.trim();
+    setUserNotes((prev) => {
+      const next = { ...prev };
+      if (trimmed) next[rsid] = trimmed;
+      else delete next[rsid];
+      return next;
+    });
+  }
+
   function exportCsv() {
     if (!blocks) return;
     const header = ['gene', 'rsid', 'chrom', 'position', 'alleles', 'other_targets', 'merged_with', 'forward_primer', 'forward_tm', 'reverse_primer', 'reverse_tm', 'product_size', 'amplicon_start', 'amplicon_end', 'amplicon_overlaps', 'primer_notes', 'heterodimer_found', 'heterodimer_dg', 'status'];
@@ -1070,7 +1141,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
         r?.ampStart ?? '',
         r?.ampEnd ?? '',
         (overlaps[b.rsid] || []).join(';'),
-        (r?.notes || []).map((n) => n.text).join(' | '),
+        [...(userNotes[b.rsid] ? [userNotes[b.rsid]] : []), ...(r?.notes || []).map((n) => n.text)].join(' | '),
         r?.pairFound ?? '',
         r?.pairDg ?? '',
         r?.status ?? 'not run',
@@ -1145,6 +1216,38 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
   // which depends on this array, doesn't refire on every unrelated
   // re-render this panel gets while a batch is running.
   const openGeneBlocks = useMemo(() => (blocks || []).filter((b) => b.gene === openGene), [blocks, openGene]);
+
+  // The row right-click menu's entries: always add/edit, plus delete when
+  // a note exists (whose current text previews under the edit row).
+  const noteMenuEntries: MenuEntry[] | null = noteMenu
+    ? (() => {
+        const note = userNotes[noteMenu.rsid];
+        const entries: MenuEntry[] = [
+          {
+            shortcut: note ? 'E' : 'N',
+            label: note ? 'Edit note' : 'Add note',
+            hint: note || undefined,
+            disabledReason: null,
+            onRun: () => {
+              setNoteEditRsid(noteMenu.rsid);
+              setNoteMenu(null);
+            },
+          },
+        ];
+        if (note) {
+          entries.push({
+            shortcut: 'D',
+            label: 'Delete note',
+            disabledReason: null,
+            onRun: () => {
+              saveUserNote(noteMenu.rsid, '');
+              setNoteMenu(null);
+            },
+          });
+        }
+        return entries;
+      })()
+    : null;
 
   return (
     <>
@@ -1295,7 +1398,11 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                       <tr
                         key={b.rsid}
                         onClick={() => (hasDesign ? setOpenAmpliconKey(b.rsid) : setOpenGene(b.gene))}
-                        title={hasDesign ? `Open ${b.rsid}'s amplicon detail (sequence map, primers & structures)` : `Open ${b.gene}'s sequence map`}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setNoteMenu({ rsid: b.rsid, x: e.clientX, y: e.clientY });
+                        }}
+                        title={`${hasDesign ? `Open ${b.rsid}'s amplicon detail (sequence map, primers & structures)` : `Open ${b.gene}'s sequence map`} · right-click to ${userNotes[b.rsid] ? 'edit/delete' : 'add'} a note`}
                         className="cursor-pointer border-b border-line bg-surface last:border-0 hover:bg-surface-2"
                       >
                         <td className="px-2 py-2">{b.gene}</td>
@@ -1374,17 +1481,28 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                             ))}
                         </td>
                         <td className="px-2 py-2">
-                          {r?.status === 'done' && r.notes && r.notes.length > 0 ? (
-                            <div className="flex flex-col gap-1">
-                              {r.notes.map((n, i) => (
-                                <Badge key={i} tone={n.tone} title={n.text} className="w-fit">
-                                  {n.text}
-                                </Badge>
-                              ))}
-                            </div>
-                          ) : (
-                            r?.status === 'done' && '-'
-                          )}
+                          {(() => {
+                            // The user's own note shows even before a design
+                            // runs; the picker's notes only exist on a
+                            // finished design.
+                            const userNote = userNotes[b.rsid];
+                            const autoNotes = r?.status === 'done' ? (r.notes ?? []) : [];
+                            if (!userNote && autoNotes.length === 0) return r?.status === 'done' ? '-' : null;
+                            return (
+                              <div className="flex flex-col gap-1">
+                                {userNote && (
+                                  <Badge tone="neutral" title="Your note (right-click the row to edit or delete it)" className="w-fit whitespace-pre-wrap">
+                                    {userNote}
+                                  </Badge>
+                                )}
+                                {autoNotes.map((n, i) => (
+                                  <Badge key={i} tone={n.tone} title={n.text} className="w-fit">
+                                    {n.text}
+                                  </Badge>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-2 py-2">
                           {!r && '-'}
@@ -1541,6 +1659,21 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
             <BlastResultsTable hits={openBlast.hits} primer={openBlast.primer} />
           ))}
       </Modal>
+      {noteMenu && noteMenuEntries && (
+        <SequenceContextMenu x={noteMenu.x} y={noteMenu.y} heading={noteMenu.rsid} entries={noteMenuEntries} onClose={() => setNoteMenu(null)} />
+      )}
+      {noteEditRsid && (
+        <RowNoteDialog
+          key={noteEditRsid}
+          rsid={noteEditRsid}
+          initial={userNotes[noteEditRsid] ?? ''}
+          onSave={(text) => {
+            saveUserNote(noteEditRsid, text);
+            setNoteEditRsid(null);
+          }}
+          onClose={() => setNoteEditRsid(null)}
+        />
+      )}
     </>
   );
 }

@@ -111,3 +111,39 @@ export interface BlastBatchJob {
 export function getBlastBatchJob(jobId: string): Promise<BlastBatchJob> {
   return getJson<BlastBatchJob>(`/blast_batch_status/${encodeURIComponent(jobId)}`);
 }
+
+// Matches `crates/server/src/routes/hit_genes.rs`.
+
+/** A gene a hit's record annotates at the hit's position. */
+export interface HitGene {
+  symbol: string;
+  synonyms: string[];
+  /** NCBI Gene ID, when the record cross-references one. */
+  gene_id?: string;
+}
+
+export interface HitGenesResponse {
+  /** `false` when the lookup failed upstream. */
+  ok: boolean;
+  /** Empty with `ok`: nothing annotated there (e.g. a BAC clone). */
+  genes: HitGene[];
+}
+
+/** Which gene(s) a BLAST hit actually lies in, from the hit record's own
+ * feature table over the hit's span - not its title (a RefSeqGene titled
+ * after one gene also spans its neighbours). */
+export function fetchHitGenes(hit: BlastHit): Promise<HitGenesResponse> {
+  return postJson<HitGenesResponse>('/blast_hit_genes', { accession: hit.accession, from: hit.hit_from, to: hit.hit_to, api_key: getNcbiApiKey() });
+}
+
+export interface GeneAliasesResponse {
+  ok: boolean;
+  /** Official symbol first, then the gene's other names. */
+  aliases: string[];
+}
+
+/** A gene's official symbol and other names in one organism (an Ensembl
+ * species slug like 'homo_sapiens'), from NCBI Gene. */
+export function fetchGeneAliases(symbol: string, organism: string): Promise<GeneAliasesResponse> {
+  return postJson<GeneAliasesResponse>('/gene_aliases', { symbol, organism, api_key: getNcbiApiKey() });
+}

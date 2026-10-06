@@ -7,7 +7,7 @@
 
 import type { BlastHit } from '../api/blast';
 import { THREE_PRIME_WINDOW, assessPrimerHit, type PrimerHitAssessment } from './primerAlignment';
-import { MAX_PRODUCT_BP, ampliconSites, findSharedTargets, isGeneHit, rankOffTargetHits, type AmpliconSite, type FlanksOf, type RankedHit, type SharedTarget } from './primerPairHits';
+import { MAX_PRODUCT_BP, ampliconSites, findSharedTargets, genesAtHit, isGeneHit, rankOffTargetHits, type AmpliconSite, type FlanksOf, type GenesOf, type RankedHit, type SharedTarget, type Target } from './primerPairHits';
 
 /** Off-target hits per primer the HTML report details. */
 export const REPORT_TOP_HITS = 5;
@@ -29,6 +29,10 @@ export interface ReportPair {
   /** rsID(s) the pair was designed for. */
   label: string;
   gene: string;
+  /** Organism slug the pair was BLASTed against. */
+  organism: string;
+  /** The gene's other names (see `fetchTargetNames`), when looked up. */
+  targetNames?: string[];
   /** Genomic location of the designed amplicon, e.g. "4:176,782,050-176,782,248". */
   location: string;
   designedSize: number | null;
@@ -53,12 +57,15 @@ interface PairAnalysis {
 }
 
 const bothDone = (p: ReportPair) => p.fwd.status === 'done' && p.rev.status === 'done';
+const noGenes: GenesOf = () => undefined;
+const targetOf = (p: ReportPair, genesOf: GenesOf): Target => ({ gene: p.gene, names: p.targetNames, genesOf });
 
-function analyzePair(p: ReportPair, flanksOf: FlanksOf): PairAnalysis | null {
+function analyzePair(p: ReportPair, flanksOf: FlanksOf, genesOf: GenesOf): PairAnalysis | null {
   if (!bothDone(p)) return null;
-  const targets = findSharedTargets(p.fwd.sequence, p.fwd.hits, p.rev.sequence, p.rev.hits, p.gene, p.designedSize, flanksOf);
+  const target = targetOf(p, genesOf);
+  const targets = findSharedTargets(p.fwd.sequence, p.fwd.hits, p.rev.sequence, p.rev.hits, target, p.designedSize, flanksOf);
   const off = targets.filter((t) => !t.onTarget);
-  const sites = ampliconSites(off);
+  const sites = ampliconSites(off, genesOf);
   const inSites = new Set(sites.flatMap((s) => s.records.map((r) => r.accession)));
   const locus = new Set(targets.filter((t) => t.sameSizeAsTarget).map((t) => t.accession));
   return {
@@ -66,18 +73,19 @@ function analyzePair(p: ReportPair, flanksOf: FlanksOf): PairAnalysis | null {
     sites,
     sharedWithoutProduct: off.filter((t) => !inSites.has(t.accession) && !locus.has(t.accession)).length,
     locus,
-    fwdRanked: rankOffTargetHits(p.fwd.sequence, p.fwd.hits, p.gene, locus, flanksOf),
-    revRanked: rankOffTargetHits(p.rev.sequence, p.rev.hits, p.gene, locus, flanksOf),
+    fwdRanked: rankOffTargetHits(p.fwd.sequence, p.fwd.hits, target, locus, flanksOf),
+    revRanked: rankOffTargetHits(p.rev.sequence, p.rev.hits, target, locus, flanksOf),
   };
 }
 
-/** The hits whose unaligned primer ends a report needs fetched first:
- * every hit on a sequence both primers hit (where products are judged)
- * and each primer's top-ranked off-target candidates. */
-export function hitsNeedingFlanks(pairs: ReportPair[], flanksOf: FlanksOf): BlastHit[] {
+/** The hits a report judges, whose genes and unaligned primer ends it
+ * needs looked up first: every hit on a sequence both primers hit (where
+ * products are judged) and each primer's top-ranked off-target candidates
+ * (with a margin - looked-up genes and end bases can reorder them). */
+export function hitsNeedingFlanks(pairs: ReportPair[], flanksOf: FlanksOf, genesOf: GenesOf = noGenes): BlastHit[] {
   const out: BlastHit[] = [];
   for (const p of pairs) {
-    const a = analyzePair(p, flanksOf);
+    const a = analyzePair(p, flanksOf, genesOf);
     if (!a) continue;
     for (const t of a.targets) out.push(t.fwd.hit, t.rev.hit);
     for (const r of [...a.fwdRanked.slice(0, RANK_MARGIN), ...a.revRanked.slice(0, RANK_MARGIN)]) out.push(r.hit);
@@ -120,12 +128,13 @@ function alignmentHtml(hit: BlastHit, a: PrimerHitAssessment): string {
 <span class="l">Target    </span>${target}<span class="l"> ${hit.hit_from.toLocaleString('en-US')}–${hit.hit_to.toLocaleString('en-US')} (${strand(hit)} strand)</span></pre>`;
 }
 
-function hitCardHtml(name: string, hit: BlastHit, a: PrimerHitAssessment | null, showTitle = true): string {
+function hitCardHtml(name: string, hit: BlastHit, a: PrimerHitAssessment | null, genesOf: GenesOf, showTitle = true): string {
   const head = a
     ? `<span class="tag ${VERDICT_CLASS[a.level]}">${esc(a.level === 'perfect' ? 'Perfect match' : a.label)}</span> <span class="muted">${esc(a.reason)}</span>`
     : `<span class="tag">no alignment</span>`;
   const stats = `cover ${hit.query_cover}%${a ? ` · id ${identity(a)}` : ''}`;
-  return `<div class="hit"><div class="hh">${name ? `<b>${esc(name)}</b> ` : ''}${head} <a href="https://www.ncbi.nlm.nih.gov/nuccore/${esc(hit.accession)}">${esc(hit.accession)}</a> <span class="stats">${stats}</span></div>
+  const inGene = genesAtHit(hit, genesOf);
+  return `<div class="hit"><div class="hh">${name ? `<b>${esc(name)}</b> ` : ''}${head} <a href="https://www.ncbi.nlm.nih.gov/nuccore/${esc(hit.accession)}">${esc(hit.accession)}</a> <span class="stats">${stats}</span>${inGene ? ` <span class="gene">lies in ${esc(inGene)}</span>` : ''}</div>
 ${showTitle ? `<div class="title">${esc(hit.title)}</div>` : ''}${a ? alignmentHtml(hit, a) : ''}</div>`;
 }
 
@@ -140,7 +149,7 @@ function primerStatusHtml(pr: ReportPrimer): string {
   return notes.map((n) => `<div class="note">${esc(n)}</div>`).join('');
 }
 
-function pairSectionHtml(p: ReportPair, a: PairAnalysis | null, i: number): string {
+function pairSectionHtml(p: ReportPair, a: PairAnalysis | null, i: number, genesOf: GenesOf): string {
   const primers = `<table class="kv">
 <tr><th>Forward</th><td class="seq">5′ ${esc(p.fwd.sequence)} 3′</td><td>${p.fwd.sequence.length} nt · ${p.fwd.hits.length} hits${primerStatusHtml(p.fwd)}</td></tr>
 <tr><th>Reverse</th><td class="seq">5′ ${esc(p.rev.sequence)} 3′</td><td>${p.rev.sequence.length} nt · ${p.rev.hits.length} hits${primerStatusHtml(p.rev)}</td></tr>
@@ -155,14 +164,14 @@ function pairSectionHtml(p: ReportPair, a: PairAnalysis | null, i: number): stri
           const others = s.records.slice(1).map((o) => `<div class="title">also: ${esc(o.accession)} — ${esc(o.title)}</div>`).join('');
           return `<div class="site"><div class="hh"><span class="tag ${s.mismatched3 ? 'warn' : 'bad'}">${esc(s.label)} · ${s.size.toLocaleString('en-US')} bp</span>${s.mismatched3 ? ' <span class="muted">both primers bind, but a 3′-end mismatch makes a product unlikely</span>' : ''}</div>
 <div class="title">${esc(r.accession)} — ${esc(r.title)}</div>${others}
-${hitCardHtml('Forward', r.fwd.hit, r.fwd.assessment, false)}${hitCardHtml('Reverse', r.rev.hit, r.rev.assessment, false)}</div>`;
+${hitCardHtml('Forward', r.fwd.hit, r.fwd.assessment, genesOf, false)}${hitCardHtml('Reverse', r.rev.hit, r.rev.assessment, genesOf, false)}</div>`;
         })
         .join('')
     : `<p><span class="tag ok">None</span> No sequence other than ${esc(p.gene)} and its locus is bound by both primers on opposite strands, 3′ ends facing, within ${MAX_PRODUCT_BP.toLocaleString('en-US')} bp.</p>`;
   const shared = `<p class="muted">Other sequences both primers hit without a reasonable product: ${a.sharedWithoutProduct}. Records of ${esc(p.gene)} itself or its locus: ${a.targets.filter((t) => t.onTarget || a.locus.has(t.accession)).length}.</p>`;
   const top = (name: string, ranked: RankedHit[]) =>
     `<div class="col"><h4>${name} primer — top ${Math.min(REPORT_TOP_HITS, ranked.length)} of ${ranked.length}</h4>${
-      ranked.length ? ranked.slice(0, REPORT_TOP_HITS).map((r) => hitCardHtml('', r.hit, r.assessment)).join('') : '<p class="muted">No hits other than the target.</p>'
+      ranked.length ? ranked.slice(0, REPORT_TOP_HITS).map((r) => hitCardHtml('', r.hit, r.assessment, genesOf)).join('') : '<p class="muted">No hits other than the target.</p>'
     }</div>`;
 
   return `<section class="pair" id="pair-${i}">
@@ -190,6 +199,7 @@ table { border-collapse: collapse; width: 100%; }
 .summary th { background: var(--surface); text-transform: uppercase; font-size: 11px; color: var(--muted); }
 .kv th { text-align: left; color: var(--muted); font-weight: 500; padding: 2px 12px 2px 0; width: 90px; vertical-align: top; } .kv td { padding: 2px 12px 2px 0; vertical-align: top; }
 .seq, pre, code { font-family: ui-monospace, "IBM Plex Mono", Menlo, Consolas, monospace; }
+.gene { font-size: 12px; font-weight: 600; color: var(--ink); }
 .tag { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 12px; font-weight: 600; background: var(--surface); color: var(--muted); white-space: nowrap; }
 .tag.bad { background: var(--bad-bg); color: var(--bad); } .tag.warn { background: var(--warn-bg); color: var(--warn); } .tag.ok { background: var(--ok-bg); color: var(--ok); }
 .pair { border-top: 2px solid var(--line); padding-top: 24px; margin-top: 32px; }
@@ -205,8 +215,8 @@ pre.aln .l { color: var(--faint); } pre.aln .x { color: var(--bad); background: 
 @media print { main { padding: 0; max-width: none; } .pair { break-before: page; border-top: 0; margin-top: 0; } a { color: inherit; } }
 `;
 
-export function buildBlastReportHtml(pairs: ReportPair[], meta: ReportMeta, flanksOf: FlanksOf): string {
-  const analyses = pairs.map((p) => analyzePair(p, flanksOf));
+export function buildBlastReportHtml(pairs: ReportPair[], meta: ReportMeta, flanksOf: FlanksOf, genesOf: GenesOf = noGenes): string {
+  const analyses = pairs.map((p) => analyzePair(p, flanksOf, genesOf));
   const when = meta.generatedAt.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
   const withSites = analyses.filter((a) => a && a.sites.some((s) => !s.mismatched3)).length;
   const rows = pairs
@@ -227,8 +237,8 @@ export function buildBlastReportHtml(pairs: ReportPair[], meta: ReportMeta, flan
 <tbody>
 ${rows}
 </tbody></table>
-${pairs.map((p, i) => pairSectionHtml(p, analyses[i], i)).join('\n')}
-<div class="method"><b>Method.</b> Each primer was searched with NCBI blastn against the nucleotide collection (nt), restricted to ${esc(meta.organism)}, tuned for short oligos (word size 11, E ≤ 1000, no low-complexity filter), keeping 50 hits per primer. An <b>off-target amplicon</b> is a sequence other than the gene of interest where both primers bind on opposite strands with their 3′ ends facing, at most ${MAX_PRODUCT_BP.toLocaleString('en-US')} bp apart; a product the designed amplicon's size is taken to be the target locus itself (e.g. a BAC clone of it). A hit is judged by where it mismatches (Primer-BLAST's default rule): 2 or more mismatches in the 3′-terminal ${THREE_PRIME_WINDOW} nt, or 6 or more in total, is not expected to prime. Primer ends BLAST left unaligned were filled in from the hit's own sequence where it could be fetched (· = not available, counted as a mismatch). Only each primer's best alignment per sequence is known, so a second binding site on the same long sequence would be missed. "cover" is BLAST's query cover; "id" counts identical bases over the whole primer.</div>
+${pairs.map((p, i) => pairSectionHtml(p, analyses[i], i, genesOf)).join('\n')}
+<div class="method"><b>Method.</b> Each primer was searched with NCBI blastn against the nucleotide collection (nt), restricted to ${esc(meta.organism)}, tuned for short oligos (word size 11, E ≤ 1000, no low-complexity filter), keeping 50 hits per primer. An <b>off-target amplicon</b> is a sequence other than the gene of interest where both primers bind on opposite strands with their 3′ ends facing, at most ${MAX_PRODUCT_BP.toLocaleString('en-US')} bp apart; a product the designed amplicon's size is taken to be the target locus itself (e.g. a BAC clone of it). A hit counts as the gene of interest when its record annotates that gene (under any of its NCBI Gene names) at the hit's position - "lies in" names the annotated gene - or, where nothing is annotated, when the record's title names it. A hit is judged by where it mismatches (Primer-BLAST's default rule): 2 or more mismatches in the 3′-terminal ${THREE_PRIME_WINDOW} nt, or 6 or more in total, is not expected to prime. Primer ends BLAST left unaligned were filled in from the hit's own sequence where it could be fetched (· = not available, counted as a mismatch). Only each primer's best alignment per sequence is known, so a second binding site on the same long sequence would be missed. "cover" is BLAST's query cover; "id" counts identical bases over the whole primer.</div>
 </main></body></html>`;
 }
 
@@ -241,16 +251,17 @@ function csvCell(v: string | number | null | undefined): string {
 
 const CSV_COLUMNS = [
   'gene', 'rsids', 'amplicon', 'primer', 'primer_sequence', 'blast_rank', 'accession', 'organism', 'gene_symbol', 'title',
-  'category', 'other_primer_hits_it', 'off_target_amplicon_bp', 'verdict', 'reason', 'identity', 'mismatches', 'mismatches_3prime_5nt',
+  'gene_at_hit', 'category', 'other_primer_hits_it', 'off_target_amplicon_bp', 'verdict', 'reason', 'identity', 'mismatches', 'mismatches_3prime_5nt',
   'query_cover_pct', 'evalue', 'hit_from', 'hit_to', 'strand', 'primer_aligned', 'target_aligned', 'primer_ends_resolved',
 ] as const;
 
 /** One row per BLAST hit of every primer, with the pair-level context
  * (is it the target, does the other primer hit it, the product there). */
-export function buildBlastHitsCsv(pairs: ReportPair[], flanksOf: FlanksOf): string {
+export function buildBlastHitsCsv(pairs: ReportPair[], flanksOf: FlanksOf, genesOf: GenesOf = noGenes): string {
   const lines = [CSV_COLUMNS.join(',')];
   for (const p of pairs) {
-    const a = analyzePair(p, flanksOf);
+    const a = analyzePair(p, flanksOf, genesOf);
+    const target = targetOf(p, genesOf);
     const productByAcc = new Map<string, number>();
     for (const s of a?.sites ?? []) for (const r of s.records) productByAcc.set(r.accession, s.size);
     for (const [name, pr, other] of [
@@ -263,10 +274,13 @@ export function buildBlastHitsCsv(pairs: ReportPair[], flanksOf: FlanksOf): stri
         const fl = flanksOf(hit);
         const as = assessPrimerHit(pr.sequence, hit, fl);
         const dangling = hit.query_from > 1 || hit.query_to < hit.query_len;
-        const category = isGeneHit(hit, p.gene) ? 'target_gene' : a?.locus.has(hit.accession) ? 'target_locus' : 'off_target';
+        const category = isGeneHit(hit, target) ? 'target_gene' : a?.locus.has(hit.accession) ? 'target_locus' : 'off_target';
+        // Genes annotated at the hit; "?" = not looked up, "" = none annotated.
+        const annotated = genesOf(hit);
+        const geneAtHit = annotated === undefined || annotated === null ? '?' : annotated.map((g) => g.symbol).join(';');
         const row = [
           p.gene, p.label, p.location, name, pr.sequence, i + 1, hit.accession, hit.organism, hit.gene_symbol, hit.title,
-          category, otherAcc.has(hit.accession) ? 'yes' : 'no', productByAcc.get(hit.accession) ?? '',
+          geneAtHit, category, otherAcc.has(hit.accession) ? 'yes' : 'no', productByAcc.get(hit.accession) ?? '',
           as ? as.label : '', as ? as.reason : '', as ? identity(as) : '', as ? as.mismatches : '', as ? as.threePrimeMismatches : '',
           hit.query_cover, hit.evalue, hit.hit_from, hit.hit_to, strand(hit),
           as ? as.columns.map((c) => c.primer).join('') : '', as ? as.columns.map((c) => c.target || '.').join('') : '',

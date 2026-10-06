@@ -158,6 +158,64 @@ impl NcbiProvider {
         Ok(strip_fasta(&text))
     }
 
+    /// The genes annotated over one GenBank accession's 1-based inclusive
+    /// range `[start, stop]` - which gene a BLAST hit actually lies in,
+    /// from the record's own feature table rather than its title (a
+    /// RefSeqGene titled after one gene also spans its neighbours).
+    /// `Ok(None)` on an upstream error, so the caller can tell "lookup
+    /// failed" from `Some(vec![])`, "nothing annotated there".
+    pub async fn fetch_genes_at(&self, accession: &str, start: i64, stop: i64, api_key: Option<&str>) -> Result<Option<Vec<AnnotatedGene>>, ProviderError> {
+        let (start_s, stop_s) = (start.to_string(), stop.to_string());
+        let params = [
+            ("db", "nucleotide"),
+            ("id", accession),
+            ("seq_start", &start_s),
+            ("seq_stop", &stop_s),
+            ("rettype", "ft"),
+            ("retmode", "text"),
+        ];
+        let resp = match self.get_with_key(&format!("{EUTILS}/efetch.fcgi"), &params, api_key, Duration::from_secs(30)).await {
+            Ok(r) => r,
+            Err(ProviderError::UpstreamStatus { .. }) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let text = resp.text().await?;
+        // A rate-limited or failed efetch answers 200 with an error body
+        // rather than a feature table, which always starts with ">Feature".
+        if !text.trim_start().starts_with(">Feature") && !text.trim().is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(parse_feature_table_genes(&text)))
+    }
+
+    /// A gene's official symbol and its other names in one organism, from
+    /// NCBI Gene: the record whose symbol (else an alias) is `symbol`.
+    /// Empty when nothing matches. Lets a hit labelled with an old or
+    /// alternative symbol (GAPD for GAPDH) still count as the target.
+    pub async fn gene_aliases(&self, symbol: &str, organism: &str, api_key: Option<&str>) -> Result<Vec<String>, ProviderError> {
+        let term = format!("({symbol}[sym] OR {symbol}[gene]) AND \"{organism}\"[orgn] AND alive[prop]");
+        let ids = self.esearch_ids_with_key("gene", &term, 10, api_key).await?;
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let esummary = self.get_json_with_key(&format!("{EUTILS}/esummary.fcgi"), &[("db", "gene"), ("id", &ids.join(",")), ("retmode", "json")], api_key).await?;
+        let q = symbol.to_lowercase();
+        let names = |gid: &String| -> Vec<String> {
+            let g = &esummary["result"][gid.as_str()];
+            let mut out = vec![g["name"].as_str().unwrap_or_default().to_string()];
+            out.extend(g["otheraliases"].as_str().unwrap_or_default().split(',').map(|a| a.trim().to_string()));
+            out.retain(|n| !n.is_empty());
+            out
+        };
+        // Prefer the record whose official symbol is the query, then one
+        // listing it as an alias.
+        let pick = ids
+            .iter()
+            .find(|gid| names(gid).first().is_some_and(|n| n.to_lowercase() == q))
+            .or_else(|| ids.iter().find(|gid| names(gid).iter().any(|n| n.to_lowercase() == q)));
+        Ok(pick.map(names).unwrap_or_default())
+    }
+
     async fn fetch_region_sequence(&self, chrom: &str, chr_accession: &str, start: u64, end: u64) -> Result<Option<String>, ProviderError> {
         if end < start {
             return Ok(Some(String::new()));
@@ -907,6 +965,75 @@ fn compute_utrs(exons: &[Interval], cds: &[Interval], strand: Strand) -> (Vec<In
     (utr5, utr3)
 }
 
+/// One gene a GenBank record annotates (see `fetch_genes_at`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct AnnotatedGene {
+    pub symbol: String,
+    pub synonyms: Vec<String>,
+    /// NCBI Gene ID, when the feature cross-references one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gene_id: Option<String>,
+}
+
+/// The genes in an efetch `rettype=ft` feature table: every feature
+/// carrying a `gene` qualifier (gene features, but also mRNA/CDS ones in
+/// records without a separate gene feature), merged per symbol with their
+/// `gene_syn` synonyms and `db_xref GeneID:`. Feature header lines are
+/// `<from>\t<to>\t<type>`, extra intervals `<from>\t<to>`, qualifiers
+/// `\t\t\t<key>\t<value>`.
+pub fn parse_feature_table_genes(text: &str) -> Vec<AnnotatedGene> {
+    let mut genes: Vec<AnnotatedGene> = Vec::new();
+    let mut current: Option<AnnotatedGene> = None;
+    let flush = |g: Option<AnnotatedGene>, genes: &mut Vec<AnnotatedGene>| {
+        let Some(g) = g else { return };
+        if g.symbol.is_empty() {
+            return;
+        }
+        match genes.iter_mut().find(|e| e.symbol == g.symbol) {
+            Some(e) => {
+                for syn in g.synonyms {
+                    if !e.synonyms.contains(&syn) {
+                        e.synonyms.push(syn);
+                    }
+                }
+                if e.gene_id.is_none() {
+                    e.gene_id = g.gene_id;
+                }
+            }
+            None => genes.push(g),
+        }
+    };
+    for line in text.lines() {
+        if line.starts_with('>') || line.trim().is_empty() {
+            continue;
+        }
+        if let Some(q) = line.strip_prefix("\t\t\t") {
+            let Some(g) = current.as_mut() else { continue };
+            let mut kv = q.splitn(2, '\t');
+            let (key, value) = (kv.next().unwrap_or(""), kv.next().unwrap_or("").trim());
+            match key {
+                "gene" if g.symbol.is_empty() => g.symbol = value.to_string(),
+                "gene_syn" if !value.is_empty() && !g.synonyms.iter().any(|s| s == value) => g.synonyms.push(value.to_string()),
+                "db_xref" => {
+                    if let Some(id) = value.strip_prefix("GeneID:") {
+                        g.gene_id.get_or_insert_with(|| id.to_string());
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        // A new feature header (3 columns) starts a feature; an extra
+        // interval of the current one (2 columns) changes nothing.
+        if line.split('\t').filter(|c| !c.is_empty()).count() >= 3 {
+            flush(current.take(), &mut genes);
+            current = Some(AnnotatedGene { symbol: String::new(), synonyms: Vec::new(), gene_id: None });
+        }
+    }
+    flush(current.take(), &mut genes);
+    genes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1050,5 +1177,18 @@ mod tests {
         let (freq, allele) = extract_minor_allele(mafs.as_array().unwrap());
         assert_eq!(allele.as_deref(), Some("T"));
         assert!((freq.unwrap() - 0.0750799).abs() < 1e-6);
+    }
+
+    #[test]
+    fn feature_table_genes_merge_per_symbol_with_synonyms_and_id() {
+        let ft = ">Feature ref|NG_028283.4|\n<1\t>20\tgene\n\t\t\tgene\tVEGFA\n\t\t\tgene_syn\tVEGF\n\t\t\tgene_syn\tVPF\n\t\t\tgene_desc\tvascular endothelial growth factor A\n\t\t\tdb_xref\tGeneID:7422\n<1\t>20\tmRNA\n5\t9\n\t\t\tgene\tVEGFA\n\t\t\tproduct\tvascular endothelial growth factor A\n<1\t>20\tCDS\n\t\t\tproduct\tsome protein\n";
+        let genes = parse_feature_table_genes(ft);
+        assert_eq!(genes, vec![AnnotatedGene { symbol: "VEGFA".into(), synonyms: vec!["VEGF".into(), "VPF".into()], gene_id: Some("7422".into()) }]);
+    }
+
+    #[test]
+    fn feature_table_without_genes_is_empty() {
+        assert!(parse_feature_table_genes(">Feature gb|AC006064.1|\n").is_empty());
+        assert!(parse_feature_table_genes(">Feature gb|M10277.1|\n<1\t>21\tCDS\n\t\t\tproduct\tbeta-actin\n").is_empty());
     }
 }

@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 import type { BlastHit } from '../api/blast';
 import { flankKey, useHitFlanks } from '../utils/useHitFlanks';
+import { hitGenesKey, useHitGenes } from '../utils/hitGenes';
 import { assessPrimerHit, THREE_PRIME_WINDOW, type PrimingLevel } from '../utils/primerAlignment';
 import PrimerHitAlignment from './PrimerHitAlignment';
 import Badge from './ui/Badge';
@@ -37,6 +38,9 @@ export default function BlastResultsTable({ hits, onUse, primer }: Props) {
   // Fills in the primer ends BLAST left unaligned with the hit's real
   // bases, re-rendering as they land (see `useHitFlanks`).
   const { flanks } = useHitFlanks(hits, Boolean(primer));
+  // For a primer, which gene each hit really lies in - from the record's
+  // annotation at the hit, since its title can name a neighbouring gene.
+  const genes = useHitGenes(hits, Boolean(primer));
 
   const assessments = top.map((hit) => (primer ? assessPrimerHit(primer, hit, flanks[flankKey(hit)]) : null));
   const levelCounts = (Object.keys(LEVEL_TONE) as PrimingLevel[])
@@ -101,7 +105,19 @@ export default function BlastResultsTable({ hits, onUse, primer }: Props) {
                     <em>{hit.organism}</em>
                   </td>
                   <td className="px-4 py-3">
-                    <strong className="font-medium text-ink">{hit.gene_symbol || <span className="text-ink-faint">-</span>}</strong>
+                    {(() => {
+                      const annotated = genes[hitGenesKey(hit)];
+                      const atHit = annotated && annotated.length ? annotated.map((g) => g.symbol).join(', ') : null;
+                      if (!atHit) return <strong className="font-medium text-ink">{hit.gene_symbol || <span className="text-ink-faint">-</span>}</strong>;
+                      return (
+                        <>
+                          <strong className="font-medium text-ink" title="The gene this record annotates at the hit's position">
+                            {atHit}
+                          </strong>
+                          {hit.gene_symbol && !atHit.split(', ').includes(hit.gene_symbol) && <div className="text-[11px] text-ink-faint">record: {hit.gene_symbol}</div>}
+                        </>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3">
                     <div className="min-w-[200px]" title={hit.title}>

@@ -15,6 +15,7 @@ import BlastResultsTable from './BlastResultsTable';
 import SharedTargetsModal, { type PairBlast } from './SharedTargetsModal';
 import { ampliconSites, findSharedTargets } from '../utils/primerPairHits';
 import { cachedHitFlanks, flankKey, prefetchHitFlanks, useHitFlanks } from '../utils/useHitFlanks';
+import { cachedHitGenes, fetchTargetNames, hitGenesKey, prefetchHitGenes, useHitGenes, useTargetNames } from '../utils/hitGenes';
 import { buildBlastHitsCsv, buildBlastReportHtml, downloadText, hitsNeedingFlanks, type ReportPair, type ReportPrimer } from '../utils/blastReport';
 import Section from './ui/Section';
 import Badge from './ui/Badge';
@@ -189,10 +190,19 @@ function SharedTargetsCell({
     return [...(fwd.hits ?? []).filter((h) => revAcc.has(h.accession)), ...(rev.hits ?? []).filter((h) => fwdAcc.has(h.accession))];
   }, [ready, fwd, rev]);
   const { flanks } = useHitFlanks(sharedHits, ready);
+  // Which gene each shared hit really lies in, and the target's other
+  // names - so a record titled after a neighbouring gene, or an old
+  // symbol, isn't mistaken for an off-target.
+  const genes = useHitGenes(sharedHits, ready);
+  const names = useTargetNames(gene, fwd?.organism ?? 'homo_sapiens');
 
   if (!ready) return <span className="text-ink-faint">-</span>;
-  const targets = findSharedTargets(fwd.sequence, fwd.hits ?? [], rev.sequence, rev.hits ?? [], gene, designedSize, (h) => flanks[flankKey(h)]);
-  const sites = ampliconSites(targets.filter((t) => !t.onTarget));
+  const genesOf = (h: BlastHit) => genes[hitGenesKey(h)];
+  const targets = findSharedTargets(fwd.sequence, fwd.hits ?? [], rev.sequence, rev.hits ?? [], { gene, names, genesOf }, designedSize, (h) => flanks[flankKey(h)]);
+  const sites = ampliconSites(
+    targets.filter((t) => !t.onTarget),
+    genesOf,
+  );
   const likely = sites.filter((s) => !s.mismatched3);
   return (
     <button
@@ -753,14 +763,6 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
    * only every 10s, so this just needs to feel responsive. */
   const BLAST_POLL_MS = 3000;
 
-  /** BLASTs every designed primer (both sides of every placed amplicon,
-   * merged groups once - they share their pair) against NCBI in chunks,
-   * updating each primer's row as its chunk finishes. Each chunk is a
-   * server-side job polled to completion - the submit returns instantly,
-   * so no HTTP request is held open for the NCBI round-trip (which a
-   * reverse proxy would cut off with a 504). Restricted to the section's
-   * organism picker (default human). Per-primer checks are stored under
-   * `${design rsID}.fwd`/`.rev`. */
   /** The BLAST check as report input: every placed amplicon's pair, each
    * primer as it was BLASTed (flagged when the design or organism has
    * changed since). */
@@ -780,6 +782,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
     return placedAmplicons.map((amp) => ({
       label: amp.rsid,
       gene: amp.gene,
+      organism: blastChecks[`${amp.rsid}.fwd`]?.organism ?? blastOrganism,
       location: `${amp.chrom}:${amp.ampStart.toLocaleString('en-US')}-${amp.ampEnd.toLocaleString('en-US')}`,
       designedSize: amp.productSize,
       fwd: primer(blastChecks[`${amp.rsid}.fwd`], amp.fwd.sequence),
@@ -795,21 +798,35 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
     const pairs = reportPairs();
     setReportProgress({ kind, done: 0, total: 0 });
     try {
-      // The report judges only the hits it shows; the CSV lists every hit.
-      const needed = kind === 'html' ? hitsNeedingFlanks(pairs, cachedHitFlanks) : pairs.flatMap((pair) => [...pair.fwd.hits, ...pair.rev.hits]);
-      await prefetchHitFlanks(needed, (done, total) => setReportProgress({ kind, done, total }));
+      // Each target gene's other names, then - for the hits the verdicts
+      // and ranking depend on - which gene each lies in and the real bases
+      // at its unaligned primer ends (the CSV also gets every hit's ends).
+      for (const pair of pairs) pair.targetNames = await fetchTargetNames(pair.gene, pair.organism);
+      const judged = hitsNeedingFlanks(pairs, cachedHitFlanks, cachedHitGenes);
+      const ends = kind === 'html' ? judged : pairs.flatMap((pair) => [...pair.fwd.hits, ...pair.rev.hits]);
+      await prefetchHitGenes(judged, (done, total) => setReportProgress({ kind, done, total: total + ends.length }));
+      const genesDone = judged.length;
+      await prefetchHitFlanks(ends, (done, total) => setReportProgress({ kind, done: genesDone + done, total: genesDone + total }));
       const d = new Date();
       const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
       if (kind === 'html') {
-        downloadText(`primer-blast-report_${stamp}.html`, buildBlastReportHtml(pairs, { organism: speciesLabel(blastOrganism), generatedAt: d }, cachedHitFlanks), 'text/html');
+        downloadText(`primer-blast-report_${stamp}.html`, buildBlastReportHtml(pairs, { organism: speciesLabel(blastOrganism), generatedAt: d }, cachedHitFlanks, cachedHitGenes), 'text/html');
       } else {
-        downloadText(`primer-blast-hits_${stamp}.csv`, buildBlastHitsCsv(pairs, cachedHitFlanks), 'text/csv');
+        downloadText(`primer-blast-hits_${stamp}.csv`, buildBlastHitsCsv(pairs, cachedHitFlanks, cachedHitGenes), 'text/csv');
       }
     } finally {
       setReportProgress(null);
     }
   }
 
+  /** BLASTs every designed primer (both sides of every placed amplicon,
+   * merged groups once - they share their pair) against NCBI in chunks,
+   * updating each primer's row as its chunk finishes. Each chunk is a
+   * server-side job polled to completion - the submit returns instantly,
+   * so no HTTP request is held open for the NCBI round-trip (which a
+   * reverse proxy would cut off with a 504). Restricted to the section's
+   * organism picker (default human). Per-primer checks are stored under
+   * `${design rsID}.fwd`/`.rev`. */
   async function runBlastAll() {
     const targets: { id: string; sequence: string }[] = [];
     for (const amp of placedAmplicons) {
@@ -1441,7 +1458,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
             {Object.keys(blastChecks).length > 0 && !blasting && ' Results below are from a previous run - re-run after re-designing, dragging primers, or switching organism.'}
             {reportProgress && reportProgress.total > 0 && (
               <span role="status" className="ml-1 text-accent">
-                Fetching unaligned primer-end bases from NCBI ({reportProgress.done}/{reportProgress.total})…
+                Looking up hit genes and primer-end bases at NCBI ({reportProgress.done}/{reportProgress.total})…
               </span>
             )}
           </p>
@@ -1496,6 +1513,7 @@ export default function SnpBatchPanel({ selectedSpecies }: Props) {
                               title: `${amp.rsid} primer pair`,
                               gene: amp.gene,
                               designedSize: amp.productSize,
+                              organism: fwd.organism,
                               fwd: { primer: fwd.sequence, hits: fwd.hits ?? [] },
                               rev: { primer: rev.sequence, hits: rev.hits ?? [] },
                             })

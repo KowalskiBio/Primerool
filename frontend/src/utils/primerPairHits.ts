@@ -4,7 +4,7 @@
 // definition of an unintended product. Each primer's own 3'-end verdict
 // (see `primerAlignment.ts`) then decides whether that product is likely.
 
-import type { BlastHit, HitFlanks } from '../api/blast';
+import type { BlastHit, HitFlanks, HitGene } from '../api/blast';
 import { assessPrimerHit, type PrimerHitAssessment, type PrimingLevel } from './primerAlignment';
 
 /** A hit's fetched flanks (see `useHitFlanks`), when known - fills in the
@@ -46,12 +46,46 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Whether `hit` is a record of `gene` itself: its parsed gene symbol, or
- * the symbol as a whole word in the title ("... (TP53), mRNA"). */
-export function isGeneHit(hit: BlastHit, gene: string): boolean {
-  if (!gene) return false;
-  if (hit.gene_symbol && hit.gene_symbol.toUpperCase() === gene.toUpperCase()) return true;
-  return new RegExp(`(^|[^A-Za-z0-9-])${escapeRegExp(gene)}([^A-Za-z0-9-]|$)`, 'i').test(hit.title);
+/** The genes annotated at a hit's position (see `hitGenes.ts`), when
+ * looked up: `[]` = nothing annotated there, `null`/`undefined` unknown. */
+export type GenesOf = (hit: BlastHit) => HitGene[] | null | undefined;
+
+/** The gene a primer pair was designed for: its symbol, optionally its
+ * other names (so an old symbol like GAPD still counts as GAPDH) and the
+ * genes-at-hit lookup. A bare symbol works too. */
+export interface Target {
+  gene: string;
+  names?: readonly string[];
+  genesOf?: GenesOf;
+}
+
+const asTarget = (t: string | Target): Target => (typeof t === 'string' ? { gene: t } : t);
+
+/** The gene symbols annotated at a hit, e.g. "VEGFA" - `null` when not
+ * looked up or nothing is annotated there. */
+export function genesAtHit(hit: BlastHit, genesOf: GenesOf | undefined): string | null {
+  const genes = genesOf?.(hit);
+  return genes && genes.length ? genes.map((g) => g.symbol).join(', ') : null;
+}
+
+/** Whether `hit` lies in the target gene. When the hit's record annotates
+ * genes at the hit's position, that decides - by symbol, against the
+ * target's names - since a record's title can name a neighbouring gene (a
+ * RefSeqGene for POLR1C spans VEGFA too). Otherwise: the parsed gene
+ * symbol, or one of the names as a whole word in the title ("... (TP53),
+ * mRNA"). */
+export function isGeneHit(hit: BlastHit, target: string | Target): boolean {
+  const t = asTarget(target);
+  if (!t.gene) return false;
+  const names = [t.gene, ...(t.names ?? [])].map((n) => n.toUpperCase());
+  const annotated = t.genesOf?.(hit);
+  if (annotated && annotated.length) return annotated.some((g) => names.includes(g.symbol.toUpperCase()));
+  if (hit.gene_symbol && names.includes(hit.gene_symbol.toUpperCase())) return true;
+  // Short aliases ("MAL", "VPF") would match ordinary title words; only
+  // names of 4+ characters (and the symbol itself) are searched for.
+  return names
+    .filter((n, i) => i === 0 || n.length >= 4)
+    .some((n) => new RegExp(`(^|[^A-Za-z0-9-])${escapeRegExp(n)}([^A-Za-z0-9-]|$)`, 'i').test(hit.title));
 }
 
 /** Where the whole primer sits on the hit sequence: its 5' end and whether
@@ -84,7 +118,7 @@ export function findSharedTargets(
   fwdHits: BlastHit[],
   revPrimer: string,
   revHits: BlastHit[],
-  gene: string,
+  target: string | Target,
   designedSize: number | null,
   flanksOf: FlanksOf = noFlanks,
 ): SharedTarget[] {
@@ -109,7 +143,7 @@ export function findSharedTargets(
       fwd,
       rev,
       productSize: size,
-      onTarget: isGeneHit(fh, gene) || isGeneHit(rh, gene),
+      onTarget: isGeneHit(fh, target) || isGeneHit(rh, target),
       sameSizeAsTarget: size !== null && designedSize !== null && Math.abs(size - designedSize) <= SAME_SIZE_SLACK_BP,
       verdict,
     });
@@ -144,9 +178,9 @@ const SEVERITY: Record<PrimingLevel, number> = { perfect: 0, risk: 1, weak: 2, u
  * skipping the gene of interest and `locusAccessions` (sequences the pair
  * amplifies at the designed size, i.e. clones of the target locus). Ties
  * go to fewer mismatches at the 3' end, then overall, then E-value. */
-export function rankOffTargetHits(primer: string, hits: BlastHit[], gene: string, locusAccessions: ReadonlySet<string>, flanksOf: FlanksOf = noFlanks): RankedHit[] {
+export function rankOffTargetHits(primer: string, hits: BlastHit[], target: string | Target, locusAccessions: ReadonlySet<string>, flanksOf: FlanksOf = noFlanks): RankedHit[] {
   return hits
-    .filter((h) => !isGeneHit(h, gene) && !locusAccessions.has(h.accession))
+    .filter((h) => !isGeneHit(h, target) && !locusAccessions.has(h.accession))
     .map((hit) => ({ hit, assessment: assessPrimerHit(primer, hit, flanksOf(hit)) }))
     .sort((a, b) => {
       const sa = a.assessment ? SEVERITY[a.assessment.level] : SEVERITY.risk;
@@ -178,7 +212,7 @@ export interface AmpliconSite {
   records: SharedTarget[];
 }
 
-export function ampliconSites(off: SharedTarget[]): AmpliconSite[] {
+export function ampliconSites(off: SharedTarget[], genesOf?: GenesOf): AmpliconSite[] {
   const groups = new Map<number, SharedTarget[]>();
   for (const t of off) {
     if (t.productSize === null || t.sameSizeAsTarget) continue;
@@ -186,7 +220,8 @@ export function ampliconSites(off: SharedTarget[]): AmpliconSite[] {
   }
   return [...groups.values()]
     .map((records): AmpliconSite => {
-      const symbol = records.map((r) => r.fwd.hit.gene_symbol ?? r.rev.hit.gene_symbol).find(Boolean);
+      // The gene annotated at the hit beats the one in the record's title.
+      const symbol = records.map((r) => genesAtHit(r.fwd.hit, genesOf) ?? genesAtHit(r.rev.hit, genesOf) ?? r.fwd.hit.gene_symbol ?? r.rev.hit.gene_symbol).find(Boolean);
       const chrom = records.map((r) => titleChromosome(r.title)).find(Boolean);
       return {
         label: symbol ?? (chrom ? `chr${chrom}` : records[0].accession),

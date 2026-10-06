@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { BlastHit } from '../api/blast';
 import type { PrimerHitAssessment } from '../utils/primerAlignment';
-import { findSharedTargets, MAX_PRODUCT_BP, rankOffTargetHits, type RankedHit, type SharedTarget, type SharedTargetVerdict } from '../utils/primerPairHits';
+import { findSharedTargets, genesAtHit, MAX_PRODUCT_BP, rankOffTargetHits, type GenesOf, type RankedHit, type SharedTarget, type SharedTargetVerdict } from '../utils/primerPairHits';
+import { hitGenesKey, useHitGenes, useTargetNames } from '../utils/hitGenes';
 import { flankKey, useHitFlanks } from '../utils/useHitFlanks';
 import Modal from './ui/Modal';
 import Badge from './ui/Badge';
@@ -31,6 +32,8 @@ export interface PairBlast {
   /** The designed amplicon's length - a shared target giving a product of
    * this size is the target locus itself (see `findSharedTargets`). */
   designedSize: number | null;
+  /** Organism slug the pair was BLASTed against. */
+  organism: string;
   fwd: PrimerHits;
   rev: PrimerHits;
 }
@@ -39,6 +42,17 @@ interface Props {
   /** The pair to show, or `null` to keep the modal closed. */
   pair: PairBlast | null;
   onClose: () => void;
+}
+
+/** "lies in VEGFA": the gene the hit's record annotates at the hit,
+ * which can differ from the gene its title names. */
+function GeneAtHit({ hit, genesOf }: { hit: BlastHit; genesOf: GenesOf }) {
+  const g = genesAtHit(hit, genesOf);
+  return g ? (
+    <span className="whitespace-nowrap text-[11px] font-medium text-ink" title="The gene this record annotates at the hit's position">
+      lies in {g}
+    </span>
+  ) : null;
 }
 
 /** Coverage and identity over the whole primer, in one line. (No
@@ -55,7 +69,7 @@ function HitStats({ hit, assessment }: { hit: BlastHit; assessment: PrimerHitAss
 }
 
 /** One primer's off-target hits, worst first - the top few, or all. */
-function OffTargetList({ name, ranked, showAll }: { name: string; ranked: RankedHit[]; showAll: boolean }) {
+function OffTargetList({ name, ranked, showAll, genesOf }: { name: string; ranked: RankedHit[]; showAll: boolean; genesOf: GenesOf }) {
   const shown = showAll ? ranked : ranked.slice(0, TOP_OFF_TARGETS);
   return (
     <div className="min-w-0">
@@ -81,6 +95,7 @@ function OffTargetList({ name, ranked, showAll }: { name: string; ranked: Ranked
                   {hit.accession}
                 </a>
                 <HitStats hit={hit} assessment={assessment} />
+                <GeneAtHit hit={hit} genesOf={genesOf} />
               </div>
               <p className="mb-1.5 text-xs text-ink-muted" title={hit.title}>
                 {hit.title}
@@ -94,7 +109,7 @@ function OffTargetList({ name, ranked, showAll }: { name: string; ranked: Ranked
   );
 }
 
-function TargetCard({ t }: { t: SharedTarget }) {
+function TargetCard({ t, genesOf }: { t: SharedTarget; genesOf: GenesOf }) {
   const verdict = VERDICT[t.verdict];
   return (
     <div className="rounded-md border border-line bg-surface px-3 py-2.5">
@@ -133,6 +148,9 @@ function TargetCard({ t }: { t: SharedTarget }) {
               <span className="normal-case tracking-normal">
                 <HitStats hit={side.hit} assessment={side.assessment} />
               </span>
+              <span className="normal-case tracking-normal">
+                <GeneAtHit hit={side.hit} genesOf={genesOf} />
+              </span>
             </div>
             {side.assessment ? <PrimerHitAlignment hit={side.hit} assessment={side.assessment} /> : <span className="text-xs text-ink-faint">No alignment returned - re-run BLAST to get one.</span>}
           </div>
@@ -152,15 +170,23 @@ export default function SharedTargetsModal({ pair, onClose }: Props) {
   const allHits = useMemo(() => (pair ? [...pair.fwd.hits, ...pair.rev.hits] : []), [pair]);
   const { flanks, needed, resolved } = useHitFlanks(allHits, pair !== null);
   const flanksOf = (hit: BlastHit) => flanks[flankKey(hit)];
+  // Which gene each hit really lies in (its record's annotation at the
+  // hit, not the title) and the target gene's other names - together they
+  // decide what counts as the target.
+  const genes = useHitGenes(allHits, pair !== null);
+  const genesOf: GenesOf = (hit) => genes[hitGenesKey(hit)];
+  const genesPending = pair ? allHits.filter((h) => !h.direct && !(hitGenesKey(h) in genes)).length : 0;
+  const names = useTargetNames(pair?.gene ?? '', pair?.organism ?? 'homo_sapiens');
+  const target = { gene: pair?.gene ?? '', names, genesOf };
 
-  const targets = pair ? findSharedTargets(pair.fwd.primer, pair.fwd.hits, pair.rev.primer, pair.rev.hits, pair.gene, pair.designedSize, flanksOf) : [];
+  const targets = pair ? findSharedTargets(pair.fwd.primer, pair.fwd.hits, pair.rev.primer, pair.rev.hits, target, pair.designedSize, flanksOf) : [];
   const off = targets.filter((t) => !t.onTarget);
   const on = targets.filter((t) => t.onTarget);
   // Sequences the pair amplifies at the designed size are the target locus
   // itself (a BAC/PAC clone of it) - not "wrong" hits for either primer.
   const locus = new Set(targets.filter((t) => t.sameSizeAsTarget).map((t) => t.accession));
-  const fwdRanked = pair ? rankOffTargetHits(pair.fwd.primer, pair.fwd.hits, pair.gene, locus, flanksOf) : [];
-  const revRanked = pair ? rankOffTargetHits(pair.rev.primer, pair.rev.hits, pair.gene, locus, flanksOf) : [];
+  const fwdRanked = pair ? rankOffTargetHits(pair.fwd.primer, pair.fwd.hits, target, locus, flanksOf) : [];
+  const revRanked = pair ? rankOffTargetHits(pair.rev.primer, pair.rev.hits, target, locus, flanksOf) : [];
   const hidden = Math.max(0, fwdRanked.length - TOP_OFF_TARGETS) + Math.max(0, revRanked.length - TOP_OFF_TARGETS);
   const gene = pair?.gene ?? '';
 
@@ -175,17 +201,18 @@ export default function SharedTargetsModal({ pair, onClose }: Props) {
     >
       <h3 className="mb-1 text-sm font-semibold text-ink">Top off-target hits per primer</h3>
       <p className="mb-3 text-xs text-ink-muted">
-        Each primer&rsquo;s hits other than {gene} and its locus, most likely to prime first: perfect matches, then intact 3′ ends, then weak, then blocked. A primer binding elsewhere alone makes no
+        Each primer&rsquo;s hits other than {gene} and its locus (by the gene each hit&rsquo;s record annotates there, else its title), most likely to prime first: perfect matches, then intact 3′ ends, then weak, then blocked. A primer binding elsewhere alone makes no
         product, but it competes for primer and can pair with a third site. Per hit: BLAST query cover and identical bases over the whole primer.
       </p>
-      {needed > resolved && (
+      {(needed > resolved || genesPending > 0) && (
         <p role="status" className="mb-3 text-xs text-accent">
-          Fetching the bases opposite unaligned primer ends from NCBI ({resolved}/{needed}) - verdicts and order update as they arrive.
+          Looking up at NCBI which gene each hit lies in ({allHits.length - genesPending}/{allHits.length}) and the bases opposite unaligned primer ends ({resolved}/{needed}) - verdicts and order
+          update as they arrive.
         </p>
       )}
       <div className="mb-3 grid gap-4 lg:grid-cols-2">
-        <OffTargetList name="Forward" ranked={fwdRanked} showAll={showAll} />
-        <OffTargetList name="Reverse" ranked={revRanked} showAll={showAll} />
+        <OffTargetList name="Forward" ranked={fwdRanked} showAll={showAll} genesOf={genesOf} />
+        <OffTargetList name="Reverse" ranked={revRanked} showAll={showAll} genesOf={genesOf} />
       </div>
       {hidden > 0 && (
         <button type="button" onClick={() => setShowAll((v) => !v)} className="mb-6 text-xs font-medium text-accent hover:underline">
@@ -204,7 +231,7 @@ export default function SharedTargetsModal({ pair, onClose }: Props) {
       ) : (
         <div className="mb-5 grid gap-2">
           {off.map((t) => (
-            <TargetCard key={t.accession} t={t} />
+            <TargetCard key={t.accession} t={t} genesOf={genesOf} />
           ))}
         </div>
       )}
@@ -215,7 +242,7 @@ export default function SharedTargetsModal({ pair, onClose }: Props) {
           </summary>
           <div className="mt-2 grid gap-2">
             {on.map((t) => (
-              <TargetCard key={t.accession} t={t} />
+              <TargetCard key={t.accession} t={t} genesOf={genesOf} />
             ))}
           </div>
         </details>

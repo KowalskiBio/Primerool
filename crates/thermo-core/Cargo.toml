@@ -2,7 +2,7 @@
 name = "thermo-core"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT"
 authors.workspace = true
 description = "Plain-Rust DNA thermodynamics core (Tm, salt corrections, dimer/hairpin ΔG), ported from Strider's native/ crate with PyO3 stripped out."
 

@@ -1,4 +1,4 @@
-//! Forked verbatim from `strider/native/src/dimer.rs` (MIT, same author) —
+//! Forked verbatim from `strider/native/src/dimer.rs` (MIT, by Emilio Venegas; see LICENSE in this crate) —
 //! no PyO3 types in this file, so no changes were needed to lift it into a
 //! plain Rust crate. See the rewrite plan's Phase 1 upstreaming note: once
 //! Strider's crate gains an `rlib` target, this fork can be replaced with a

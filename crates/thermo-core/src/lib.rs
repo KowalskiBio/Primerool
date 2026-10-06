@@ -1,7 +1,7 @@
 //! Plain-Rust DNA thermodynamics core.
 //!
 //! De-PyO3'd fork of `strider/native/src/{lib,dimer,tables,tables_dna}.rs`
-//! (MIT, same author) — Strider's crate is `crate-type = ["cdylib"]` only
+//! (MIT, by Emilio Venegas; see LICENSE in this crate) — Strider's crate is `crate-type = ["cdylib"]` only
 //! and every public function is PyO3-bound, so it cannot be linked into a
 //! normal Rust binary as-is. Every function below is mechanically
 //! equivalent to its Strider counterpart: `PyResult<T>`/`PyErr` become

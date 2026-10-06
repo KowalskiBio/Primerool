@@ -14,7 +14,7 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06b6d4?style=flat-square&logo=tailwindcss&logoColor=white)](frontend)
 [![Vite](https://img.shields.io/badge/Vite-7-646cff?style=flat-square&logo=vite&logoColor=white)](frontend)
 [![Tauri](https://img.shields.io/badge/desktop-Tauri-24c8db?style=flat-square&logo=tauri&logoColor=white)](src-tauri)
-[![License: CC0](https://img.shields.io/badge/license-CC0_1.0-lightgrey?style=flat-square)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](LICENSE)
 
 [**Features**](#features) · [**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Architecture**](#architecture) · [**Development**](#development)
 
@@ -289,7 +289,11 @@ Primerool stands on the shoulders of [MAFFT](https://mafft.cbrc.jp/alignment/sof
 
 ## License
 
-Released into the public domain under [CC0 1.0 Universal](LICENSE): use it freely, for any purpose.
+Copyright (C) 2026 Vojtech Rejtar.
+
+Primerool is licensed under the [GNU Affero General Public License v3.0 or later](LICENSE) (AGPL-3.0-or-later). If you modify it and let others use it, including over a network, you must publish your modified source under the same license and keep the original copyright and attribution notices.
+
+Third-party code keeps its own license: `crates/thermo-core` is derived from Strider ([MIT](crates/thermo-core/LICENSE), Copyright (c) 2026 Emilio Venegas), and the vendored Primer3 in `vendor/primer3-py` is GPL-2.0-or-later.
 
 <div align="center">
 <br />

@@ -2,7 +2,7 @@
 name = "primer3-sys"
 version.workspace = true
 edition.workspace = true
-license = "GPL-2.0-only"
+license = "GPL-2.0-or-later"
 authors.workspace = true
 description = "Raw FFI bindings to the vendored Primer3 C library (thal/oligotm/libprimer3). No logic beyond the binding layer lives here."
 build = "build.rs"

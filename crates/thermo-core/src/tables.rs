@@ -1,4 +1,4 @@
-//! Forked verbatim from `strider/native/src/tables.rs` (MIT, same author) —
+//! Forked verbatim from `strider/native/src/tables.rs` (MIT, by Emilio Venegas; see LICENSE in this crate) —
 //! pure data + lookup helpers, no PyO3 dependency. See dimer.rs's header
 //! for the upstreaming note.
 //!

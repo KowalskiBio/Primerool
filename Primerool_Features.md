@@ -51,8 +51,8 @@ Primerool is a cloud-based, local web application that allows molecular biologis
 ## Typical Workflow
 
 1. **Launch the Application**
-   - **macOS:** Open the `Primerool.app` bundle to launch the native desktop application.
-   - **Windows:** Run `Run_primerool.bat` or `Primerool.exe` to start the application.
+   - Use the hosted app, or run it locally with `npm run setup && npm run dev` (see the README's Quick start).
+   - For a native desktop window, build the Tauri shell: `cargo tauri build`.
 
 2. **Organism and Data Source Selection**
    - Select your target organism and preferred data API (Ensembl or NCBI).

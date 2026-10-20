@@ -1,8 +1,9 @@
 //! NCBI E-utilities provider, ported from `ncbi_api.py`.
 //!
-//! Rate-limited to ~3 req/s (`_MIN_INTERVAL = 0.34`), single attempt, no
-//! retry — deliberately less robust than Ensembl's client, and deliberately
-//! not sharing a rate limiter with it. Carries a load-bearing, process-
+//! Rate-limited to ~3 req/s (`_MIN_INTERVAL = 0.34`). The only retry is
+//! on HTTP 429: NCBI's keyless limit is per IP, shared with other apps on
+//! the same host, so this process's own pacing cannot rule it out. Still
+//! deliberately not sharing a rate limiter with Ensembl's client. Carries a load-bearing, process-
 //! lifetime, stateful transcript cache (`transcript_cache`, populated by
 //! `search_gene`, read by `get_transcript_details`): NCBI has no
 //! per-transcript structured lookup, so `gene_table` parsing only happens
@@ -26,6 +27,17 @@ use crate::{revcomp, strip_fasta, Feature, GeneMatch, GeneSearchResult, Interval
 
 const EUTILS: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const MIN_INTERVAL: Duration = Duration::from_millis(340); // ~3 req/s, no API key
+/// Retries after an HTTP 429 (rate limit exceeded), waiting 1 s, then 2 s.
+const MAX_RATE_LIMIT_RETRIES: u32 = 2;
+
+tokio::task_local! {
+    /// The NCBI API key of the HTTP request being served (the browser's
+    /// Settings key, set by the server's middleware), so every E-utilities
+    /// call made for that request carries it without threading a key
+    /// through `SequenceProvider`. Calls outside a request scope (tests,
+    /// spawned tasks) see none and fall back to keyless.
+    pub static REQUEST_API_KEY: Option<String>;
+}
 
 /// Caps how many `db=snp` `esearch` hits a region search will pull details
 /// for. Unlike Ensembl's single `/overlap/region` call, satisfying a region
@@ -80,36 +92,46 @@ impl NcbiProvider {
         }
     }
 
-    /// Direct port of `ncbi_api.py::_get`: rate-limited, single-attempt,
-    /// no retry (unlike Ensembl's `_get`).
+    /// Port of `ncbi_api.py::_get`: rate-limited, and retried only when
+    /// NCBI answers 429 (unlike Ensembl's `_get`, which retries more).
     async fn get(&self, url: &str, params: &[(&str, &str)], timeout: Duration) -> Result<reqwest::Response, ProviderError> {
         self.get_with_key(url, params, None, timeout).await
     }
 
-    /// `get` plus an optional per-request NCBI API key (appended as the
-    /// `api_key` query parameter). All callers go through here with `None`
-    /// except the ones made key-aware by the BLAST sequence route.
+    /// `get` plus an NCBI API key (appended as the `api_key` query
+    /// parameter): the explicit one when given, else the request's
+    /// `REQUEST_API_KEY`, else none.
     async fn get_with_key(&self, url: &str, params: &[(&str, &str)], api_key: Option<&str>, timeout: Duration) -> Result<reqwest::Response, ProviderError> {
-        {
-            let mut last = self.last_request.lock().await;
-            let elapsed = last.elapsed();
-            if elapsed < MIN_INTERVAL {
-                tokio::time::sleep(MIN_INTERVAL - elapsed).await;
+        let scoped = REQUEST_API_KEY.try_with(|k| k.clone()).ok().flatten();
+        let api_key = api_key.or(scoped.as_deref());
+        let mut retries = 0;
+        loop {
+            {
+                let mut last = self.last_request.lock().await;
+                let elapsed = last.elapsed();
+                if elapsed < MIN_INTERVAL {
+                    tokio::time::sleep(MIN_INTERVAL - elapsed).await;
+                }
+                *last = Instant::now();
             }
-            *last = Instant::now();
-        }
 
-        let mut req = self.client.get(url).query(params);
-        if let Some(key) = api_key {
-            req = req.query(&[("api_key", key)]);
+            let mut req = self.client.get(url).query(params);
+            if let Some(key) = api_key {
+                req = req.query(&[("api_key", key)]);
+            }
+            let resp = req.timeout(timeout).send().await?;
+            let status = resp.status().as_u16();
+            if status == 429 && retries < MAX_RATE_LIMIT_RETRIES {
+                retries += 1;
+                tokio::time::sleep(Duration::from_secs(retries as u64)).await;
+                continue;
+            }
+            if status >= 400 {
+                let message = resp.text().await.unwrap_or_default();
+                return Err(ProviderError::UpstreamStatus { status, message });
+            }
+            return Ok(resp);
         }
-        let resp = req.timeout(timeout).send().await?;
-        let status = resp.status().as_u16();
-        if status >= 400 {
-            let message = resp.text().await.unwrap_or_default();
-            return Err(ProviderError::UpstreamStatus { status, message });
-        }
-        Ok(resp)
     }
 
     async fn get_json(&self, url: &str, params: &[(&str, &str)]) -> Result<Value, ProviderError> {

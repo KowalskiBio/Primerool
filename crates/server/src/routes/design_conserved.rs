@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 
 use engine::backend::ThermoParams;
 use engine::backend_native::NativeBackend;
-use engine::conserved::{design_pairs_in_conserved_region, majority_consensus, parse_aligned_fasta, scan_conserved_region, ConservedError};
+use engine::conserved::{design_pairs_between_windows, design_pairs_in_conserved_region, majority_consensus, parse_aligned_fasta, scan_conserved_region, ConservedError, ConservedOligo, ConservedPair};
 use engine::picker::{CandidateConstraints, GcRange, PenaltyWeights, SizeRange, TmRange};
 
 use crate::error::AppError;
@@ -29,6 +29,11 @@ pub struct DesignConservedRequest {
     pub col_end: usize,
     pub target_start: Option<usize>,
     pub target_end: Option<usize>,
+    /// Pair mode over two alignment-column windows, `[start, end)` each:
+    /// the forward primer inside `left_cols`, the reverse inside
+    /// `right_cols`. Takes precedence over `target_start`/`target_end`.
+    pub left_cols: Option<(usize, usize)>,
+    pub right_cols: Option<(usize, usize)>,
     pub size_min: u32,
     pub size_opt: u32,
     pub size_max: u32,
@@ -50,6 +55,8 @@ impl Default for DesignConservedRequest {
             col_end: 0,
             target_start: None,
             target_end: None,
+            left_cols: None,
+            right_cols: None,
             size_min: 18,
             size_opt: 20,
             size_max: 25,
@@ -90,39 +97,50 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
     tokio::task::spawn_blocking(move || {
         let backend = NativeBackend;
 
-        if let (Some(target_start), Some(target_end)) = (req.target_start, req.target_end) {
-            let pairs = design_pairs_in_conserved_region(
-                &backend,
-                &records,
-                req.col_start,
-                req.col_end,
-                target_start,
-                target_end,
-                &constraints,
-                (req.product_size_min, req.product_size_max),
-                thermo,
-                req.num_return,
-            )
-            .map_err(map_conserved_error)?;
+        let windows = match (req.left_cols, req.right_cols) {
+            (Some(left), Some(right)) => {
+                if left.0 >= left.1 || right.0 >= right.1 || left.1 > right.0 {
+                    return Err(AppError::bad_request("The left window must end before the right window starts."));
+                }
+                Some((left, right))
+            }
+            _ => None,
+        };
 
+        let pairs = if let Some((left, right)) = windows {
+            Some(design_pairs_between_windows(&backend, &records, left, right, &constraints, (req.product_size_min, req.product_size_max), thermo, req.num_return).map_err(map_conserved_error)?)
+        } else if let (Some(target_start), Some(target_end)) = (req.target_start, req.target_end) {
+            Some(
+                design_pairs_in_conserved_region(
+                    &backend,
+                    &records,
+                    req.col_start,
+                    req.col_end,
+                    target_start,
+                    target_end,
+                    &constraints,
+                    (req.product_size_min, req.product_size_max),
+                    thermo,
+                    req.num_return,
+                )
+                .map_err(map_conserved_error)?,
+            )
+        } else {
+            None
+        };
+
+        if let Some(pairs) = pairs {
             if pairs.is_empty() {
-                return Err(AppError::not_found("No primer pairs found flanking the target within this conserved region."));
+                return Err(AppError::not_found(if windows.is_some() {
+                    "No primer pairs found with the forward primer in the first window and the reverse in the second - try longer windows or a wider product size range."
+                } else {
+                    "No primer pairs found flanking the target within this conserved region."
+                }));
             }
 
-            let consensus = majority_consensus(&records, req.col_start, req.col_end).map_err(map_conserved_error)?;
-            let pairs_json: Vec<Value> = pairs
-                .iter()
-                .map(|p| {
-                    json!({
-                        "left": { "sequence": p.left.sequence, "start": p.left.candidate.start, "end": p.left.candidate.end, "tm": p.left.tm, "gc_percent": p.left.gc_percent, "penalty": p.left.penalty },
-                        "right": { "sequence": p.right.sequence, "start": p.right.candidate.start, "end": p.right.candidate.end, "tm": p.right.tm, "gc_percent": p.right.gc_percent, "penalty": p.right.penalty },
-                        "product_size": p.product_size,
-                        "heterodimer": p.heterodimer,
-                        "penalty": p.penalty,
-                    })
-                })
-                .collect();
-
+            let (from, to) = windows.map_or((req.col_start, req.col_end), |(left, right)| (left.0, right.1));
+            let consensus = majority_consensus(&records, from, to).map_err(map_conserved_error)?;
+            let pairs_json: Vec<Value> = pairs.iter().map(pair_json).collect();
             Ok(Json(json!({ "mode": "pairs", "consensus_length": consensus.len(), "pairs": pairs_json })))
         } else {
             let scored = scan_conserved_region(&backend, &records, req.col_start, req.col_end, &constraints, thermo, &PenaltyWeights::default(), req.num_return).map_err(map_conserved_error)?;
@@ -134,17 +152,11 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
             let consensus = majority_consensus(&records, req.col_start, req.col_end).map_err(map_conserved_error)?;
             let candidates_json: Vec<Value> = scored
                 .iter()
-                .map(|sc| {
-                    json!({
-                        "sequence": sc.sequence,
-                        "start": sc.candidate.start,
-                        "end": sc.candidate.end,
-                        "tm": sc.tm,
-                        "gc_percent": sc.gc_percent,
-                        "hairpin": sc.hairpin,
-                        "self_dimer": sc.self_dimer,
-                        "penalty": sc.penalty,
-                    })
+                .map(|o| {
+                    let mut v = oligo_json(o);
+                    v["hairpin"] = json!(o.oligo.hairpin);
+                    v["self_dimer"] = json!(o.oligo.self_dimer);
+                    v
                 })
                 .collect();
 
@@ -153,4 +165,30 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
     })
     .await
     .map_err(|e| AppError::server_error(format!("Server error: design task panicked: {e}")))?
+}
+
+/// One oligo's JSON: consensus offsets (`start`/`end`), the alignment
+/// columns it spans, and how many sequences it matches.
+fn oligo_json(o: &ConservedOligo) -> Value {
+    json!({
+        "sequence": o.oligo.sequence,
+        "start": o.oligo.candidate.start,
+        "end": o.oligo.candidate.end,
+        "col_start": o.columns.0,
+        "col_end": o.columns.1,
+        "tm": o.oligo.tm,
+        "gc_percent": o.oligo.gc_percent,
+        "penalty": o.oligo.penalty,
+        "coverage": o.coverage,
+    })
+}
+
+fn pair_json(p: &ConservedPair) -> Value {
+    json!({
+        "left": oligo_json(&p.left),
+        "right": oligo_json(&p.right),
+        "product_size": p.pair.product_size,
+        "heterodimer": p.pair.heterodimer,
+        "penalty": p.pair.penalty,
+    })
 }

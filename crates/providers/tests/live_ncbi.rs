@@ -105,3 +105,18 @@ async fn gene_missing_from_ncbi_gene_falls_back_to_a_genbank_protein_cds() {
         assert!(cds.starts_with("ATG") || cds.starts_with("GTG") || cds.starts_with("TTG"), "{} should open with a start codon", &cds[..3]);
     }
 }
+
+#[tokio::test]
+#[ignore = "hits live NCBI E-utilities; run explicitly"]
+async fn nirs_homologs_across_pseudomonas_cover_many_species() {
+    let provider = providers::ncbi::NcbiProvider::new();
+    let homologs = provider.collect_homologs("nirS", "txid286[orgn]", 25).await.unwrap();
+
+    let species: std::collections::HashSet<&str> = homologs.iter().map(|h| h.species.as_str()).collect();
+    assert_eq!(species.len(), homologs.len(), "one homolog per species");
+    assert!(homologs.len() >= 10, "only {} species: {:?}", homologs.len(), species);
+    for h in &homologs {
+        assert_eq!(h.sequence.len() as u64, h.end - h.start + 1, "{}", h.species);
+        assert!(["ATG", "GTG", "TTG"].contains(&&h.sequence[..3]), "{} opens with {}", h.species, &h.sequence[..3]);
+    }
+}

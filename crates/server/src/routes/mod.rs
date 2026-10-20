@@ -15,6 +15,7 @@ pub mod design_primers;
 pub mod design_probe;
 pub mod gene;
 pub mod hit_genes;
+pub mod homologs;
 pub mod idt;
 pub mod import_snp;
 pub mod lookup_variant;

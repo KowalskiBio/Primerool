@@ -16,10 +16,23 @@ export function alignSequences(sequences: AlignSequenceInput[]): Promise<AlignRe
   return postJson<AlignResponse>('/align', { sequences });
 }
 
+/** How many of the aligned sequences an oligo matches exactly. */
+export interface Coverage {
+  matching_rows: number;
+  total_rows: number;
+  /** Rows with a mismatch or gap in the oligo's 3'-terminal 5 bases -
+   * the ones it is unlikely to amplify. */
+  three_prime_mismatch_rows: number;
+}
+
 export interface ConservedCandidate {
   sequence: string;
   start: number;
   end: number;
+  /** The alignment columns it spans, `[col_start, col_end)`. */
+  col_start: number;
+  col_end: number;
+  coverage: Coverage;
   tm: number;
   gc_percent: number;
   hairpin: DimerResult;
@@ -37,6 +50,9 @@ export interface ConservedPairOligo {
   sequence: string;
   start: number;
   end: number;
+  col_start: number;
+  col_end: number;
+  coverage: Coverage;
   tm: number;
   gc_percent: number;
   penalty: number;
@@ -62,6 +78,10 @@ export interface DesignConservedRequest {
   col_end: number;
   target_start?: number;
   target_end?: number;
+  /** Pair mode across two alignment-column windows, `[start, end)` each:
+   * forward primer in `left_cols`, reverse in `right_cols`. */
+  left_cols?: [number, number];
+  right_cols?: [number, number];
   size_min?: number;
   size_opt?: number;
   size_max?: number;

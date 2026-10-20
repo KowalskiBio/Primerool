@@ -182,72 +182,15 @@ pub struct BlastBatchQueryResult {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BlastBatchResponse {
     pub results: Vec<BlastBatchQueryResult>,
 }
 
-/// A `/blast_batch` job's stored outcome — `None` until the spawned task
-/// finishes. The `String` error is the whole-request failure message
-/// (submission/poll/parse failure), mirroring what the synchronous
-/// version returned as an `AppError`.
-struct JobCell {
-    outcome: Option<Result<BlastBatchResponse, String>>,
-    created: std::time::Instant,
-}
-
-/// In-memory store of `/blast_batch` jobs, shared through `AppState`.
-/// The route used to answer one request only after the whole NCBI
-/// round-trip (~30-600s), which a reverse proxy in front of the server
-/// (nginx's ~60s default) cuts off with a 504 — the job API answers the
-/// POST immediately and the client polls `GET /blast_batch_status/:id`
-/// instead, so no request is held open for the BLAST's duration. Jobs
-/// die with the process (a deploy mid-run surfaces as a 404 to the
-/// poller, which the frontend reports per primer), and finished jobs are
-/// pruned when an hour old or past the size cap, whichever hits first.
-#[derive(Default)]
-pub struct BlastJobStore {
-    jobs: std::sync::Mutex<std::collections::HashMap<String, JobCell>>,
-}
-
-const JOB_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
-const JOB_CAP: usize = 128;
-
-impl BlastJobStore {
-    fn new_job_id() -> String {
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
-        format!("{nanos:x}-{n:x}-{}", std::process::id())
-    }
-
-    fn insert(&self) -> String {
-        let id = Self::new_job_id();
-        let mut jobs = self.jobs.lock().expect("blast job store poisoned");
-        self.prune(&mut jobs, std::time::Instant::now());
-        jobs.insert(id.clone(), JobCell { outcome: None, created: std::time::Instant::now() });
-        id
-    }
-
-    fn finish(&self, id: &str, outcome: Result<BlastBatchResponse, String>) {
-        if let Some(cell) = self.jobs.lock().expect("blast job store poisoned").get_mut(id) {
-            cell.outcome = Some(outcome);
-        }
-    }
-
-    /// Drops finished jobs older than `JOB_TTL`, then oldest-first once
-    /// the store exceeds `JOB_CAP` — running jobs are never dropped.
-    fn prune(&self, jobs: &mut std::collections::HashMap<String, JobCell>, now: std::time::Instant) {
-        jobs.retain(|_, cell| cell.outcome.is_none() || now.duration_since(cell.created) < JOB_TTL);
-        if jobs.len() > JOB_CAP {
-            let mut finished: Vec<(std::time::Instant, String)> = jobs.iter().filter(|(_, c)| c.outcome.is_some()).map(|(id, c)| (c.created, id.clone())).collect();
-            finished.sort();
-            for (_, id) in finished.into_iter().take(jobs.len() - JOB_CAP) {
-                jobs.remove(&id);
-            }
-        }
-    }
-}
+/// Background `/blast_batch` jobs (see `crate::jobs::JobStore`): the
+/// route used to answer only after the whole NCBI round-trip (~30-600s),
+/// which nginx's ~60s proxy timeout cut off with a 504.
+pub type BlastJobStore = crate::jobs::JobStore<BlastBatchResponse>;
 
 fn valid_batch_id(id: &str) -> bool {
     let id = id.trim();
@@ -387,14 +330,11 @@ pub async fn blast_batch(State(state): State<AppState>, Json(req): Json<BlastBat
 /// finishes, then the job's per-query results, or its error. Unknown
 /// (expired, or lost to a server restart) job ids are a 404.
 pub async fn blast_batch_status(State(state): State<AppState>, axum::extract::Path(job_id): axum::extract::Path<String>) -> Result<Json<BlastJobStatus>, AppError> {
-    let jobs = state.blast_jobs.jobs.lock().expect("blast job store poisoned");
-    match jobs.get(&job_id) {
+    match state.blast_jobs.status(&job_id) {
         None => Err(AppError::not_found("Unknown or expired BLAST job id")),
-        Some(cell) => match &cell.outcome {
-            None => Ok(Json(BlastJobStatus { status: "running", results: None, error: None })),
-            Some(Ok(response)) => Ok(Json(BlastJobStatus { status: "done", results: Some(response.results.clone()), error: None })),
-            Some(Err(message)) => Ok(Json(BlastJobStatus { status: "error", results: None, error: Some(message.clone()) })),
-        },
+        Some(None) => Ok(Json(BlastJobStatus { status: "running", results: None, error: None })),
+        Some(Some(Ok(response))) => Ok(Json(BlastJobStatus { status: "done", results: Some(response.results), error: None })),
+        Some(Some(Err(message))) => Ok(Json(BlastJobStatus { status: "error", results: None, error: Some(message) })),
     }
 }
 
@@ -534,41 +474,5 @@ mod tests {
         assert!(resolve_organism("Homo sapiens [organism]").is_err());
         assert!(resolve_organism("homo sapiens:1").is_err());
         assert!(resolve_organism(&"x".repeat(201)).is_err());
-    }
-
-    #[test]
-    fn job_store_lifecycle_and_prune() {
-        let store = BlastJobStore::default();
-
-        let a = store.insert();
-        let b = store.insert();
-        assert_ne!(a, b);
-        // Both known and still running before any outcome lands.
-        {
-            let jobs = store.jobs.lock().unwrap();
-            assert!(jobs.get(&a).is_some_and(|c| c.outcome.is_none()));
-            assert!(jobs.get(&b).is_some_and(|c| c.outcome.is_none()));
-        }
-
-        let response = BlastBatchResponse { results: vec![BlastBatchQueryResult { id: "x.fwd".into(), status: "done", hits: Some(vec![]), error: None }] };
-        store.finish(&a, Ok(response));
-        assert!(store.jobs.lock().unwrap().get(&a).is_some_and(|c| c.outcome.is_some()));
-
-        // A finished job past the TTL is pruned on the next insert; a
-        // running job never is, however old.
-        let mut jobs = store.jobs.lock().unwrap();
-        let now = std::time::Instant::now();
-        let old = now - std::time::Duration::from_secs(JOB_TTL.as_secs() + 1);
-        if let Some(cell) = jobs.get_mut(&a) {
-            cell.created = old;
-        }
-        if let Some(cell) = jobs.get_mut(&b) {
-            cell.created = old;
-        }
-        drop(jobs);
-        store.prune(&mut store.jobs.lock().unwrap(), std::time::Instant::now());
-        let jobs = store.jobs.lock().unwrap();
-        assert!(!jobs.contains_key(&a), "finished job past TTL must be pruned");
-        assert!(jobs.contains_key(&b), "running job must survive pruning");
     }
 }

@@ -161,7 +161,9 @@ One set of reaction conditions is used everywhere: design, analysis, structures 
 
 - Paste **FASTA**, **GenBank** (a whole record or just its numbered sequence lines) or one bare sequence per line. You can also add the loaded sequence, or **every other transcript variant** of the gene, in one click.
 - **MAFFT** aligns them. The result shows the classic way: a column ruler, one numbered row per sequence, a match line, mismatches highlighted and gaps dimmed.
-- **Design primers in a conserved column range**, as individual candidates or as pairs around a target.
+- **Collect homologs across species**: give a gene and a taxon (e.g. nirS in *Pseudomonas*, or a taxonomy ID) and get one coding sequence per species, from GenBank proteins that record where they are coded.
+- A **conservation track** and a list of **conserved windows** (adjustable identity threshold and length) show where primers can go.
+- **Design primers in a conserved window** or a column range, as individual candidates, as pairs around a target, or as a pair across two windows. Every primer shows how many of the aligned sequences it matches, and how many would fail at its 3′ end.
 
 ---
 

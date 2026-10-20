@@ -503,6 +503,141 @@ impl NcbiProvider {
         let label = format!("{} (CDS, {source}, {})", cds.gene, cds.accession);
         Ok(Some(self.load_region(&cds.gene, &cds.protein, &cds.accession, cds.start, cds.end, cds.strand, &label).await))
     }
+
+    /// One CDS of `gene` per species within a taxon - the input for a
+    /// cross-species alignment. GenBank proteins are the source (NCBI
+    /// Gene lacks most prokaryote genomes), but they are dominated by
+    /// whichever species is sequenced most (~90% P. aeruginosa for nirS
+    /// in Pseudomonas), so species are chosen from cheap docsums first
+    /// and only the chosen proteins' GenPept records are fetched.
+    pub async fn collect_homologs(&self, gene: &str, organism_term: &str, max_species: usize) -> Result<Vec<Homolog>, ProviderError> {
+        let ids = self.esearch_ids("protein", &format!("{gene}[gene] AND {organism_term}"), MAX_HOMOLOG_PROTEINS).await?;
+        let mut docsums = Vec::new();
+        for chunk in ids.chunks(200) {
+            let esummary = self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "protein"), ("id", &chunk.join(",")), ("retmode", "json")]).await?;
+            for id in chunk {
+                let d = &esummary["result"][id.as_str()];
+                docsums.push(ProteinDocsum {
+                    accession: d["accessionversion"].as_str().unwrap_or_default().to_string(),
+                    organism: d["organism"].as_str().unwrap_or_default().to_string(),
+                    taxid: d["taxid"].as_u64().unwrap_or(0),
+                    complete: d["completeness"].as_str() == Some("complete"),
+                });
+            }
+        }
+        let groups = group_by_species(&docsums, max_species);
+
+        // Up to HOMOLOG_TRIES proteins per species, fetched round by
+        // round: the first of each, then the next for species whose
+        // record had no usable location.
+        let mut found: Vec<Option<ProteinCds>> = vec![None; groups.len()];
+        for round in 0..HOMOLOG_TRIES {
+            let wanted: Vec<&str> = groups.iter().zip(&found).filter(|(_, f)| f.is_none()).filter_map(|(g, _)| g.proteins.get(round).map(String::as_str)).collect();
+            if wanted.is_empty() {
+                break;
+            }
+            let resp = self.get(&format!("{EUTILS}/efetch.fcgi"), &[("db", "protein"), ("id", &wanted.join(",")), ("rettype", "gp"), ("retmode", "text")], Duration::from_secs(120)).await?;
+            let parsed = parse_coded_by_cdss(&resp.text().await?, gene);
+            for (group, slot) in groups.iter().zip(found.iter_mut()) {
+                if slot.is_none() {
+                    if let Some(protein) = group.proteins.get(round) {
+                        *slot = parsed.iter().find(|c| &c.protein == protein).cloned();
+                    }
+                }
+            }
+        }
+
+        let mut homologs = Vec::new();
+        for (group, cds) in groups.into_iter().zip(found) {
+            let Some(cds) = cds else { continue };
+            let Some(mut seq) = self.fetch_region_sequence(&cds.accession, &cds.accession, cds.start, cds.end).await? else { continue };
+            if cds.strand == Strand::Minus {
+                seq = revcomp(&seq);
+            }
+            homologs.push(Homolog {
+                species: group.species,
+                isolate: group.isolate,
+                organism: cds.organism,
+                strain: cds.strain,
+                gene: cds.gene,
+                protein: cds.protein,
+                accession: cds.accession,
+                start: cds.start,
+                end: cds.end,
+                minus_strand: cds.strand == Strand::Minus,
+                sequence: seq.to_uppercase(),
+            });
+        }
+        Ok(homologs)
+    }
+}
+
+/// How many protein ids `collect_homologs` looks through - enough to
+/// reach past a dominant species to the rare ones.
+const MAX_HOMOLOG_PROTEINS: usize = 2000;
+/// Proteins tried per species before giving up on it.
+const HOMOLOG_TRIES: usize = 3;
+
+/// One species' CDS of a gene, from `collect_homologs`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Homolog {
+    /// The species as grouped ("Pseudomonas veronii"), or the whole
+    /// organism name for an unnamed isolate ("Pseudomonas sp. LY-1").
+    pub species: String,
+    pub isolate: bool,
+    pub organism: String,
+    pub strain: Option<String>,
+    pub gene: String,
+    pub protein: String,
+    pub accession: String,
+    pub start: u64,
+    pub end: u64,
+    pub minus_strand: bool,
+    /// The CDS, 5'->3' in the gene's own sense.
+    pub sequence: String,
+}
+
+/// The bits of a protein `esummary` record species selection needs.
+#[derive(Debug, Clone)]
+struct ProteinDocsum {
+    accession: String,
+    organism: String,
+    taxid: u64,
+    complete: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct SpeciesGroup {
+    species: String,
+    isolate: bool,
+    /// Candidate protein accessions, best first, at most `HOMOLOG_TRIES`.
+    proteins: Vec<String>,
+}
+
+/// Groups proteins by species, keeping only complete GenBank/RefSeq
+/// proteins that can carry a genome location (multi-genome WP_ ones
+/// can't) of identified organisms ("uncultured bacterium" can't anchor a
+/// species). Named species come first, then "sp." isolates, each in
+/// first-seen (relevance) order, at most `max` groups.
+fn group_by_species(docsums: &[ProteinDocsum], max: usize) -> Vec<SpeciesGroup> {
+    let mut groups: IndexMap<String, SpeciesGroup> = IndexMap::new();
+    for d in docsums {
+        if !d.complete || d.taxid == 0 || d.accession.is_empty() || d.accession.starts_with("WP_") {
+            continue;
+        }
+        let words: Vec<&str> = d.organism.split_whitespace().collect();
+        if words.len() < 2 || !words[0].starts_with(|c: char| c.is_ascii_uppercase()) {
+            continue;
+        }
+        let isolate = matches!(words[1], "sp." | "cf." | "bacterium");
+        let species = if isolate { d.organism.clone() } else { format!("{} {}", words[0], words[1]) };
+        let group = groups.entry(species.clone()).or_insert_with(|| SpeciesGroup { species, isolate, proteins: Vec::new() });
+        if group.proteins.len() < HOMOLOG_TRIES {
+            group.proteins.push(d.accession.clone());
+        }
+    }
+    let (named, isolates): (Vec<_>, Vec<_>) = groups.into_values().partition(|g| !g.isolate);
+    named.into_iter().chain(isolates).take(max).collect()
 }
 
 /// `NC_000017.11`, `CP151816.1`, `AB012345` - letters (optionally `_`),
@@ -560,13 +695,18 @@ pub struct ProteinCds {
 /// plain stretch - `ACC:a..b` or `complement(ACC:a..b)`. Joined or partial
 /// (`<`/`>`) locations are skipped rather than loaded as a wrong span.
 pub fn parse_coded_by_cds(text: &str, query: &str) -> Option<ProteinCds> {
+    parse_coded_by_cdss(text, query).into_iter().next()
+}
+
+/// Every record `parse_coded_by_cds` would accept, in document order.
+pub fn parse_coded_by_cdss(text: &str, query: &str) -> Vec<ProteinCds> {
     let qualifier = |record: &str, name: &str| -> Option<String> {
         let re = Regex::new(&format!(r#"/{name}="([^"]*)""#)).unwrap();
         re.captures(record).map(|c| c[1].split_whitespace().collect::<Vec<_>>().join(" "))
     };
     let location = Regex::new(r"^(complement\()?([A-Za-z0-9_.]+):(\d+)\.\.(\d+)\)?$").unwrap();
 
-    text.split("\n//").find_map(|record| {
+    text.split("\n//").filter_map(|record| {
         let gene = qualifier(record, "gene")?;
         if !gene.eq_ignore_ascii_case(query.trim()) {
             return None;
@@ -590,6 +730,7 @@ pub fn parse_coded_by_cds(text: &str, query: &str) -> Option<ProteinCds> {
             strand: if complement { Strand::Minus } else { Strand::Plus },
         })
     })
+    .collect()
 }
 
 /// One `esummary(db=snp)` record -> `VariantHit`. `None` for a uid that
@@ -1233,6 +1374,29 @@ FEATURES             Location/Qualifiers
         for name in ["17", "X", "MT", "", "NC_", "CP151816."] {
             assert!(!is_nucleotide_accession(name), "{name}");
         }
+    }
+
+    fn docsum(accession: &str, organism: &str) -> ProteinDocsum {
+        ProteinDocsum { accession: accession.into(), organism: organism.into(), taxid: 1, complete: true }
+    }
+
+    #[test]
+    fn species_groups_reach_past_a_dominant_species() {
+        let mut docsums: Vec<ProteinDocsum> = (0..50).map(|i| docsum(&format!("AER{i}.1"), "Pseudomonas aeruginosa PAO1")).collect();
+        docsums.insert(3, docsum("SP1.1", "Pseudomonas sp. LY-1"));
+        docsums.push(docsum("WP_1.1", "Pseudomonas"));
+        docsums.push(docsum("UNC1.1", "uncultured bacterium"));
+        docsums.push(ProteinDocsum { complete: false, ..docsum("PART1.1", "Pseudomonas stutzeri") });
+        docsums.push(docsum("VER1.1", "Pseudomonas veronii"));
+        docsums.push(docsum("VER2.1", "Pseudomonas veronii strain X"));
+
+        let groups = group_by_species(&docsums, 10);
+        let names: Vec<&str> = groups.iter().map(|g| g.species.as_str()).collect();
+        assert_eq!(names, ["Pseudomonas aeruginosa", "Pseudomonas veronii", "Pseudomonas sp. LY-1"]);
+        assert_eq!(groups[0].proteins, ["AER0.1", "AER1.1", "AER2.1"]);
+        assert_eq!(groups[1].proteins, ["VER1.1", "VER2.1"]);
+        assert!(groups[2].isolate);
+        assert_eq!(group_by_species(&docsums, 1).len(), 1);
     }
 
     #[test]

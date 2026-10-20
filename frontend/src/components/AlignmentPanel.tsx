@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
-import { alignSequences, designConserved, type ConservedPair, type ConservedCandidate } from '../api/align';
+import { alignSequences, designConserved, type ConservedPair, type ConservedCandidate, type Coverage, type DesignConservedRequest } from '../api/align';
 import type { SequenceData } from '../api/sequence';
 import { getSequence } from '../api/sequence';
 import type { Transcript } from '../api/gene';
 import { ApiError } from '../api/client';
 import { parseMultiFasta } from '../utils/fasta';
 import AlignmentView from './AlignmentView';
+import ConservedWindows from './ConservedWindows';
+import HomologCollector from './HomologCollector';
+import Badge from './ui/Badge';
+import { analyzeAlignment, parseAlignedFasta, type ConservedWindow } from '../utils/alignedFasta';
 import { cleanDNA } from '../utils/dna';
 import ResultsTable from './ResultsTable';
 import PrimerSequence from './PrimerSequence';
@@ -44,6 +48,27 @@ interface Props {
     upstreamBp: number;
     downstreamBp: number;
   };
+}
+
+/** "18/20 sequences", flagged when some would fail at the primer's 3' end. */
+function CoverageBadge({ coverage, label }: { coverage: Coverage; label?: string }) {
+  const { matching_rows: ok, total_rows: total, three_prime_mismatch_rows: bad3 } = coverage;
+  const tone = ok === total ? 'success' : bad3 > 0 ? 'danger' : 'warning';
+  const title = `Matches ${ok} of ${total} aligned sequences exactly${bad3 ? `; ${bad3} have a mismatch in its 3'-terminal 5 bases and are unlikely to amplify` : ''}.`;
+  return (
+    <Badge tone={tone} title={title} className="whitespace-nowrap tabular-nums">
+      {label ? `${label} ` : ''}
+      {ok}/{total}
+      {bad3 > 0 ? ` · ${bad3}×3′` : ''}
+    </Badge>
+  );
+}
+
+/** "Pseudomonas" from a species slug, name or BLAST organism - the
+ * default taxon to collect homologs in. Empty for a taxonomy ID. */
+function genusOf(species: string): string {
+  const first = species.trim().split(/[\s_]+/)[0] ?? '';
+  return /^[a-z]+$/i.test(first) ? first[0].toUpperCase() + first.slice(1).toLowerCase() : '';
 }
 
 export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneContext }: Props) {
@@ -144,20 +169,43 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     }
   }
 
-  async function runDesign() {
+  const analysis = useMemo(() => (alignment ? analyzeAlignment(parseAlignedFasta(alignment)) : null), [alignment]);
+
+  /** Runs the design with the column fields' settings, or over one
+   * conserved window, or as a pair across two of them. */
+  async function runDesign(region?: { window: ConservedWindow } | { left: ConservedWindow; right: ConservedWindow }) {
     if (!alignment) return;
     setDesignError(null);
     setCandidates(null);
     setPairs(null);
     setDesigning(true);
-    try {
-      const res = await designConserved({
+    let req: DesignConservedRequest;
+    if (region && 'window' in region) {
+      setColStart(region.window.start);
+      setColEnd(region.window.end);
+      setUseTarget(false);
+      req = { alignment, col_start: region.window.start, col_end: region.window.end };
+    } else if (region) {
+      req = {
+        alignment,
+        col_start: region.left.start,
+        col_end: region.right.end,
+        left_cols: [region.left.start, region.left.end],
+        right_cols: [region.right.start, region.right.end],
+        product_size_min: 60,
+        product_size_max: Math.max(1000, region.right.end - region.left.start),
+      };
+    } else {
+      req = {
         alignment,
         col_start: colStart,
         col_end: colEnd,
         target_start: useTarget ? targetStart : undefined,
         target_end: useTarget ? targetEnd : undefined,
-      });
+      };
+    }
+    try {
+      const res = await designConserved(req);
       if (res.mode === 'pairs') {
         setPairs(res.pairs);
       } else {
@@ -174,8 +222,14 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     <div>
       <h3 className="mb-2 text-sm font-semibold text-ink">Multi-Sequence Alignment</h3>
       <p className="mb-4 text-sm text-ink-muted">
-        Paste two or more sequences - FASTA, GenBank (a whole record or just its numbered sequence lines), or one bare sequence per line. MAFFT aligns them; you can then design primers within a conserved column range.
+        Collect a gene&rsquo;s homologs across species, or paste two or more sequences - FASTA, GenBank (a whole record or just its numbered sequence lines), or one bare sequence per line. MAFFT aligns them; then pick a conserved window to design primers in. Each primer shows how many of the aligned sequences it matches.
       </p>
+
+      <HomologCollector
+        defaultGene={geneContext?.geneName}
+        defaultTaxon={geneContext ? genusOf(geneContext.species) : undefined}
+        onAdd={(fasta) => setFastaText((fastaText.trim() ? `${fastaText.trim()}\n` : '') + fasta)}
+      />
 
       <textarea
         rows={8}
@@ -226,6 +280,10 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
             <pre className="sequence-viewer mt-2 max-h-[300px] overflow-auto rounded-lg border border-line bg-base p-4 text-xs">{alignment}</pre>
           </details>
 
+          {analysis && analysis.rows.length >= 2 && (
+            <ConservedWindows analysis={analysis} designing={designing} onDesignIn={(w) => void runDesign({ window: w })} onDesignPair={(left, right) => void runDesign({ left, right })} />
+          )}
+
           <div className="mt-4 rounded-md border border-line bg-surface-2 p-4">
             <h4 className="mb-3 text-sm font-semibold text-ink">Design Primers in Conserved Region</h4>
             <div className="mb-3 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -270,8 +328,8 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
                 keyOf={(c, i) => `${i}-${c.sequence}`}
                 columns={[
                   { header: "Sequence (5'→3')", render: (c) => <PrimerSequence sequence={c.sequence} />, className: 'font-mono text-ink' },
-                  { header: 'Start', render: (c) => c.start },
-                  { header: 'End', render: (c) => c.end },
+                  { header: 'Covers', render: (c) => <CoverageBadge coverage={c.coverage} /> },
+                  { header: 'Columns', render: (c) => `${c.col_start + 1}-${c.col_end}` },
                   { header: 'Tm', render: (c) => fmt(c.tm) },
                   { header: 'GC%', render: (c) => fmt(c.gc_percent) },
                   { header: 'Penalty', render: (c) => c.penalty.toFixed(2) },
@@ -289,6 +347,16 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
                 columns={[
                   { header: 'Left', render: (p) => <PrimerSequence sequence={p.left.sequence} label="Forward primer" />, className: 'font-mono text-ink' },
                   { header: 'Right', render: (p) => <PrimerSequence sequence={p.right.sequence} label="Reverse primer" />, className: 'font-mono text-ink' },
+                  {
+                    header: 'Covers',
+                    render: (p) => (
+                      <span className="flex flex-col items-start gap-1">
+                        <CoverageBadge coverage={p.left.coverage} label="F" />
+                        <CoverageBadge coverage={p.right.coverage} label="R" />
+                      </span>
+                    ),
+                  },
+                  { header: 'Columns', render: (p) => `${p.left.col_start + 1}-${p.right.col_end}` },
                   { header: 'Product', render: (p) => `${p.product_size} bp` },
                   { header: 'Left Tm', render: (p) => fmt(p.left.tm) },
                   { header: 'Right Tm', render: (p) => fmt(p.right.tm) },

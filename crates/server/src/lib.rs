@@ -32,6 +32,7 @@
 //! original route.
 
 pub mod error;
+pub mod jobs;
 pub mod routes;
 pub mod state;
 
@@ -78,6 +79,8 @@ pub fn build_router(state: state::AppState) -> Router {
         .route("/_health", get(health))
         .route("/search_gene", post(routes::gene::search_gene))
         .route("/load_blast_hit", post(routes::gene::load_blast_hit))
+        .route("/collect_homologs", post(routes::homologs::collect_homologs))
+        .route("/collect_homologs_status/:job_id", get(routes::homologs::collect_homologs_status))
         .route("/get_sequence", post(routes::sequence::get_sequence))
         .route("/blast_sequence", post(routes::blast::blast_sequence))
         .route("/blast_batch", post(routes::blast::blast_batch))

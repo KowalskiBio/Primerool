@@ -16,6 +16,8 @@ pub struct AppState {
     /// Background `/blast_batch` jobs (see `routes::blast::BlastJobStore`)
     /// — in-process only, jobs die with the server.
     pub blast_jobs: Arc<crate::routes::blast::BlastJobStore>,
+    /// Background `/collect_homologs` jobs, likewise in-process.
+    pub homolog_jobs: Arc<crate::routes::homologs::HomologJobStore>,
 }
 
 impl Default for AppState {
@@ -25,6 +27,7 @@ impl Default for AppState {
             ncbi: Arc::new(NcbiProvider::new()),
             http_client: reqwest::Client::new(),
             blast_jobs: Arc::new(crate::routes::blast::BlastJobStore::default()),
+            homolog_jobs: Arc::new(crate::routes::homologs::HomologJobStore::default()),
         }
     }
 }

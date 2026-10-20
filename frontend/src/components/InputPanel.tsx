@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import { loadBlastHit, searchGene } from '../api/gene';
 import { ApiError } from '../api/client';
@@ -17,6 +17,7 @@ import Select from './ui/Select';
 import Button from './ui/Button';
 import { controlClasses } from './ui/TextInput';
 import { useBlastProgress } from '../utils/useBlastProgress';
+import { readLastOrganism, writeLastOrganism } from '../utils/lastOrganism';
 
 interface Props {
   onGeneFound: (geneName: string, species: string, apiSource: 'ensembl' | 'ncbi', transcripts: Transcript[]) => void;
@@ -33,10 +34,12 @@ interface Props {
 }
 
 export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: setInputMode, onSpeciesSelectionChange }: Props) {
-  const [apiSource, setApiSource] = useSessionState<'ensembl' | 'ncbi'>('input.apiSource', 'ncbi');
-  const [kingdom, setKingdom] = useSessionState<Kingdom>('input.kingdom', 'animals');
-  const [speciesValue, setSpeciesValue] = useSessionState('input.speciesValue', 'homo_sapiens');
-  const [customSpecies, setCustomSpecies] = useSessionState('input.customSpecies', '');
+  const [lastOrganism] = useState(readLastOrganism);
+  const [apiSource, setApiSource] = useSessionState<'ensembl' | 'ncbi'>('input.apiSource', lastOrganism.apiSource ?? 'ncbi');
+  const [kingdom, setKingdom] = useSessionState<Kingdom>('input.kingdom', lastOrganism.kingdom ?? 'animals');
+  const [speciesValue, setSpeciesValue] = useSessionState('input.speciesValue', lastOrganism.speciesValue ?? 'homo_sapiens');
+  const [customSpecies, setCustomSpecies] = useSessionState('input.customSpecies', lastOrganism.customSpecies ?? '');
+  useEffect(() => writeLastOrganism({ apiSource, kingdom, speciesValue, customSpecies }), [apiSource, kingdom, speciesValue, customSpecies]);
   const [geneInput, setGeneInput] = useSessionState('input.geneInput', '');
   const [fastaInput, setFastaInput] = useSessionState('input.fastaInput', '');
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +57,9 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
   const [showSnpBatch, setShowSnpBatch] = useSessionState('input.showSnpBatch', false);
 
   const effectiveSpecies = speciesValue === '__custom__' ? customSpecies.trim() : speciesValue;
+  // App starts from its own default, so tell it the remembered or
+  // restored organism too, not only later picks.
+  useEffect(() => onSpeciesSelectionChange?.(effectiveSpecies), [effectiveSpecies, onSpeciesSelectionChange]);
   const organismLabel = speciesValue === '__custom__' ? customSpecies.trim() : (SPECIES_BY_KINGDOM[kingdom].find((s) => s.value === speciesValue)?.label ?? speciesValue);
 
   function syncDropdownsToSpecies(species: string) {

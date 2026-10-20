@@ -326,7 +326,7 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
               {apiSource === 'ncbi' ? (
                 <p className="mt-1 text-xs text-ink-faint">
                   Enter an NCBI Taxonomy ID (e.g. 294) or a scientific name (e.g. Pseudomonas fluorescens). A taxonomy ID also covers every strain below it.{' '}
-                  <a href="https://www.ncbi.nlm.nih.gov/taxonomy" target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                  <a href="https://www.ncbi.nlm.nih.gov/datasets/taxonomy/" target="_blank" rel="noreferrer" className="text-accent hover:underline">
                     Browse NCBI Taxonomy
                   </a>
                 </p>

@@ -19,6 +19,7 @@ pub mod homologs;
 pub mod idt;
 pub mod import_snp;
 pub mod lookup_variant;
+pub mod ncbi_test;
 pub mod search_variants;
 pub mod sequence;
 

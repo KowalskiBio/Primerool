@@ -80,6 +80,8 @@ pub fn build_router(state: state::AppState) -> Router {
         .route("/search_gene", post(routes::gene::search_gene))
         .route("/load_blast_hit", post(routes::gene::load_blast_hit))
         .route("/collect_homologs", post(routes::homologs::collect_homologs))
+        .route("/ncbi/test", post(routes::ncbi_test::ncbi_test))
+        .route("/ncbi/test/:rid", get(routes::ncbi_test::ncbi_test_queue))
         .route("/collect_homologs_status/:job_id", get(routes::homologs::collect_homologs_status))
         .route("/get_sequence", post(routes::sequence::get_sequence))
         .route("/blast_sequence", post(routes::blast::blast_sequence))

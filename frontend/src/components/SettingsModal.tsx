@@ -6,6 +6,7 @@ import Modal from './ui/Modal';
 import SegmentedControl from './ui/SegmentedControl';
 import TextInput from './ui/TextInput';
 import IdtSettingsPanel from './IdtSettingsPanel';
+import NcbiTester from './NcbiTester';
 import type { IdtCredentials } from '../utils/idtCredentials';
 
 export interface ThemePrefs {
@@ -85,6 +86,7 @@ export default function SettingsModal({ open, onClose, apiKey, onApiKeyChange, i
               </a>
               ) they're noticeably more lenient.
             </p>
+            <NcbiTester apiKey={apiKey} />
           </div>
 
           <div>

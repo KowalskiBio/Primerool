@@ -193,6 +193,47 @@ pub async fn get_blast_results(client: &reqwest::Client, rid: &str, api_key: Opt
     Ok(resp.text().await?)
 }
 
+/// Short, well-known query (a human beta-actin fragment) that megablast
+/// resolves in seconds when NCBI's BLAST queue is healthy - the probe the
+/// Settings "Test NCBI" button submits.
+const TEST_QUERY: &str = "ATGGATGATGATATCGCCGCGCTCGTCGTCGACAACGGCTCCGGCATGTGCAAGGCCGGCTTCGCGGGCGACGATGCCCCCCGGGCCGTCTTCCC";
+
+/// Submits `TEST_QUERY` (one hit wanted) and returns its RID, so the
+/// caller can ask once, a minute later, whether the queue let it through.
+pub async fn submit_test_search(client: &reqwest::Client, api_key: Option<&str>) -> Result<String, BlastError> {
+    let params = vec![
+        ("CMD", "Put"),
+        ("PROGRAM", "blastn"),
+        ("DATABASE", "nt"),
+        ("QUERY", TEST_QUERY),
+        ("HITLIST_SIZE", "1"),
+        ("FORMAT_TYPE", "XML"),
+        ("MEGABLAST", "on"),
+        ("tool", "primeroonline"),
+    ];
+    Ok(submit_params(client, with_api_key(params, api_key)).await?.rid)
+}
+
+/// A search's status, asked once: `Some(true)` finished, `Some(false)`
+/// failed or unknown to NCBI, `None` still waiting in the queue.
+pub async fn search_status(client: &reqwest::Client, rid: &str, api_key: Option<&str>) -> Result<Option<bool>, BlastError> {
+    let text = client
+        .get(BLAST_URL)
+        .query(&with_api_key(vec![("CMD", "Get"), ("FORMAT_OBJECT", "SearchInfo"), ("RID", rid)], api_key))
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await?
+        .text()
+        .await?;
+    Ok(if text.contains("Status=READY") {
+        Some(true)
+    } else if text.contains("Status=FAILED") || text.contains("Status=UNKNOWN") {
+        Some(false)
+    } else {
+        None
+    })
+}
+
 /// Full BLAST pipeline: submit, poll, retrieve, parse. Blocking (in the
 /// sense of taking a long time) — may take up to ~3 minutes. `organism`
 /// (`None` = everything) restricts the hits to one organism.

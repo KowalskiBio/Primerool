@@ -12,7 +12,7 @@ import SegmentedControl from './ui/SegmentedControl';
 import { isPlusOriented } from '../utils/orientation';
 import { flipSelection, flipSelections, flipSequenceData } from '../utils/strandFlip';
 
-type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
+type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms' | 'conserved';
 
 interface Props {
   data: SequenceData;

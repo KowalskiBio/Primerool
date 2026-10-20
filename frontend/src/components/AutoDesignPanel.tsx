@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
 import { designFlanking, designGeneral, designJunction, type DimerResult, type FlankingOligoResult, type GeneralPairResult, type GeneralPrimerRegion, type JunctionPairResult } from '../api/design';
@@ -18,7 +18,7 @@ import Button from './ui/Button';
 import { fmt, yesNo } from '../utils/format';
 import type { IdtCredentials } from '../utils/idtCredentials';
 
-type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms';
+type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms' | 'conserved';
 
 /** `design_general::PRODUCT_SIZE_RANGE` on the server. */
 const GENERAL_PRODUCT_RANGE = '100–1000';
@@ -50,9 +50,12 @@ interface Props {
   idtCredentials?: IdtCredentials;
   /** The sequence map's intron truncation, reused by the primer preview. */
   truncateIntrons: boolean;
+  /** The "Conserved" mode's content: the multi-sequence alignment and
+   * conserved-region design, built by App, which holds its inputs. */
+  conservedPanel: ReactNode;
 }
 
-export default function AutoDesignPanel({ data, species, apiSource, primerMode, onPrimerModeChange, onSelect, idtCredentials, truncateIntrons }: Props) {
+export default function AutoDesignPanel({ data, species, apiSource, primerMode, onPrimerModeChange, onSelect, idtCredentials, truncateIntrons, conservedPanel }: Props) {
   const [junctionPos, setJunctionPos] = useSessionState('auto.junctionPos', '');
   const [overlapMin, setOverlapMin] = useSessionState('auto.overlapMin', 6);
   const [overlapMax, setOverlapMax] = useSessionState('auto.overlapMax', 12);
@@ -196,8 +199,11 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
           { value: 'flanking', label: 'WGA', title: 'Primers in flanking regions' },
           { value: 'junction', label: 'Junction', title: 'Exon-exon junction primers' },
           { value: 'arms', label: 'SNP/indel', title: 'ARMS-PCR allele-specific primers' },
+          { value: 'conserved', label: 'Conserved', title: 'Primers in a region conserved across species or sequences, from a multi-sequence alignment' },
         ]}
       />
+
+      {primerMode === 'conserved' && conservedPanel}
 
       {primerMode === 'arms' && <ArmsDesignPanel data={data} species={species} apiSource={apiSource} onSelect={onSelect} idtCredentials={idtCredentials} />}
 
@@ -270,13 +276,13 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
       )}
 
 
-      {primerMode !== 'arms' && (
+      {primerMode !== 'arms' && primerMode !== 'conserved' && (
         <Button variant="primary" className="mb-4" disabled={loading} onClick={() => void (primerMode === 'flanking' ? runFlanking() : primerMode === 'junction' ? runJunction() : runGeneral())}>
           {loading ? 'Designing…' : 'Design Primers'}
         </Button>
       )}
 
-      {primerMode !== 'arms' && error && (
+      {primerMode !== 'arms' && primerMode !== 'conserved' && error && (
         <div role="alert" className="mb-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">
           {error}
         </div>

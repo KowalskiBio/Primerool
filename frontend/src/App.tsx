@@ -103,7 +103,7 @@ function App() {
   useEffect(() => {
     if (setKey === loadedSetKey) savePrimerSets(setKey, selections);
   }, [setKey, loadedSetKey, selections]);
-  const [primerMode, setPrimerMode] = useSessionState<'flanking' | 'junction' | 'general' | 'arms'>('app.primerMode', 'flanking');
+  const [primerMode, setPrimerMode] = useSessionState<'flanking' | 'junction' | 'general' | 'arms' | 'conserved'>('app.primerMode', 'flanking');
 
   // IDT OligoAnalyzer credentials - machine-local like the NCBI key, but
   // encrypted at rest, so they load asynchronously after first render.
@@ -379,21 +379,16 @@ function App() {
               onSelect={handleSelect}
               idtCredentials={idtReady ? idtCredentials : undefined}
               truncateIntrons={truncateIntrons}
+              conservedPanel={
+                <AlignmentPanel
+                  loadedSequence={sequenceData}
+                  geneTranscripts={transcripts.length > 0 ? transcripts : undefined}
+                  geneContext={{ geneName, species, apiSource, includeIntrons, includeUtr, upstreamBp: upFlank, downstreamBp: downFlank }}
+                />
+              }
             />
           </Section>
         )}
-
-        <Section step={5} title="Multi-Sequence Alignment (Conserved-Region Primers)" defaultCollapsed persistKey="section.align">
-          <AlignmentPanel
-            loadedSequence={sequenceData}
-            geneTranscripts={!isCustomSequence && transcripts.length > 0 ? transcripts : undefined}
-            geneContext={
-              !isCustomSequence
-                ? { geneName, species, apiSource, includeIntrons, includeUtr, upstreamBp: upFlank, downstreamBp: downFlank }
-                : undefined
-            }
-          />
-        </Section>
       </main>
 
       <SettingsModal

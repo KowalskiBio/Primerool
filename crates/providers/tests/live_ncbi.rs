@@ -82,3 +82,26 @@ async fn symbol_search_prefers_official_symbol_over_alias() {
     assert_eq!(gene.gene_name, "COPS2");
     assert_eq!(gene.matched_by, GeneMatch::Alias);
 }
+
+#[tokio::test]
+#[ignore = "hits live NCBI E-utilities; run explicitly"]
+async fn gene_missing_from_ncbi_gene_falls_back_to_a_genbank_protein_cds() {
+    // NCBI Gene has no nirS record for P. fluorescens (taxid 294); its
+    // GenBank proteins do, with the genome stretch coding for them.
+    let provider = providers::ncbi::NcbiProvider::new();
+
+    for species in ["Pseudomonas fluorescens", "294"] {
+        let gene = provider.search_gene("nirS", species).await.unwrap().unwrap_or_else(|| panic!("nirS should resolve in {species}"));
+        assert_eq!(gene.gene_name, "nirS");
+        assert_eq!(gene.matched_by, GeneMatch::Symbol);
+        assert_eq!(gene.transcripts.len(), 1);
+        let t = &gene.transcripts[0];
+        assert!(t.name.contains("Pseudomonas fluorescens"), "{}", t.name);
+
+        let tinfo = provider.get_transcript_details(&t.id).await.unwrap().unwrap();
+        let (start, end) = tinfo.cds[0];
+        let cds = provider.build_spliced_sequence(&tinfo, Feature::Cds, species, false).await.unwrap().expect("the CDS should be fetchable");
+        assert_eq!(cds.len() as u64, end - start + 1);
+        assert!(cds.starts_with("ATG") || cds.starts_with("GTG") || cds.starts_with("TTG"), "{} should open with a start codon", &cds[..3]);
+    }
+}

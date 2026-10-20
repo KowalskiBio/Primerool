@@ -22,7 +22,7 @@ use regex::Regex;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
-use crate::species_map::ensembl_to_binomial_or_guess;
+use crate::species_map::ncbi_organism_term;
 use crate::{revcomp, strip_fasta, Feature, GeneMatch, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo, TranscriptSummary, VariantHit};
 
 const EUTILS: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
@@ -243,8 +243,10 @@ impl NcbiProvider {
             return Ok(Some(String::new()));
         }
         let acc = if !chr_accession.is_empty() { chr_accession } else { chrom };
-        if !acc.starts_with("NC_") {
-            // Python: prints a warning and returns None — can't fetch without NC_.
+        if !is_nucleotide_accession(acc) {
+            // A bare chromosome name ("17") can't be fetched by itself.
+            // Any accession can: NC_ for Gene-db hits, but also GenBank
+            // genomes (CP151816.1) for protein-located CDSs and BLAST hits.
             return Ok(None);
         }
         let start_s = start.to_string();
@@ -270,8 +272,8 @@ impl NcbiProvider {
     /// E-utils has no one-shot spatial-overlap endpoint). An empty result
     /// is the normal "no known variants here" case, not an error.
     pub async fn search_variants_in_region(&self, chrom: &str, start: u64, end: u64, species: &str) -> Result<Vec<VariantHit>, ProviderError> {
-        let organism = ensembl_to_binomial_or_guess(species);
-        let term = format!("{chrom}[chr] AND {start}:{end}[chrpos] AND {organism}[orgn]");
+        let organism = ncbi_organism_term(species);
+        let term = format!("{chrom}[chr] AND {start}:{end}[chrpos] AND {organism}");
         let retmax = MAX_REGION_HITS.to_string();
         let esearch = self.get_json(&format!("{EUTILS}/esearch.fcgi"), &[("db", "snp"), ("term", &term), ("retmode", "json"), ("retmax", &retmax)]).await?;
 
@@ -428,6 +430,166 @@ impl NcbiProvider {
             organism: summary["organism"]["scientificname"].as_str().unwrap_or_default().to_string(),
         }))
     }
+
+    /// The tail every successful `search_gene` path shares: caches the
+    /// transcripts for `get_transcript_details`, then lists them NM_ first,
+    /// most exons first, with one marked canonical.
+    #[allow(clippy::too_many_arguments)]
+    async fn finish_search(&self, gene_name: String, matched_by: GeneMatch, gene_id: String, chrom: String, strand: Strand, start: u64, end: u64, transcripts_data: IndexMap<String, TranscriptInfo>) -> GeneSearchResult {
+        {
+            let mut cache = self.transcript_cache.lock().await;
+            for (tid, tinfo) in &transcripts_data {
+                cache.insert(tid.clone(), tinfo.clone());
+            }
+        }
+
+        let mut transcripts: Vec<TranscriptSummary> = transcripts_data
+            .iter()
+            .map(|(tid, tinfo)| TranscriptSummary {
+                id: tid.clone(),
+                name: tinfo.transcript_name.clone(),
+                biotype: String::new(),
+                exon_count: tinfo.exons.len(),
+                strand,
+                is_canonical: false,
+            })
+            .collect();
+
+        // Sort: NM_ first, then by exon count descending.
+        transcripts.sort_by(|a, b| {
+            let a_key = (if a.id.starts_with("NM_") { 0 } else { 1 }, std::cmp::Reverse(a.exon_count));
+            let b_key = (if b.id.starts_with("NM_") { 0 } else { 1 }, std::cmp::Reverse(b.exon_count));
+            a_key.cmp(&b_key)
+        });
+
+        // Mark first NM_ as canonical; if none, mark the first transcript.
+        if let Some(t) = transcripts.iter_mut().find(|t| t.id.starts_with("NM_")) {
+            t.is_canonical = true;
+        }
+        if !transcripts.is_empty() && !transcripts.iter().any(|t| t.is_canonical) {
+            transcripts[0].is_canonical = true;
+        }
+
+        GeneSearchResult { gene_name, matched_by, gene_id, chrom, strand, start, end, transcripts }
+    }
+
+    /// Loads `start..=end` (1-based) of a nucleotide record as a gene with
+    /// one single-region transcript - a CDS located through a GenBank
+    /// protein, or a BLAST hit the user picked. `label` names the
+    /// transcript so the user can see which record it came from.
+    pub async fn load_region(&self, gene_name: &str, gene_id: &str, accession: &str, start: u64, end: u64, strand: Strand, label: &str) -> GeneSearchResult {
+        let mut transcripts = IndexMap::new();
+        transcripts.insert(format!("{accession}:{start}-{end}"), single_region_transcript(label.to_string(), accession.to_string(), accession.to_string(), strand, start, end));
+        self.finish_search(gene_name.to_string(), GeneMatch::Symbol, gene_id.to_string(), accession.to_string(), strand, start, end, transcripts).await
+    }
+
+    /// `search_gene`'s last resort: a GenBank protein named `gene_name` in
+    /// the organism whose record says which genome stretch codes for it
+    /// (`/coded_by`). RefSeq WP_ proteins are shared across genomes and
+    /// carry no such location, so they never match.
+    async fn search_protein_cds(&self, gene_name: &str, organism_term: &str) -> Result<Option<GeneSearchResult>, ProviderError> {
+        let ids = self.esearch_ids("protein", &format!("{gene_name}[gene] AND {organism_term}"), 20).await?;
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let resp = self.get(&format!("{EUTILS}/efetch.fcgi"), &[("db", "protein"), ("id", &ids.join(",")), ("rettype", "gp"), ("retmode", "text")], Duration::from_secs(30)).await?;
+        let Some(cds) = parse_coded_by_cds(&resp.text().await?, gene_name) else {
+            return Ok(None);
+        };
+        let source = match &cds.strain {
+            Some(strain) if !cds.organism.contains(strain.as_str()) => format!("{} {strain}", cds.organism),
+            _ => cds.organism.clone(),
+        };
+        let label = format!("{} (CDS, {source}, {})", cds.gene, cds.accession);
+        Ok(Some(self.load_region(&cds.gene, &cds.protein, &cds.accession, cds.start, cds.end, cds.strand, &label).await))
+    }
+}
+
+/// `NC_000017.11`, `CP151816.1`, `AB012345` - letters (optionally `_`),
+/// digits, optional version - as opposed to a chromosome name like `17`.
+fn is_nucleotide_accession(s: &str) -> bool {
+    let base = s.split_once('.').map_or(s, |(b, v)| if !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()) { b } else { "" });
+    let letters = base.trim_end_matches(|c: char| c.is_ascii_digit());
+    letters.len() < base.len() && letters.starts_with(|c: char| c.is_ascii_uppercase()) && letters.len() <= 8 && letters.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+}
+
+/// A single-exon transcript covering `start..=end`, for genes with no
+/// annotated mRNA (prokaryotes) and for loaded regions.
+fn single_region_transcript(transcript_name: String, chrom: String, chr_accession: String, strand: Strand, start: u64, end: u64) -> TranscriptInfo {
+    TranscriptInfo {
+        // Deliberately empty, NOT the synthetic id: Python's synthetic
+        // dict for this fallback never sets a "transcript_id" key at all,
+        // so `tinfo.get("transcript_id", "")` is falsy — this is what
+        // forces build_spliced_sequence/build_genomic_sequence/
+        // get_flanking_sequence down their per-region-fetch fallback path
+        // instead of trying (and failing) to `efetch` a fake accession
+        // like "dnaA_CDS" from NCBI. Confirmed empirically: NCBI returns
+        // HTTP 200 with a garbled text error body for such IDs, not a 4xx
+        // that Python's `except HTTPError` would catch — so this must stay
+        // empty for real correctness, not just Python-parity pedantry.
+        transcript_id: String::new(),
+        transcript_name,
+        chrom,
+        chr_accession,
+        strand,
+        exons: vec![(start, end)],
+        cds: vec![(start, end)],
+        utr5: vec![],
+        utr3: vec![],
+        utr: vec![],
+    }
+}
+
+/// Where a GenBank protein's CDS sits in its nucleotide record.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProteinCds {
+    pub protein: String,
+    pub gene: String,
+    pub organism: String,
+    pub strain: Option<String>,
+    /// The nucleotide record (e.g. a genome's `CP151816.1`).
+    pub accession: String,
+    /// 1-based inclusive.
+    pub start: u64,
+    pub end: u64,
+    pub strand: Strand,
+}
+
+/// The first record of an `efetch(db=protein, rettype=gp)` text whose
+/// `/gene` is `query` (case-insensitively) and whose `/coded_by` is one
+/// plain stretch - `ACC:a..b` or `complement(ACC:a..b)`. Joined or partial
+/// (`<`/`>`) locations are skipped rather than loaded as a wrong span.
+pub fn parse_coded_by_cds(text: &str, query: &str) -> Option<ProteinCds> {
+    let qualifier = |record: &str, name: &str| -> Option<String> {
+        let re = Regex::new(&format!(r#"/{name}="([^"]*)""#)).unwrap();
+        re.captures(record).map(|c| c[1].split_whitespace().collect::<Vec<_>>().join(" "))
+    };
+    let location = Regex::new(r"^(complement\()?([A-Za-z0-9_.]+):(\d+)\.\.(\d+)\)?$").unwrap();
+
+    text.split("\n//").find_map(|record| {
+        let gene = qualifier(record, "gene")?;
+        if !gene.eq_ignore_ascii_case(query.trim()) {
+            return None;
+        }
+        let coded_by = qualifier(record, "coded_by")?.replace(' ', "");
+        let loc = location.captures(&coded_by)?;
+        let complement = loc.get(1).is_some();
+        if complement != coded_by.ends_with(')') {
+            return None;
+        }
+        let (start, end): (u64, u64) = (loc[3].parse().ok()?, loc[4].parse().ok()?);
+        let field = |key: &str| record.lines().find_map(|l| l.trim_start().strip_prefix(key).map(|v| v.trim().to_string()));
+        Some(ProteinCds {
+            protein: field("VERSION").and_then(|v| v.split_whitespace().next().map(str::to_string)).unwrap_or_default(),
+            gene,
+            organism: field("ORGANISM").unwrap_or_default(),
+            strain: qualifier(record, "strain"),
+            accession: loc[2].to_string(),
+            start: start.min(end),
+            end: start.max(end),
+            strand: if complement { Strand::Minus } else { Strand::Plus },
+        })
+    })
 }
 
 /// One `esummary(db=snp)` record -> `VariantHit`. `None` for a uid that
@@ -510,14 +672,14 @@ fn extract_minor_allele(global_mafs: &[Value]) -> (Option<f64>, Option<String>) 
 impl SequenceProvider for NcbiProvider {
     async fn search_gene(&self, gene_name: &str, species: &str) -> Result<Option<GeneSearchResult>, ProviderError> {
         let gene_name = gene_name.trim();
-        let organism = ensembl_to_binomial_or_guess(species);
+        let organism = ncbi_organism_term(species);
 
         // Step 1: esearch -> gene ID
         // 1a: exact symbol match (fast path, e.g. MTHFR)
         // `[sym]` matches aliases too, in no useful order - "CSN2" returns
         // COPS2 (alias CSN2) ahead of CSN2 itself - so rank the hits rather
         // than taking the first.
-        let term = format!("{gene_name}[sym] AND {organism}[orgn]");
+        let term = format!("{gene_name}[sym] AND {organism}");
         let ids = self.esearch_ids("gene", &term, 20).await?;
         let ranked = self.rank_name_candidates(gene_name, &ids).await?;
         let (gene_id, matched_by, summary) = match ranked {
@@ -525,11 +687,14 @@ impl SequenceProvider for NcbiProvider {
             None => {
                 // 1b: name/protein-family fallback (e.g. "casein" -> CSN2),
                 // ranked strictly so summary-text mentions never win
-                let term2 = format!("{gene_name} AND {organism}[orgn]");
+                let term2 = format!("{gene_name} AND {organism}");
                 let candidates = self.esearch_ids("gene", &term2, 50).await?;
                 match self.rank_name_candidates(gene_name, &candidates).await? {
                     Some(hit) => hit,
-                    None => return Ok(None),
+                    // 1c: NCBI Gene has no records for most prokaryote
+                    // genomes (nirS in Pseudomonas fluorescens, say), but
+                    // their annotated GenBank proteins say where the gene is.
+                    None => return self.search_protein_cds(gene_name, &organism).await,
                 }
             }
         };
@@ -578,80 +743,11 @@ impl SequenceProvider for NcbiProvider {
         // from the esummary genomic span.
         if transcripts_data.is_empty() && gene_start != 0 && gene_end != 0 {
             let syn_id = format!("{official_name}_CDS");
-            transcripts_data.insert(
-                syn_id.clone(),
-                TranscriptInfo {
-                    // Deliberately empty, NOT `syn_id`: Python's synthetic
-                    // dict for this fallback never sets a "transcript_id"
-                    // key at all, so `tinfo.get("transcript_id", "")` is
-                    // falsy — this is what forces build_spliced_sequence/
-                    // build_genomic_sequence/get_flanking_sequence down
-                    // their per-region-fetch fallback path instead of
-                    // trying (and failing) to `efetch` a fake accession
-                    // like "dnaA_CDS" from NCBI. Confirmed empirically:
-                    // NCBI returns HTTP 200 with a garbled text error body
-                    // for such IDs, not a 4xx that Python's `except
-                    // HTTPError` would catch — so this must stay empty for
-                    // real correctness, not just Python-parity pedantry.
-                    transcript_id: String::new(),
-                    transcript_name: format!("{official_name} (CDS)"),
-                    chrom: if !chrom.is_empty() { chrom.clone() } else { chr_accession.clone() },
-                    chr_accession: chr_accession.clone(),
-                    strand,
-                    exons: vec![(gene_start, gene_end)],
-                    cds: vec![(gene_start, gene_end)],
-                    utr5: vec![],
-                    utr3: vec![],
-                    utr: vec![],
-                },
-            );
+            let chrom = if !chrom.is_empty() { chrom.clone() } else { chr_accession.clone() };
+            transcripts_data.insert(syn_id, single_region_transcript(format!("{official_name} (CDS)"), chrom, chr_accession.clone(), strand, gene_start, gene_end));
         }
 
-        // Cache all parsed transcript details.
-        {
-            let mut cache = self.transcript_cache.lock().await;
-            for (tid, tinfo) in &transcripts_data {
-                cache.insert(tid.clone(), tinfo.clone());
-            }
-        }
-
-        let mut transcripts: Vec<TranscriptSummary> = transcripts_data
-            .iter()
-            .map(|(tid, tinfo)| TranscriptSummary {
-                id: tid.clone(),
-                name: tinfo.transcript_name.clone(),
-                biotype: String::new(),
-                exon_count: tinfo.exons.len(),
-                strand,
-                is_canonical: false,
-            })
-            .collect();
-
-        // Sort: NM_ first, then by exon count descending.
-        transcripts.sort_by(|a, b| {
-            let a_key = (if a.id.starts_with("NM_") { 0 } else { 1 }, std::cmp::Reverse(a.exon_count));
-            let b_key = (if b.id.starts_with("NM_") { 0 } else { 1 }, std::cmp::Reverse(b.exon_count));
-            a_key.cmp(&b_key)
-        });
-
-        // Mark first NM_ as canonical; if none, mark the first transcript.
-        if let Some(t) = transcripts.iter_mut().find(|t| t.id.starts_with("NM_")) {
-            t.is_canonical = true;
-        }
-        if !transcripts.is_empty() && !transcripts.iter().any(|t| t.is_canonical) {
-            transcripts[0].is_canonical = true;
-        }
-
-        Ok(Some(GeneSearchResult {
-            gene_name: official_name,
-            matched_by,
-            gene_id,
-            chrom,
-            strand,
-            start: gene_start,
-            end: gene_end,
-            transcripts,
-        }))
+        Ok(Some(self.finish_search(official_name, matched_by, gene_id, chrom, strand, gene_start, gene_end, transcripts_data).await))
     }
 
     async fn get_transcript_details(&self, transcript_id: &str) -> Result<Option<TranscriptInfo>, ProviderError> {
@@ -1101,6 +1197,71 @@ mod tests {
 
         // Minus strand: at least one entry should show 5'UTR at higher coords.
         assert!(!t.utr.is_empty());
+    }
+
+    /// Trimmed from live `efetch(db=protein, rettype=gp)` output: a RefSeq
+    /// WP_ record (no `/coded_by`), then a GenBank one on a genome.
+    const GENPEPT_NIRS: &str = "LOCUS       WP_490620475             559 aa            linear   BCT 15-MAR-2025
+VERSION     WP_490620475.1
+SOURCE      Pseudomonas fluorescens
+  ORGANISM  Pseudomonas fluorescens
+FEATURES             Location/Qualifiers
+     CDS             1..559
+                     /gene=\"nirS\"
+//
+
+LOCUS       WZV51523                 513 aa            linear   BCT 22-APR-2024
+VERSION     WZV51523.1
+DBSOURCE    accession CP151816.1
+  ORGANISM  Pseudomonas fluorescens
+FEATURES             Location/Qualifiers
+     source          1..513
+                     /organism=\"Pseudomonas fluorescens\"
+                     /strain=\"IMGN2\"
+     CDS             1..513
+                     /gene=\"nirS\"
+                     /locus_tag=\"WLF14_12835\"
+                     /coded_by=\"complement(CP151816.1:2792077..2793618)\"
+//
+";
+
+    #[test]
+    fn nucleotide_accessions_vs_chromosome_names() {
+        for acc in ["NC_000017.11", "CP151816.1", "AB012345", "NZ_CP012345.1"] {
+            assert!(is_nucleotide_accession(acc), "{acc}");
+        }
+        for name in ["17", "X", "MT", "", "NC_", "CP151816."] {
+            assert!(!is_nucleotide_accession(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn coded_by_cds_skips_records_without_a_location() {
+        let cds = parse_coded_by_cds(GENPEPT_NIRS, "NIRS").unwrap();
+        assert_eq!(
+            cds,
+            ProteinCds {
+                protein: "WZV51523.1".into(),
+                gene: "nirS".into(),
+                organism: "Pseudomonas fluorescens".into(),
+                strain: Some("IMGN2".into()),
+                accession: "CP151816.1".into(),
+                start: 2792077,
+                end: 2793618,
+                strand: Strand::Minus,
+            }
+        );
+        assert_eq!(parse_coded_by_cds(GENPEPT_NIRS, "nirK"), None);
+    }
+
+    #[test]
+    fn coded_by_cds_rejects_joined_and_partial_locations() {
+        for loc in ["join(CP1.1:1..10,CP1.1:20..30)", "CP1.1:<1..30", "complement(CP1.1:1..30"] {
+            let text = format!("VERSION     X1.1\n                     /gene=\"abc\"\n                     /coded_by=\"{loc}\"\n//\n");
+            assert_eq!(parse_coded_by_cds(&text, "abc"), None, "{loc}");
+        }
+        let plus = parse_coded_by_cds("/gene=\"abc\"\n/coded_by=\"CP1.1:5..40\"\n", "abc").unwrap();
+        assert_eq!((plus.start, plus.end, plus.strand), (5, 40, Strand::Plus));
     }
 
     #[test]

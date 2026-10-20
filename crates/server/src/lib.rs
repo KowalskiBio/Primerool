@@ -77,6 +77,7 @@ pub fn build_router(state: state::AppState) -> Router {
     Router::new()
         .route("/_health", get(health))
         .route("/search_gene", post(routes::gene::search_gene))
+        .route("/load_blast_hit", post(routes::gene::load_blast_hit))
         .route("/get_sequence", post(routes::sequence::get_sequence))
         .route("/blast_sequence", post(routes::blast::blast_sequence))
         .route("/blast_batch", post(routes::blast::blast_batch))

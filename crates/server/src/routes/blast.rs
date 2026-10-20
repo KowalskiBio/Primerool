@@ -22,6 +22,9 @@ pub struct BlastSequenceRequest {
     /// E-utilities accession fast-path below to lift NCBI's anonymous
     /// rate limits. Empty when unset.
     pub api_key: String,
+    /// Restricts the search to one organism (see `resolve_organism`).
+    /// Empty searches everything.
+    pub organism: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +82,10 @@ pub async fn blast_sequence(State(state): State<AppState>, Json(req): Json<Blast
         "" => None,
         key => Some(key),
     };
+    let organism = match req.organism.trim() {
+        "" => None,
+        raw => Some(resolve_organism(raw)?),
+    };
 
     // Fast path (ported from `main.py::blast_sequence`): resolve accession
     // IDs directly via NCBI E-utilities. Instant, and the only working
@@ -115,7 +122,7 @@ pub async fn blast_sequence(State(state): State<AppState>, Json(req): Json<Blast
         }
     }
 
-    let hits = blast::run_blast(&state.http_client, &sequence, api_key).await?;
+    let hits = blast::run_blast(&state.http_client, &sequence, organism.as_deref(), api_key).await?;
 
     if hits.is_empty() {
         return Err(AppError::not_found("No significant matches found."));
@@ -249,14 +256,18 @@ fn valid_batch_id(id: &str) -> bool {
 
 /// Resolves `/blast_batch`'s `organism` field to the NCBI organism name
 /// the search is restricted to (via ENTREZ_QUERY): a known Ensembl
-/// species slug maps through `BINOMIAL_TO_ENSEMBL`'s reverse, anything
-/// else passes through as an already-spelled-out organism name. The
+/// species slug maps through `BINOMIAL_TO_ENSEMBL`'s reverse, an NCBI
+/// Taxonomy ID (`294`/`txid294`) becomes `txid294`, anything else passes
+/// through as an already-spelled-out organism name. The
 /// charset check keeps the value from smuggling ENTREZ query syntax
 /// (brackets, quotes, field tags) into the restriction.
 fn resolve_organism(raw: &str) -> Result<String, AppError> {
     let organism = raw.trim();
     if organism.is_empty() || organism.len() > 200 || !organism.chars().all(|c| c.is_alphanumeric() || " ._-".contains(c)) {
         return Err(AppError::bad_request("Invalid organism (need a species slug like homo_sapiens, or an organism name like \"Homo sapiens\")"));
+    }
+    if let Some(id) = providers::species_map::taxid(organism) {
+        return Ok(format!("txid{id}"));
     }
     Ok(blast::parse::ensembl_slug_to_organism(organism).unwrap_or_else(|| organism.to_string()))
 }
@@ -510,6 +521,8 @@ mod tests {
         assert_eq!(resolve_organism("sars_cov_2").unwrap(), "sars-cov-2");
         assert_eq!(resolve_organism("  Homo sapiens  ").unwrap(), "Homo sapiens");
         assert_eq!(resolve_organism("Gallus gallus").unwrap(), "Gallus gallus");
+        assert_eq!(resolve_organism("294").unwrap(), "txid294");
+        assert_eq!(resolve_organism("txid294").unwrap(), "txid294");
     }
 
     #[test]

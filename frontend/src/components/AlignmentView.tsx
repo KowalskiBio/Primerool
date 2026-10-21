@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { analyzeAlignment, type AlignedRow, type AlignmentAnalysis } from '../utils/alignedFasta';
 import { rowBases, type AlignPick, type AlignPrimers } from '../utils/alignPrimers';
 import SequenceContextMenu, { type MenuEntry } from './SequenceContextMenu';
@@ -26,20 +26,92 @@ const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 const MIN_PRIMER = 8;
 const MAX_PRIMER = 60;
 
-/** Drawn as a mismatch: a base differing from its column's majority - with
- * two sequences, any differing column, both sides. */
-function isMismatch(a: AlignmentAnalysis, b: string, c: number): boolean {
-  if (b === '-' || b === '.') return false;
-  return a.rows.length === 2 ? !a.conserved[c] && !a.gapped[c] : b !== a.consensus[c];
+/** Per row: its aligned span and prefix counts (length + 1) of mismatches
+ * and internal gaps - how many fall in columns `[c0, c1)` is
+ * `mis[c1] - mis[c0]`. A mismatch is a base differing from its column's
+ * majority - with two sequences, any differing column, both sides. */
+interface RowTrack {
+  start: number;
+  end: number;
+  mis: Int32Array;
+  gap: Int32Array;
+}
+
+function rowTracks(a: AlignmentAnalysis): RowTrack[] {
+  const pair = a.rows.length === 2;
+  return a.rows.map((r) => {
+    const start = r.seq.search(/[^-.]/);
+    let end = r.seq.length - 1;
+    while (end >= 0 && (r.seq[end] === '-' || r.seq[end] === '.')) end--;
+    const mis = new Int32Array(a.length + 1);
+    const gap = new Int32Array(a.length + 1);
+    for (let c = 0; c < a.length; c++) {
+      const b = r.seq[c] ?? '-';
+      const isGap = b === '-' || b === '.';
+      const isMis = !isGap && (pair ? !a.conserved[c] && !a.gapped[c] : b !== a.consensus[c]);
+      mis[c + 1] = mis[c] + (isMis ? 1 : 0);
+      gap[c + 1] = gap[c] + (isGap && c > start && c < end ? 1 : 0);
+    }
+    return { start, end, mis, gap };
+  });
+}
+
+type Colors = Record<'base' | 'ink' | 'muted' | 'faint' | 'line' | 'bar' | 'mis' | 'misBg' | 'accent' | 'fwd' | 'fwdBg' | 'rev' | 'revBg', string>;
+
+/** The palette's CSS tokens, read once per theme (not per draw). */
+function readColors(el: Element): Colors {
+  const s = getComputedStyle(el);
+  const v = (name: string) => s.getPropertyValue(name).trim();
+  return {
+    base: v('--base'),
+    ink: v('--ink'),
+    muted: v('--ink-muted'),
+    faint: v('--ink-faint'),
+    line: v('--line'),
+    bar: v('--aln-bar'),
+    mis: v('--aln-mismatch-ink'),
+    misBg: v('--aln-mismatch-bg'),
+    accent: v('--accent'),
+    fwd: v('--aln-fwd'),
+    fwdBg: v('--aln-fwd-bg'),
+    rev: v('--aln-rev'),
+    revBg: v('--aln-rev-bg'),
+  };
+}
+
+/** Each base letter rendered once per color and font size into a small
+ * canvas, then stamped with `drawImage`. */
+class GlyphCache {
+  private key = '';
+  private map = new Map<string, HTMLCanvasElement>();
+
+  get(ch: string, color: string, fs: number, dpr: number): HTMLCanvasElement {
+    const key = `${fs}|${dpr}`;
+    if (key !== this.key) {
+      this.key = key;
+      this.map.clear();
+    }
+    const id = `${ch}|${color}`;
+    let g = this.map.get(id);
+    if (!g) {
+      g = document.createElement('canvas');
+      g.width = Math.ceil(fs * dpr);
+      g.height = ROW_H * dpr;
+      const ctx = g.getContext('2d')!;
+      ctx.font = `${fs * dpr}px ${MONO}`;
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(ch, g.width / 2, g.height / 2 + 0.5 * dpr);
+      this.map.set(id, g);
+    }
+    return g;
+  }
 }
 
 /** A 1/2/5 × 10ⁿ ruler step whose ticks stand at least `minCols` apart. */
 function niceStep(minCols: number): number {
   for (let p = 1; ; p *= 10) for (const m of [1, 2, 5]) if (m * p >= minCols) return m * p;
-}
-
-function cssVar(el: Element, name: string): string {
-  return getComputedStyle(el).getPropertyValue(name).trim();
 }
 
 interface Selection {
@@ -73,9 +145,11 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
-  const [scrollLeft, setScrollLeft] = useState(0);
   /** Share of the alignment's columns in view: 1 fits it all. */
   const [viewFraction, setViewFraction] = useState(1);
+  /** The zoom and scroll the latest zoom asked for, ahead of React: wheel
+   * events can outpace renders, and each must build on the one before. */
+  const vfRef = useRef(1);
   const pendingScroll = useRef<number | null>(null);
   const [sel, setSel] = useState<Selection | null>(null);
   const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
@@ -97,6 +171,7 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
   const totalH = TOP + rows.length * ROW_H + 4;
   /** Whether the canvas (not the plain-text fallback) is on screen. */
   const drawable = allRows.length >= 2 && len > 0;
+  const tracks = useMemo(() => rowTracks(a), [a]);
 
   // A new alignment or a different set of rows: drop the selection.
   const selScope = `${alignment}\0${hiddenRows.join('\n')}`;
@@ -123,24 +198,215 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
     return () => mo.disconnect();
   }, []);
 
-  // A zoom resizes the scroll content first; the scroll position it wants
-  // can only be applied once that has rendered, or the browser clamps it.
+  const selCols = sel ? { from: Math.min(sel.c0, sel.c1), to: Math.max(sel.c0, sel.c1) + 1 } : null;
+
+  /* ── drawing ─────────────────────────────────────────── */
+  // Drawing runs outside React, at most once per animation frame: scrolling
+  // only redraws (no render), and a burst of zoom steps costs one draw.
+  const drawRef = useRef<() => void>(() => undefined);
+  const frameRef = useRef(0);
+  const colorsRef = useRef<{ tick: number; col: Colors } | null>(null);
+  const glyphsRef = useRef(new GlyphCache());
+  const scheduleDraw = useCallback(() => {
+    if (frameRef.current) return;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = 0;
+      drawRef.current();
+    });
+  }, []);
+  useEffect(() => () => cancelAnimationFrame(frameRef.current), []);
+
   useLayoutEffect(() => {
-    if (pendingScroll.current === null || !scrollRef.current) return;
-    scrollRef.current.scrollLeft = pendingScroll.current;
-    pendingScroll.current = null;
+    // A zoom resizes the scroll content first; the scroll position it
+    // wants can only be applied once that has rendered, or the browser
+    // clamps it.
+    if (pendingScroll.current !== null && scrollRef.current) {
+      scrollRef.current.scrollLeft = pendingScroll.current;
+      pendingScroll.current = null;
+    }
+    vfRef.current = vf;
+
+    drawRef.current = () => {
+      const cvs = canvasRef.current;
+      if (!cvs || width === 0 || len === 0) return;
+      const ctx = cvs.getContext('2d');
+      if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      // Resizing reallocates the canvas: only when its size changed.
+      if (cvs.width !== Math.round(width * dpr) || cvs.height !== Math.round(totalH * dpr)) {
+        cvs.width = Math.round(width * dpr);
+        cvs.height = Math.round(totalH * dpr);
+        cvs.style.width = `${width}px`;
+        cvs.style.height = `${totalH}px`;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (colorsRef.current?.tick !== themeTick) colorsRef.current = { tick: themeTick, col: readColors(cvs) };
+      const col = colorsRef.current.col;
+      const scrollLeft = scrollRef.current?.scrollLeft ?? 0;
+
+      ctx.fillStyle = col.base;
+      ctx.fillRect(0, 0, width, totalH);
+
+      const first = Math.max(0, Math.floor(scrollLeft / cellW));
+      const last = Math.min(len - 1, Math.ceil((scrollLeft + seqW) / cellW));
+      const x = (c: number) => labelW + c * cellW - scrollLeft;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(labelW, 0, seqW + RIGHT_PAD, totalH);
+      ctx.clip();
+
+      // Ruler: alignment columns, 1-based.
+      const tick = niceStep(Math.max(1, 64 / cellW));
+      ctx.font = `10px ${MONO}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = col.faint;
+      for (let n = Math.max(tick, Math.ceil((first + 1) / tick) * tick); n <= last + 1; n += tick) {
+        const cx = x(n - 1) + cellW / 2;
+        ctx.fillRect(Math.round(cx), RULER_H - 5, 1, 4);
+        ctx.fillText(fmt(n), cx, RULER_H - 8);
+      }
+
+      // Selected columns: a faint band down every row.
+      if (selCols) {
+        ctx.globalAlpha = 0.08;
+        ctx.fillStyle = col.accent;
+        ctx.fillRect(x(selCols.from), TOP, (selCols.to - selCols.from) * cellW, rows.length * ROW_H);
+        ctx.globalAlpha = 1;
+      }
+
+      // Primer track.
+      for (const p of [primers.F, primers.R]) {
+        if (!p) continue;
+        const px = x(p.colStart);
+        const pw = Math.max(2, (p.colEnd - p.colStart) * cellW);
+        ctx.fillStyle = p.side === 'F' ? col.fwd : col.rev;
+        ctx.fillRect(px, RULER_H + 2, pw, PRIMER_TRACK_H - 4);
+        // Arrowhead at the 3' end.
+        const tipX = p.side === 'F' ? px + pw : px;
+        const dir = p.side === 'F' ? 1 : -1;
+        ctx.beginPath();
+        ctx.moveTo(tipX, RULER_H);
+        ctx.lineTo(tipX + dir * 5, RULER_H + PRIMER_TRACK_H / 2);
+        ctx.lineTo(tipX, RULER_H + PRIMER_TRACK_H);
+        ctx.fill();
+      }
+
+      const fs = Math.round(Math.min(13, Math.max(9, cellW * 0.85)));
+      rows.forEach((r, i) => {
+        const y = TOP + i * ROW_H;
+        const t = tracks[i];
+        const primerOn = [primers.F, primers.R].filter((p): p is NonNullable<typeof p> => p !== null && p.rowId === r.id);
+        if (letters) {
+          for (let c = first; c <= last; c++) {
+            const b = r.seq[c] ?? '-';
+            let bg = '';
+            let fg = col.ink;
+            if (b === '-' || b === '.') fg = col.faint;
+            else if (t.mis[c + 1] > t.mis[c]) {
+              bg = col.misBg;
+              fg = col.mis;
+            } else {
+              const p = primerOn.find((q) => c >= q.colStart && c < q.colEnd);
+              if (p) bg = p.side === 'F' ? col.fwdBg : col.revBg;
+            }
+            if (bg) {
+              ctx.fillStyle = bg;
+              ctx.fillRect(x(c), y + 1, cellW + 0.5, ROW_H - 2);
+            }
+            // Pre-rendered letters: far cheaper than a fillText per base.
+            const g = glyphsRef.current.get(b, fg, fs, dpr);
+            const gw = g.width / dpr;
+            ctx.drawImage(g, x(c) + (cellW - gw) / 2, y, gw, ROW_H);
+          }
+        } else {
+          // Grey bar over the row's aligned span, then mismatches in red and
+          // gaps cut out of it - read off prefix counts, so a pixel holding
+          // many columns costs the same as one holding a single column.
+          if (t.start >= 0) {
+            ctx.fillStyle = col.bar;
+            ctx.fillRect(x(t.start), y + 4, (t.end - t.start + 1) * cellW, ROW_H - 8);
+          }
+          const mark = (px: number, w: number, c0: number, c1: number) => {
+            if (t.mis[c1] > t.mis[c0]) {
+              ctx.fillStyle = col.mis;
+              ctx.fillRect(px, y + 2, w, ROW_H - 4);
+            } else if (t.gap[c1] > t.gap[c0]) {
+              ctx.fillStyle = col.base;
+              ctx.fillRect(px, y + 4, w, ROW_H - 8);
+            }
+          };
+          if (cellW >= 1) {
+            for (let c = first; c <= last; c++) mark(x(c), cellW, c, c + 1);
+          } else {
+            for (let px = 0; px < seqW; px++) {
+              const c0 = Math.floor((scrollLeft + px) / cellW);
+              if (c0 >= len) break;
+              const c1 = Math.min(len, Math.max(c0 + 1, Math.floor((scrollLeft + px + 1) / cellW)));
+              mark(labelW + px, 1, c0, c1);
+            }
+          }
+          for (const p of primerOn) {
+            ctx.strokeStyle = p.side === 'F' ? col.fwd : col.rev;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x(p.colStart), y + 2, Math.max(2, (p.colEnd - p.colStart) * cellW), ROW_H - 4);
+          }
+        }
+      });
+
+      if (sel && selCols) {
+        const y = TOP + sel.row * ROW_H;
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = col.accent;
+        ctx.fillRect(x(selCols.from), y + 1, (selCols.to - selCols.from) * cellW, ROW_H - 2);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = col.accent;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x(selCols.from), y + 1, Math.max(1.5, (selCols.to - selCols.from) * cellW), ROW_H - 2);
+      }
+      ctx.restore();
+
+      // Label column: name, and (in sequence mode) the row's own number for
+      // its first base in view.
+      ctx.fillStyle = col.base;
+      ctx.fillRect(0, 0, labelW, totalH);
+      ctx.fillStyle = col.line;
+      ctx.fillRect(labelW - 1, TOP, 1, rows.length * ROW_H);
+      ctx.font = `11px ${MONO}`;
+      ctx.textBaseline = 'middle';
+      names.forEach((name, i) => {
+        const y = TOP + i * ROW_H + ROW_H / 2 + 0.5;
+        ctx.textAlign = 'left';
+        ctx.fillStyle = i === hover?.row || i === sel?.row ? col.ink : col.muted;
+        ctx.fillText(name, 6, y);
+        if (letters) {
+          const rb = a.residuesBefore[i];
+          if (rb[Math.min(len, last + 1)] > rb[first]) {
+            ctx.textAlign = 'right';
+            ctx.fillStyle = col.faint;
+            ctx.fillText(String(rb[first] + 1), labelW - 6, y);
+          }
+        }
+      });
+    };
   });
+
+  useEffect(() => {
+    scheduleDraw();
+  }, [scheduleDraw, a, tracks, rows, width, totalH, vf, labelW, sel, hover?.row, primers, themeTick]);
 
   /** Zooms to `nextFraction`, keeping the column under `anchorPx` (from
    * the sequence area's left edge) where it is. */
   function zoomTo(nextFraction: number, anchorPx = seqW / 2, anchorCol?: number) {
+    if (len === 0) return;
+    const curVf = vfRef.current;
+    const curLeft = pendingScroll.current ?? scrollRef.current?.scrollLeft ?? 0;
     const next = Math.max(minFraction, Math.min(1, nextFraction));
-    const col = anchorCol ?? (scrollLeft + anchorPx) / cellW;
-    const nextCell = seqW / next / Math.max(1, len);
+    const col = anchorCol ?? (curLeft + anchorPx) / (seqW / curVf / len);
     const nextTotal = seqW / next;
-    const left = Math.max(0, Math.min(nextTotal - seqW, col * nextCell - anchorPx));
-    pendingScroll.current = left;
-    setScrollLeft(left);
+    pendingScroll.current = Math.max(0, Math.min(nextTotal - seqW, (col * nextTotal) / len - anchorPx));
+    vfRef.current = next;
     setViewFraction(next);
   }
 
@@ -153,7 +419,7 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       const x = e.clientX - (scrollRef.current?.getBoundingClientRect().left ?? 0) - labelW;
-      zoomTo(vf * Math.exp(e.deltaY * 0.01), Math.max(0, Math.min(seqW, x)));
+      zoomTo(vfRef.current * Math.exp(e.deltaY * 0.01), Math.max(0, Math.min(seqW, x)));
     };
   });
   useEffect(() => {
@@ -164,183 +430,6 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
     return () => el.removeEventListener('wheel', onWheel);
   }, [drawable]);
 
-  const selCols = sel ? { from: Math.min(sel.c0, sel.c1), to: Math.max(sel.c0, sel.c1) + 1 } : null;
-
-  /* ── drawing ─────────────────────────────────────────── */
-  useEffect(() => {
-    const cvs = canvasRef.current;
-    if (!cvs || width === 0 || len === 0) return;
-    const ctx = cvs.getContext('2d');
-    if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    cvs.width = width * dpr;
-    cvs.height = totalH * dpr;
-    cvs.style.width = `${width}px`;
-    cvs.style.height = `${totalH}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const col = {
-      base: cssVar(cvs, '--base'),
-      ink: cssVar(cvs, '--ink'),
-      muted: cssVar(cvs, '--ink-muted'),
-      faint: cssVar(cvs, '--ink-faint'),
-      line: cssVar(cvs, '--line'),
-      bar: cssVar(cvs, '--aln-bar'),
-      mis: cssVar(cvs, '--aln-mismatch-ink'),
-      misBg: cssVar(cvs, '--aln-mismatch-bg'),
-      accent: cssVar(cvs, '--accent'),
-      fwd: cssVar(cvs, '--aln-fwd'),
-      fwdBg: cssVar(cvs, '--aln-fwd-bg'),
-      rev: cssVar(cvs, '--aln-rev'),
-      revBg: cssVar(cvs, '--aln-rev-bg'),
-    };
-    ctx.fillStyle = col.base;
-    ctx.fillRect(0, 0, width, totalH);
-
-    const first = Math.max(0, Math.floor(scrollLeft / cellW));
-    const last = Math.min(len - 1, Math.ceil((scrollLeft + seqW) / cellW));
-    const x = (c: number) => labelW + c * cellW - scrollLeft;
-    // Zoomed far out, many columns share a pixel: visit one per pixel.
-    const step = Math.max(1, Math.floor(1 / cellW));
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(labelW, 0, seqW + RIGHT_PAD, totalH);
-    ctx.clip();
-
-    // Ruler: alignment columns, 1-based.
-    const tick = niceStep(Math.max(1, 64 / cellW));
-    ctx.font = `10px ${MONO}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = col.faint;
-    for (let n = Math.max(tick, Math.ceil((first + 1) / tick) * tick); n <= last + 1; n += tick) {
-      const cx = x(n - 1) + cellW / 2;
-      ctx.fillRect(Math.round(cx), RULER_H - 5, 1, 4);
-      ctx.fillText(fmt(n), cx, RULER_H - 8);
-    }
-
-    // Selected columns: a faint band down every row.
-    if (selCols) {
-      ctx.globalAlpha = 0.08;
-      ctx.fillStyle = col.accent;
-      ctx.fillRect(x(selCols.from), TOP, (selCols.to - selCols.from) * cellW, rows.length * ROW_H);
-      ctx.globalAlpha = 1;
-    }
-
-    // Primer track.
-    for (const p of [primers.F, primers.R]) {
-      if (!p) continue;
-      const px = x(p.colStart);
-      const pw = Math.max(2, (p.colEnd - p.colStart) * cellW);
-      ctx.fillStyle = p.side === 'F' ? col.fwd : col.rev;
-      ctx.fillRect(px, RULER_H + 2, pw, PRIMER_TRACK_H - 4);
-      // Arrowhead at the 3' end.
-      const tipX = p.side === 'F' ? px + pw : px;
-      const dir = p.side === 'F' ? 1 : -1;
-      ctx.beginPath();
-      ctx.moveTo(tipX, RULER_H);
-      ctx.lineTo(tipX + dir * 5, RULER_H + PRIMER_TRACK_H / 2);
-      ctx.lineTo(tipX, RULER_H + PRIMER_TRACK_H);
-      ctx.fill();
-    }
-
-    ctx.font = `${Math.min(13, Math.max(9, cellW * 0.85))}px ${MONO}`;
-    ctx.textBaseline = 'middle';
-    rows.forEach((r, i) => {
-      const y = TOP + i * ROW_H;
-      const primerOn = [primers.F, primers.R].filter((p) => p && p.rowId === r.id);
-      if (letters) {
-        for (let c = first; c <= last; c++) {
-          const b = r.seq[c] ?? '-';
-          let bg = '';
-          let fg = col.ink;
-          const p = primerOn.find((q) => q && c >= q.colStart && c < q.colEnd);
-          if (b === '-' || b === '.') fg = col.faint;
-          else if (isMismatch(a, b, c)) {
-            bg = col.misBg;
-            fg = col.mis;
-          } else if (p) bg = p.side === 'F' ? col.fwdBg : col.revBg;
-          if (bg) {
-            ctx.fillStyle = bg;
-            ctx.fillRect(x(c), y + 1, cellW + 0.5, ROW_H - 2);
-          }
-          ctx.fillStyle = fg;
-          ctx.fillText(b, x(c) + cellW / 2, y + ROW_H / 2 + 0.5);
-        }
-      } else {
-        // Grey bar over the row's aligned span, then mismatches in red and
-        // gaps cut out of it.
-        const s = r.seq.search(/[^-.]/);
-        let e = r.seq.length - 1;
-        while (e >= 0 && (r.seq[e] === '-' || r.seq[e] === '.')) e--;
-        if (s >= 0 && e >= s) {
-          ctx.fillStyle = col.bar;
-          ctx.fillRect(x(s), y + 4, (e - s + 1) * cellW, ROW_H - 8);
-        }
-        const w = Math.max(1, cellW * step);
-        for (let c = first - (first % step); c <= last; c += step) {
-          let mis = false;
-          let gap = false;
-          for (let k = c; k < c + step && k < len; k++) {
-            const b = r.seq[k] ?? '-';
-            if (b === '-' || b === '.') gap = gap || (k > s && k < e);
-            else if (isMismatch(a, b, k)) mis = true;
-          }
-          if (mis) {
-            ctx.fillStyle = col.mis;
-            ctx.fillRect(x(c), y + 2, w, ROW_H - 4);
-          } else if (gap) {
-            ctx.fillStyle = col.base;
-            ctx.fillRect(x(c), y + 4, w, ROW_H - 8);
-          }
-        }
-        for (const p of primerOn) {
-          if (!p) continue;
-          ctx.strokeStyle = p.side === 'F' ? col.fwd : col.rev;
-          ctx.lineWidth = 2;
-          ctx.strokeRect(x(p.colStart), y + 2, Math.max(2, (p.colEnd - p.colStart) * cellW), ROW_H - 4);
-        }
-      }
-    });
-
-    if (sel && selCols) {
-      const y = TOP + sel.row * ROW_H;
-      ctx.globalAlpha = 0.25;
-      ctx.fillStyle = col.accent;
-      ctx.fillRect(x(selCols.from), y + 1, (selCols.to - selCols.from) * cellW, ROW_H - 2);
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = col.accent;
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x(selCols.from), y + 1, Math.max(1.5, (selCols.to - selCols.from) * cellW), ROW_H - 2);
-    }
-    ctx.restore();
-
-    // Label column: name, and (in sequence mode) the row's own number for
-    // its first base in view.
-    ctx.fillStyle = col.base;
-    ctx.fillRect(0, 0, labelW, totalH);
-    ctx.fillStyle = col.line;
-    ctx.fillRect(labelW - 1, TOP, 1, rows.length * ROW_H);
-    ctx.font = `11px ${MONO}`;
-    ctx.textBaseline = 'middle';
-    names.forEach((name, i) => {
-      const y = TOP + i * ROW_H + ROW_H / 2 + 0.5;
-      ctx.textAlign = 'left';
-      ctx.fillStyle = i === hover?.row || i === sel?.row ? col.ink : col.muted;
-      ctx.fillText(name, 6, y);
-      if (letters) {
-        const rb = a.residuesBefore[i];
-        if (rb[Math.min(len, last + 1)] > rb[first]) {
-          ctx.textAlign = 'right';
-          ctx.fillStyle = col.faint;
-          ctx.fillText(String(rb[first] + 1), labelW - 6, y);
-        }
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- selCols derives from sel
-  }, [a, rows, names.join('\n'), width, totalH, scrollLeft, cellW, seqW, labelW, letters, len, sel, hover?.row, primers, themeTick]);
-
   /* ── pointer ─────────────────────────────────────────── */
   function cellAt(clientX: number, clientY: number, clamp = false): { row: number; col: number } | null {
     const cvs = canvasRef.current;
@@ -349,7 +438,7 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
     const px = clientX - rect.left;
     const row = Math.floor((clientY - rect.top - TOP) / ROW_H);
     // Read live: a drag scrolls the view while its handlers stay the same.
-    const left = scrollRef.current?.scrollLeft ?? scrollLeft;
+    const left = scrollRef.current?.scrollLeft ?? 0;
     let c = Math.floor((px - labelW + left) / cellW);
     if (clamp) c = Math.max(0, Math.min(len - 1, c));
     else if (px < labelW || c < 0 || c >= len || row < 0 || row >= rows.length) return null;
@@ -454,7 +543,7 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
   }
 
   /* ── toolbar ─────────────────────────────────────────── */
-  const viewCenterCol = (scrollLeft + seqW / 2) / cellW;
+  const viewCenterCol = ((scrollRef.current?.scrollLeft ?? 0) + seqW / 2) / cellW;
   function showSequence() {
     const target = selCols ? (selCols.from + selCols.to) / 2 : viewCenterCol;
     zoomTo(seqW / (len * SEQUENCE_W), seqW / 2, target);
@@ -512,7 +601,7 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
       </p>
       <div
         ref={scrollRef}
-        onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
+        onScroll={scheduleDraw}
         className="max-h-[520px] overflow-auto rounded-lg border border-line bg-base"
       >
         <div style={{ width: labelW + totalW + RIGHT_PAD, height: totalH }}>

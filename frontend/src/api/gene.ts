@@ -1,4 +1,5 @@
 import { postJson } from './client';
+import type { BlastHit } from './blast';
 
 // Matches `crates/server/src/routes/gene.rs`.
 
@@ -31,4 +32,17 @@ export interface SearchGeneResponse {
 
 export function searchGene(req: SearchGeneRequest): Promise<SearchGeneResponse> {
   return postJson<SearchGeneResponse>('/search_gene', req);
+}
+
+/** Loads the stretch of the record a BLAST hit covers as a gene with one
+ * transcript - for genes NCBI has no Gene record for. The transcript
+ * lives in the NCBI provider, so continue with `api_source` `ncbi`. */
+export function loadBlastHit(hit: BlastHit): Promise<SearchGeneResponse> {
+  return postJson<SearchGeneResponse>('/load_blast_hit', {
+    accession: hit.accession,
+    hit_from: hit.hit_from,
+    hit_to: hit.hit_to,
+    gene_name: hit.gene_symbol || hit.accession,
+    organism: hit.organism,
+  });
 }

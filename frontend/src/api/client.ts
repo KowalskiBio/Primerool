@@ -1,3 +1,5 @@
+import { getNcbiApiKey } from './ncbiApiKey';
+
 /**
  * Shared POST-JSON helper for every route in `crates/server`. All six
  * routes return `{"error": "..."}` on failure (see `crates/server/src/error.rs`'s
@@ -39,10 +41,17 @@ async function readResponse<TRes>(response: Response): Promise<TRes> {
   return data as TRes;
 }
 
+/** Sends the Settings NCBI API key on every request; the server applies it
+ * to every NCBI E-utilities call it makes while serving that request. */
+function ncbiKeyHeader(): Record<string, string> {
+  const key = getNcbiApiKey();
+  return key ? { 'X-NCBI-API-Key': key } : {};
+}
+
 export async function postJson<TRes>(path: string, body: unknown): Promise<TRes> {
   const response = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...ncbiKeyHeader() },
     body: JSON.stringify(body),
   });
   return readResponse<TRes>(response);
@@ -51,6 +60,6 @@ export async function postJson<TRes>(path: string, body: unknown): Promise<TRes>
 /** GET counterpart of `postJson` for the few polling-style routes
  * (`/blast_batch_status/:id`): same `{"error": ...}` handling. */
 export async function getJson<TRes>(path: string): Promise<TRes> {
-  const response = await fetch(path);
+  const response = await fetch(path, { headers: ncbiKeyHeader() });
   return readResponse<TRes>(response);
 }

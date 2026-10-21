@@ -82,3 +82,54 @@ async fn symbol_search_prefers_official_symbol_over_alias() {
     assert_eq!(gene.gene_name, "COPS2");
     assert_eq!(gene.matched_by, GeneMatch::Alias);
 }
+
+#[tokio::test]
+#[ignore = "hits live NCBI E-utilities; run explicitly"]
+async fn gene_missing_from_ncbi_gene_falls_back_to_a_genbank_protein_cds() {
+    // NCBI Gene has no nirS record for P. fluorescens (taxid 294); its
+    // GenBank proteins do, with the genome stretch coding for them.
+    let provider = providers::ncbi::NcbiProvider::new();
+
+    for species in ["Pseudomonas fluorescens", "294"] {
+        let gene = provider.search_gene("nirS", species).await.unwrap().unwrap_or_else(|| panic!("nirS should resolve in {species}"));
+        assert_eq!(gene.gene_name, "nirS");
+        assert_eq!(gene.matched_by, GeneMatch::Symbol);
+        assert_eq!(gene.transcripts.len(), 1);
+        let t = &gene.transcripts[0];
+        assert!(t.name.contains("Pseudomonas fluorescens"), "{}", t.name);
+
+        let tinfo = provider.get_transcript_details(&t.id).await.unwrap().unwrap();
+        let (start, end) = tinfo.cds[0];
+        let cds = provider.build_spliced_sequence(&tinfo, Feature::Cds, species, false).await.unwrap().expect("the CDS should be fetchable");
+        assert_eq!(cds.len() as u64, end - start + 1);
+        assert!(cds.starts_with("ATG") || cds.starts_with("GTG") || cds.starts_with("TTG"), "{} should open with a start codon", &cds[..3]);
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits live NCBI E-utilities; run explicitly"]
+async fn nirs_homologs_across_pseudomonas_cover_many_species() {
+    let provider = providers::ncbi::NcbiProvider::new();
+    let homologs = provider.collect_homologs("nirS", "txid286[orgn]", 25).await.unwrap();
+
+    let species: std::collections::HashSet<&str> = homologs.iter().map(|h| h.species.as_str()).collect();
+    assert_eq!(species.len(), homologs.len(), "one homolog per species");
+    assert!(homologs.len() >= 10, "only {} species: {:?}", homologs.len(), species);
+    for h in &homologs {
+        assert_eq!(h.sequence.len() as u64, h.end - h.start + 1, "{}", h.species);
+        assert!(["ATG", "GTG", "TTG"].contains(&&h.sequence[..3]), "{} opens with {}", h.species, &h.sequence[..3]);
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits live NCBI Datasets and E-utilities; run explicitly"]
+async fn datasets_collects_ortholog_cdss_for_a_eukaryotic_gene() {
+    let provider = providers::ncbi::NcbiProvider::new();
+    let (homologs, via) = provider.collect_homologs_datasets("INS", "Mammalia", "\"Mammalia\"[orgn]", 8).await.unwrap();
+    assert_eq!(via, providers::ncbi::VIA_ORTHOLOGS);
+    assert!(homologs.len() >= 5, "only {} orthologs", homologs.len());
+    assert_eq!(homologs[0].species, "Homo sapiens");
+    for h in &homologs {
+        assert!(h.sequence.starts_with("ATG") && h.sequence.len() % 3 == 0, "{} CDS looks wrong", h.species);
+    }
+}

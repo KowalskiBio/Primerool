@@ -37,6 +37,23 @@ export interface PrimerAnalysis {
   tm: number | null;
   hairpin: DimerResult;
   homodimer: DimerResult;
+  /** Set for a degenerate (IUPAC) oligo: its variants' spread. The fields
+   * above are then the worst cases - Tm/GC of the lowest-Tm variant, the
+   * highest-Tm hairpin, the strongest self-dimer. */
+  degenerate?: DegenerateSummary;
+}
+
+export interface DegenerateSummary {
+  degeneracy: number;
+  /** Variants analyzed: all, or 0 when there were too many (numbers null). */
+  analyzed: number;
+  tm_min: number | null;
+  tm_max: number | null;
+  gc_min: number | null;
+  gc_max: number | null;
+  lowest_tm_variant: string | null;
+  strongest_hairpin_variant: string | null;
+  strongest_dimer_variant: string | null;
 }
 
 export interface PairAnalysis {

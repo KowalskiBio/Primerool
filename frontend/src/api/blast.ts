@@ -34,9 +34,11 @@ export interface BlastSequenceResponse {
   hits: BlastHit[];
 }
 
-export function blastSequence(sequence: string): Promise<BlastSequenceResponse> {
+/** `organism` (a species slug, NCBI Taxonomy ID or organism name)
+ * restricts the hits to that organism; omitted searches everything. */
+export function blastSequence(sequence: string, organism?: string): Promise<BlastSequenceResponse> {
   // Server ignores an empty key; mirrors Oligool's `/search` request shape.
-  return postJson<BlastSequenceResponse>('/blast_sequence', { sequence, api_key: getNcbiApiKey() });
+  return postJson<BlastSequenceResponse>('/blast_sequence', { sequence, organism: organism ?? '', api_key: getNcbiApiKey() });
 }
 
 // Matches `crates/server/src/routes/blast.rs`'s `/blast_hit_flanks`.

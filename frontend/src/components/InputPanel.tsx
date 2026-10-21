@@ -1,11 +1,14 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useSessionState } from '../session/sessionContext';
-import { searchGene } from '../api/gene';
+import { loadBlastHit, searchGene } from '../api/gene';
+import { ApiError } from '../api/client';
 import { blastSequence, type BlastHit } from '../api/blast';
 import type { Transcript } from '../api/gene';
 import { isAccessionId } from '../utils/dna';
 import { SPECIES_BY_KINGDOM, KINGDOM_LABELS, findKingdomForSpecies, type Kingdom, type SpeciesOption } from '../utils/species';
+import BlastProgress from './BlastProgress';
 import BlastResultsTable from './BlastResultsTable';
+import GeneNotFoundPanel from './GeneNotFoundPanel';
 import SnpBatchPanel from './SnpBatchPanel';
 import SegmentedControl from './ui/SegmentedControl';
 import Field from './ui/Field';
@@ -13,6 +16,8 @@ import TextInput from './ui/TextInput';
 import RichSelect from './ui/RichSelect';
 import Button from './ui/Button';
 import { controlClasses } from './ui/TextInput';
+import { useBlastProgress } from '../utils/useBlastProgress';
+import { readLastOrganism, writeLastOrganism } from '../utils/lastOrganism';
 
 interface Props {
   onGeneFound: (geneName: string, species: string, apiSource: 'ensembl' | 'ncbi', transcripts: Transcript[]) => void;
@@ -45,10 +50,12 @@ function speciesContent(s: SpeciesOption): ReactNode {
 }
 
 export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: setInputMode, onSpeciesSelectionChange }: Props) {
-  const [apiSource, setApiSource] = useSessionState<'ensembl' | 'ncbi'>('input.apiSource', 'ncbi');
-  const [kingdom, setKingdom] = useSessionState<Kingdom>('input.kingdom', 'animals');
-  const [speciesValue, setSpeciesValue] = useSessionState('input.speciesValue', 'homo_sapiens');
-  const [customSpecies, setCustomSpecies] = useSessionState('input.customSpecies', '');
+  const [lastOrganism] = useState(readLastOrganism);
+  const [apiSource, setApiSource] = useSessionState<'ensembl' | 'ncbi'>('input.apiSource', lastOrganism.apiSource ?? 'ncbi');
+  const [kingdom, setKingdom] = useSessionState<Kingdom>('input.kingdom', lastOrganism.kingdom ?? 'animals');
+  const [speciesValue, setSpeciesValue] = useSessionState('input.speciesValue', lastOrganism.speciesValue ?? 'homo_sapiens');
+  const [customSpecies, setCustomSpecies] = useSessionState('input.customSpecies', lastOrganism.customSpecies ?? '');
+  useEffect(() => writeLastOrganism({ apiSource, kingdom, speciesValue, customSpecies }), [apiSource, kingdom, speciesValue, customSpecies]);
   const [geneInput, setGeneInput] = useSessionState('input.geneInput', '');
   const [fastaInput, setFastaInput] = useSessionState('input.fastaInput', '');
   const [error, setError] = useState<string | null>(null);
@@ -58,11 +65,18 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
   const [warning, setWarning] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [blastRunning, setBlastRunning] = useState(false);
-  const [blastProgress, setBlastProgress] = useState(0);
+  const blastProgress = useBlastProgress();
+  /** The last gene search's "not found" explanation - shown with the
+   * offer to BLAST the gene's sequence instead. */
+  const [notFound, setNotFound] = useState<string | null>(null);
   const [blastHits, setBlastHits] = useSessionState<BlastHit[] | null>('input.blastHits', null);
   const [showSnpBatch, setShowSnpBatch] = useSessionState('input.showSnpBatch', false);
 
   const effectiveSpecies = speciesValue === '__custom__' ? customSpecies.trim() : speciesValue;
+  // App starts from its own default, so tell it the remembered or
+  // restored organism too, not only later picks.
+  useEffect(() => onSpeciesSelectionChange?.(effectiveSpecies), [effectiveSpecies, onSpeciesSelectionChange]);
+  const organismLabel = speciesValue === '__custom__' ? customSpecies.trim() : (SPECIES_BY_KINGDOM[kingdom].find((s) => s.value === speciesValue)?.label ?? speciesValue);
 
   function syncDropdownsToSpecies(species: string) {
     const found = findKingdomForSpecies(species);
@@ -81,6 +95,7 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
   async function runSearchGene(geneName: string, species: string, source: 'ensembl' | 'ncbi') {
     setError(null);
     setWarning(null);
+    setNotFound(null);
     setSearching(true);
     try {
       const data = await searchGene({ gene_name: geneName, species, api_source: source });
@@ -97,6 +112,27 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
       onGeneFound(data.gene_name, species, source, data.transcripts);
     } catch (e) {
       setSuccess(null);
+      if (e instanceof ApiError && e.status === 404) setNotFound(e.message);
+      else setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  /** Loads the region a BLAST hit covers (from the not-found panel): the
+   * gene has no record to search, so its sequence is taken from the hit. */
+  async function loadNotFoundHit(hit: BlastHit) {
+    setError(null);
+    setWarning(null);
+    setSuccess(null);
+    setSearching(true);
+    try {
+      const data = await loadBlastHit(hit);
+      setNotFound(null);
+      const span = `${Math.min(hit.hit_from, hit.hit_to)}-${Math.max(hit.hit_from, hit.hit_to)}`;
+      setSuccess(`Loaded ${hit.accession}:${span} (${hit.organism}) as ${data.gene_name}.`);
+      onGeneFound(data.gene_name, hit.ensembl_species || hit.organism, 'ncbi', data.transcripts);
+    } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSearching(false);
@@ -151,10 +187,7 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
     }
 
     setBlastRunning(true);
-    setBlastProgress(0);
-    const progressTimer = setInterval(() => {
-      setBlastProgress((p) => Math.min(p + 1, 95));
-    }, 1200);
+    blastProgress.start();
 
     try {
       const data = await blastSequence(raw);
@@ -167,8 +200,7 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      clearInterval(progressTimer);
-      setBlastProgress(100);
+      blastProgress.finish();
       setBlastRunning(false);
     }
   }
@@ -186,7 +218,7 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
     }
 
     setGeneInput(hit.gene_symbol);
-    setSuccess(`Identified: ${hit.organism} (${hit.gene_symbol}). Searching Ensembl…`);
+    setSuccess(`Identified: ${hit.organism} (${hit.gene_symbol}). Searching ${apiSource === 'ncbi' ? 'NCBI' : 'Ensembl'}…`);
     void runSearchGene(hit.gene_symbol, species, apiSource);
   }
 
@@ -300,16 +332,27 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
                   setCustomSpecies(e.target.value);
                   onSpeciesSelectionChange?.(e.target.value.trim());
                 }}
-                placeholder="e.g. escherichia_coli_str_k_12_substr_mg1655…"
+                placeholder={apiSource === 'ncbi' ? 'e.g. 294 or Pseudomonas fluorescens…' : 'e.g. escherichia_coli_str_k_12_substr_mg1655…'}
               />
-              <p className="mt-1 text-xs text-ink-faint">
-                Enter the Ensembl species name (lowercase, underscores).{' '}
-                <a href="https://rest.ensembl.org/info/species?content-type=application/json" target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                  Browse all species
-                </a>
-              </p>
+              {apiSource === 'ncbi' ? (
+                <p className="mt-1 text-xs text-ink-faint">
+                  Enter an NCBI Taxonomy ID (e.g. 294) or a scientific name (e.g. Pseudomonas fluorescens). A taxonomy ID also covers every strain below it.{' '}
+                  <a href="https://www.ncbi.nlm.nih.gov/datasets/taxonomy/" target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                    Browse NCBI Taxonomy
+                  </a>
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-ink-faint">
+                  Enter the Ensembl species name (lowercase, underscores).{' '}
+                  <a href="https://rest.ensembl.org/info/species?content-type=application/json" target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                    Browse all species
+                  </a>
+                </p>
+              )}
             </div>
           )}
+
+          {notFound && <GeneNotFoundPanel message={notFound} species={effectiveSpecies} organismLabel={organismLabel} onUse={(hit) => void loadNotFoundHit(hit)} />}
         </>
       )}
 
@@ -345,17 +388,7 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
             </div>
           )}
 
-          {blastRunning && (
-            <div className="mt-4 rounded-md border border-line bg-surface-2 px-4 py-3" role="status">
-              <div className="mb-2 flex items-baseline gap-2">
-                <strong className="text-sm text-ink">Running NCBI BLAST…</strong>
-                <span className="text-sm text-ink-muted">This may take up to 2 minutes. Please wait.</span>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
-                <div className="h-full rounded-full bg-accent transition-[width] duration-1000 ease-linear" style={{ width: `${blastProgress}%` }} />
-              </div>
-            </div>
-          )}
+          {blastRunning && <BlastProgress progress={blastProgress.progress} />}
 
           {blastHits && (
             <div className="mt-4">

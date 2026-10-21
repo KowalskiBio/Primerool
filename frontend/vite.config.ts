@@ -35,6 +35,9 @@ export default defineConfig({
       '/design_conserved': 'http://127.0.0.1:5050',
       '/idt': 'http://127.0.0.1:5050',
       '/import_snp_blocks': 'http://127.0.0.1:5050',
+      '/collect_homologs': 'http://127.0.0.1:5050',
+      '/load_blast_hit': 'http://127.0.0.1:5050',
+      '/ncbi': 'http://127.0.0.1:5050',
     },
   },
 })

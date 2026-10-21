@@ -18,6 +18,24 @@ pub fn ensembl_to_binomial_or_guess(species: &str) -> String {
     }
 }
 
+/// The NCBI E-utilities `[orgn]` filter for a species: a bare NCBI
+/// Taxonomy ID (`294`, or `txid294`) becomes `txid294[orgn]`, which also
+/// covers every taxon below it; anything else is resolved to a binomial
+/// and quoted, so a multi-word name is always searched as one phrase.
+pub fn ncbi_organism_term(species: &str) -> String {
+    match taxid(species) {
+        Some(id) => format!("txid{id}[orgn]"),
+        None => format!("\"{}\"[orgn]", ensembl_to_binomial_or_guess(species.trim()).replace('"', "")),
+    }
+}
+
+/// `294` or `txid294` (any case) -> `294`.
+pub fn taxid(species: &str) -> Option<&str> {
+    let s = species.trim();
+    let digits = s.strip_prefix("txid").or_else(|| s.strip_prefix("TXID")).unwrap_or(s);
+    (!digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())).then_some(digits)
+}
+
 pub static ENSEMBL_TO_BINOMIAL: &[(&str, &str)] = &[
     // Animals / Vertebrates
     ("homo_sapiens", "Homo sapiens"),
@@ -88,6 +106,16 @@ mod tests {
     #[test]
     fn unknown_species_falls_back_to_underscore_replace() {
         assert_eq!(ensembl_to_binomial_or_guess("my_custom_species"), "my custom species");
+    }
+
+    #[test]
+    fn organism_term_takes_taxids_and_quotes_names() {
+        assert_eq!(ncbi_organism_term("294"), "txid294[orgn]");
+        assert_eq!(ncbi_organism_term(" txid286 "), "txid286[orgn]");
+        assert_eq!(ncbi_organism_term("homo_sapiens"), "\"Homo sapiens\"[orgn]");
+        assert_eq!(ncbi_organism_term("Pseudomonas fluorescens"), "\"Pseudomonas fluorescens\"[orgn]");
+        assert_eq!(taxid("txid"), None);
+        assert_eq!(taxid("9606a"), None);
     }
 
     #[test]

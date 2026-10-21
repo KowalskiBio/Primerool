@@ -19,6 +19,7 @@ pub mod design_general;
 pub mod design_internal;
 pub mod design_junction;
 pub mod design_probe;
+pub mod iupac;
 pub mod picker;
 pub mod structure_variant;
 

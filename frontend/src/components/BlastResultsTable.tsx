@@ -32,6 +32,14 @@ interface Props {
   primer?: string;
 }
 
+/** Identity at a glance: exact, near-identical, related, distant. */
+function identityDot(pct: number): string {
+  if (pct >= 100) return 'bg-accent';
+  if (pct >= 95) return 'bg-success';
+  if (pct >= 80) return 'bg-warning';
+  return 'bg-danger';
+}
+
 export default function BlastResultsTable({ hits, onUse, primer }: Props) {
   const top = primer ? hits : hits.slice(0, 10);
   const columnCount = 8 + (primer ? 1 : 0) + (onUse ? 1 : 0);
@@ -130,7 +138,12 @@ export default function BlastResultsTable({ hits, onUse, primer }: Props) {
                     </a>
                   </td>
                   <td className="px-4 py-3 tabular-nums">{hit.query_cover ?? '-'}%</td>
-                  <td className="px-4 py-3 tabular-nums">{hit.identity_pct}%</td>
+                  <td className="px-4 py-3 tabular-nums">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${identityDot(hit.identity_pct)}`} />
+                      {hit.identity_pct}%
+                    </span>
+                  </td>
                   <td className="px-4 py-3 tabular-nums">{hit.evalue !== null ? hit.evalue.toExponential(1) : '-'}</td>
                   {onUse && (
                     <td className="px-4 py-3">

@@ -1,8 +1,9 @@
 //! NCBI E-utilities provider, ported from `ncbi_api.py`.
 //!
-//! Rate-limited to ~3 req/s (`_MIN_INTERVAL = 0.34`), single attempt, no
-//! retry — deliberately less robust than Ensembl's client, and deliberately
-//! not sharing a rate limiter with it. Carries a load-bearing, process-
+//! Rate-limited to ~3 req/s (`_MIN_INTERVAL = 0.34`). The only retry is
+//! on HTTP 429: NCBI's keyless limit is per IP, shared with other apps on
+//! the same host, so this process's own pacing cannot rule it out. Still
+//! deliberately not sharing a rate limiter with Ensembl's client. Carries a load-bearing, process-
 //! lifetime, stateful transcript cache (`transcript_cache`, populated by
 //! `search_gene`, read by `get_transcript_details`): NCBI has no
 //! per-transcript structured lookup, so `gene_table` parsing only happens
@@ -21,11 +22,25 @@ use regex::Regex;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
-use crate::species_map::ensembl_to_binomial_or_guess;
+use crate::species_map::ncbi_organism_term;
 use crate::{revcomp, strip_fasta, Feature, GeneMatch, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo, TranscriptSummary, VariantHit};
+
+mod datasets;
+pub use datasets::{VIA_ASSEMBLIES, VIA_ORTHOLOGS};
 
 const EUTILS: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const MIN_INTERVAL: Duration = Duration::from_millis(340); // ~3 req/s, no API key
+/// Retries after an HTTP 429 (rate limit exceeded), waiting 1 s, then 2 s.
+const MAX_RATE_LIMIT_RETRIES: u32 = 2;
+
+tokio::task_local! {
+    /// The NCBI API key of the HTTP request being served (the browser's
+    /// Settings key, set by the server's middleware), so every E-utilities
+    /// call made for that request carries it without threading a key
+    /// through `SequenceProvider`. Calls outside a request scope (tests,
+    /// spawned tasks) see none and fall back to keyless.
+    pub static REQUEST_API_KEY: Option<String>;
+}
 
 /// Caps how many `db=snp` `esearch` hits a region search will pull details
 /// for. Unlike Ensembl's single `/overlap/region` call, satisfying a region
@@ -51,6 +66,8 @@ const PREFERRED_STUDIES: [&str; 5] = ["1000Genomes", "1000Genomes_30X", "GnomAD_
 pub struct NcbiProvider {
     client: reqwest::Client,
     last_request: Mutex<Instant>,
+    /// NCBI Datasets is paced on its own (see `datasets`).
+    datasets_last_request: Mutex<Instant>,
     transcript_cache: Arc<Mutex<HashMap<String, TranscriptInfo>>>,
 }
 
@@ -76,40 +93,51 @@ impl NcbiProvider {
         Self {
             client: reqwest::Client::new(),
             last_request: Mutex::new(Instant::now() - Duration::from_secs(1)),
+            datasets_last_request: Mutex::new(Instant::now() - Duration::from_secs(1)),
             transcript_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// Direct port of `ncbi_api.py::_get`: rate-limited, single-attempt,
-    /// no retry (unlike Ensembl's `_get`).
+    /// Port of `ncbi_api.py::_get`: rate-limited, and retried only when
+    /// NCBI answers 429 (unlike Ensembl's `_get`, which retries more).
     async fn get(&self, url: &str, params: &[(&str, &str)], timeout: Duration) -> Result<reqwest::Response, ProviderError> {
         self.get_with_key(url, params, None, timeout).await
     }
 
-    /// `get` plus an optional per-request NCBI API key (appended as the
-    /// `api_key` query parameter). All callers go through here with `None`
-    /// except the ones made key-aware by the BLAST sequence route.
+    /// `get` plus an NCBI API key (appended as the `api_key` query
+    /// parameter): the explicit one when given, else the request's
+    /// `REQUEST_API_KEY`, else none.
     async fn get_with_key(&self, url: &str, params: &[(&str, &str)], api_key: Option<&str>, timeout: Duration) -> Result<reqwest::Response, ProviderError> {
-        {
-            let mut last = self.last_request.lock().await;
-            let elapsed = last.elapsed();
-            if elapsed < MIN_INTERVAL {
-                tokio::time::sleep(MIN_INTERVAL - elapsed).await;
+        let scoped = REQUEST_API_KEY.try_with(|k| k.clone()).ok().flatten();
+        let api_key = api_key.or(scoped.as_deref());
+        let mut retries = 0;
+        loop {
+            {
+                let mut last = self.last_request.lock().await;
+                let elapsed = last.elapsed();
+                if elapsed < MIN_INTERVAL {
+                    tokio::time::sleep(MIN_INTERVAL - elapsed).await;
+                }
+                *last = Instant::now();
             }
-            *last = Instant::now();
-        }
 
-        let mut req = self.client.get(url).query(params);
-        if let Some(key) = api_key {
-            req = req.query(&[("api_key", key)]);
+            let mut req = self.client.get(url).query(params);
+            if let Some(key) = api_key {
+                req = req.query(&[("api_key", key)]);
+            }
+            let resp = req.timeout(timeout).send().await?;
+            let status = resp.status().as_u16();
+            if status == 429 && retries < MAX_RATE_LIMIT_RETRIES {
+                retries += 1;
+                tokio::time::sleep(Duration::from_secs(retries as u64)).await;
+                continue;
+            }
+            if status >= 400 {
+                let message = resp.text().await.unwrap_or_default();
+                return Err(ProviderError::UpstreamStatus { status, message });
+            }
+            return Ok(resp);
         }
-        let resp = req.timeout(timeout).send().await?;
-        let status = resp.status().as_u16();
-        if status >= 400 {
-            let message = resp.text().await.unwrap_or_default();
-            return Err(ProviderError::UpstreamStatus { status, message });
-        }
-        Ok(resp)
     }
 
     async fn get_json(&self, url: &str, params: &[(&str, &str)]) -> Result<Value, ProviderError> {
@@ -221,8 +249,10 @@ impl NcbiProvider {
             return Ok(Some(String::new()));
         }
         let acc = if !chr_accession.is_empty() { chr_accession } else { chrom };
-        if !acc.starts_with("NC_") {
-            // Python: prints a warning and returns None — can't fetch without NC_.
+        if !is_nucleotide_accession(acc) {
+            // A bare chromosome name ("17") can't be fetched by itself.
+            // Any accession can: NC_ for Gene-db hits, but also GenBank
+            // genomes (CP151816.1) for protein-located CDSs and BLAST hits.
             return Ok(None);
         }
         let start_s = start.to_string();
@@ -248,8 +278,8 @@ impl NcbiProvider {
     /// E-utils has no one-shot spatial-overlap endpoint). An empty result
     /// is the normal "no known variants here" case, not an error.
     pub async fn search_variants_in_region(&self, chrom: &str, start: u64, end: u64, species: &str) -> Result<Vec<VariantHit>, ProviderError> {
-        let organism = ensembl_to_binomial_or_guess(species);
-        let term = format!("{chrom}[chr] AND {start}:{end}[chrpos] AND {organism}[orgn]");
+        let organism = ncbi_organism_term(species);
+        let term = format!("{chrom}[chr] AND {start}:{end}[chrpos] AND {organism}");
         let retmax = MAX_REGION_HITS.to_string();
         let esearch = self.get_json(&format!("{EUTILS}/esearch.fcgi"), &[("db", "snp"), ("term", &term), ("retmode", "json"), ("retmax", &retmax)]).await?;
 
@@ -406,6 +436,307 @@ impl NcbiProvider {
             organism: summary["organism"]["scientificname"].as_str().unwrap_or_default().to_string(),
         }))
     }
+
+    /// The tail every successful `search_gene` path shares: caches the
+    /// transcripts for `get_transcript_details`, then lists them NM_ first,
+    /// most exons first, with one marked canonical.
+    #[allow(clippy::too_many_arguments)]
+    async fn finish_search(&self, gene_name: String, matched_by: GeneMatch, gene_id: String, chrom: String, strand: Strand, start: u64, end: u64, transcripts_data: IndexMap<String, TranscriptInfo>) -> GeneSearchResult {
+        {
+            let mut cache = self.transcript_cache.lock().await;
+            for (tid, tinfo) in &transcripts_data {
+                cache.insert(tid.clone(), tinfo.clone());
+            }
+        }
+
+        let mut transcripts: Vec<TranscriptSummary> = transcripts_data
+            .iter()
+            .map(|(tid, tinfo)| TranscriptSummary {
+                id: tid.clone(),
+                name: tinfo.transcript_name.clone(),
+                biotype: String::new(),
+                exon_count: tinfo.exons.len(),
+                strand,
+                is_canonical: false,
+            })
+            .collect();
+
+        // Sort: NM_ first, then by exon count descending.
+        transcripts.sort_by(|a, b| {
+            let a_key = (if a.id.starts_with("NM_") { 0 } else { 1 }, std::cmp::Reverse(a.exon_count));
+            let b_key = (if b.id.starts_with("NM_") { 0 } else { 1 }, std::cmp::Reverse(b.exon_count));
+            a_key.cmp(&b_key)
+        });
+
+        // Mark first NM_ as canonical; if none, mark the first transcript.
+        if let Some(t) = transcripts.iter_mut().find(|t| t.id.starts_with("NM_")) {
+            t.is_canonical = true;
+        }
+        if !transcripts.is_empty() && !transcripts.iter().any(|t| t.is_canonical) {
+            transcripts[0].is_canonical = true;
+        }
+
+        GeneSearchResult { gene_name, matched_by, gene_id, chrom, strand, start, end, transcripts }
+    }
+
+    /// Loads `start..=end` (1-based) of a nucleotide record as a gene with
+    /// one single-region transcript - a CDS located through a GenBank
+    /// protein, or a BLAST hit the user picked. `label` names the
+    /// transcript so the user can see which record it came from.
+    pub async fn load_region(&self, gene_name: &str, gene_id: &str, accession: &str, start: u64, end: u64, strand: Strand, label: &str) -> GeneSearchResult {
+        let mut transcripts = IndexMap::new();
+        transcripts.insert(format!("{accession}:{start}-{end}"), single_region_transcript(label.to_string(), accession.to_string(), accession.to_string(), strand, start, end));
+        self.finish_search(gene_name.to_string(), GeneMatch::Symbol, gene_id.to_string(), accession.to_string(), strand, start, end, transcripts).await
+    }
+
+    /// `search_gene`'s last resort: a GenBank protein named `gene_name` in
+    /// the organism whose record says which genome stretch codes for it
+    /// (`/coded_by`). RefSeq WP_ proteins are shared across genomes and
+    /// carry no such location, so they never match.
+    async fn search_protein_cds(&self, gene_name: &str, organism_term: &str) -> Result<Option<GeneSearchResult>, ProviderError> {
+        let ids = self.esearch_ids("protein", &format!("{gene_name}[gene] AND {organism_term}"), 20).await?;
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let resp = self.get(&format!("{EUTILS}/efetch.fcgi"), &[("db", "protein"), ("id", &ids.join(",")), ("rettype", "gp"), ("retmode", "text")], Duration::from_secs(30)).await?;
+        let Some(cds) = parse_coded_by_cds(&resp.text().await?, gene_name) else {
+            return Ok(None);
+        };
+        let source = match &cds.strain {
+            Some(strain) if !cds.organism.contains(strain.as_str()) => format!("{} {strain}", cds.organism),
+            _ => cds.organism.clone(),
+        };
+        let label = format!("{} (CDS, {source}, {})", cds.gene, cds.accession);
+        Ok(Some(self.load_region(&cds.gene, &cds.protein, &cds.accession, cds.start, cds.end, cds.strand, &label).await))
+    }
+
+    /// One CDS of `gene` per species within a taxon - the input for a
+    /// cross-species alignment. GenBank proteins are the source (NCBI
+    /// Gene lacks most prokaryote genomes), but they are dominated by
+    /// whichever species is sequenced most (~90% P. aeruginosa for nirS
+    /// in Pseudomonas), so species are chosen from cheap docsums first
+    /// and only the chosen proteins' GenPept records are fetched.
+    pub async fn collect_homologs(&self, gene: &str, organism_term: &str, max_species: usize) -> Result<Vec<Homolog>, ProviderError> {
+        let ids = self.esearch_ids("protein", &format!("{gene}[gene] AND {organism_term}"), MAX_HOMOLOG_PROTEINS).await?;
+        let mut docsums = Vec::new();
+        for chunk in ids.chunks(200) {
+            let esummary = self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "protein"), ("id", &chunk.join(",")), ("retmode", "json")]).await?;
+            for id in chunk {
+                let d = &esummary["result"][id.as_str()];
+                docsums.push(ProteinDocsum {
+                    accession: d["accessionversion"].as_str().unwrap_or_default().to_string(),
+                    organism: d["organism"].as_str().unwrap_or_default().to_string(),
+                    taxid: d["taxid"].as_u64().unwrap_or(0),
+                    complete: d["completeness"].as_str() == Some("complete"),
+                });
+            }
+        }
+        let groups = group_by_species(&docsums, max_species);
+
+        // Up to HOMOLOG_TRIES proteins per species, fetched round by
+        // round: the first of each, then the next for species whose
+        // record had no usable location.
+        let mut found: Vec<Option<ProteinCds>> = vec![None; groups.len()];
+        for round in 0..HOMOLOG_TRIES {
+            let wanted: Vec<&str> = groups.iter().zip(&found).filter(|(_, f)| f.is_none()).filter_map(|(g, _)| g.proteins.get(round).map(String::as_str)).collect();
+            if wanted.is_empty() {
+                break;
+            }
+            let resp = self.get(&format!("{EUTILS}/efetch.fcgi"), &[("db", "protein"), ("id", &wanted.join(",")), ("rettype", "gp"), ("retmode", "text")], Duration::from_secs(120)).await?;
+            let parsed = parse_coded_by_cdss(&resp.text().await?, gene);
+            for (group, slot) in groups.iter().zip(found.iter_mut()) {
+                if slot.is_none() {
+                    if let Some(protein) = group.proteins.get(round) {
+                        *slot = parsed.iter().find(|c| &c.protein == protein).cloned();
+                    }
+                }
+            }
+        }
+
+        let mut homologs = Vec::new();
+        for (group, cds) in groups.into_iter().zip(found) {
+            let Some(cds) = cds else { continue };
+            let Some(mut seq) = self.fetch_region_sequence(&cds.accession, &cds.accession, cds.start, cds.end).await? else { continue };
+            if cds.strand == Strand::Minus {
+                seq = revcomp(&seq);
+            }
+            homologs.push(Homolog {
+                species: group.species,
+                isolate: group.isolate,
+                organism: cds.organism,
+                strain: cds.strain,
+                gene: cds.gene,
+                protein: cds.protein,
+                accession: cds.accession,
+                start: cds.start,
+                end: cds.end,
+                minus_strand: cds.strand == Strand::Minus,
+                sequence: seq.to_uppercase(),
+            });
+        }
+        Ok(homologs)
+    }
+}
+
+/// How many protein ids `collect_homologs` looks through - enough to
+/// reach past a dominant species to the rare ones.
+const MAX_HOMOLOG_PROTEINS: usize = 2000;
+/// Proteins tried per species before giving up on it.
+const HOMOLOG_TRIES: usize = 3;
+
+/// One species' CDS of a gene, from `collect_homologs`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Homolog {
+    /// The species as grouped ("Pseudomonas veronii"), or the whole
+    /// organism name for an unnamed isolate ("Pseudomonas sp. LY-1").
+    pub species: String,
+    pub isolate: bool,
+    pub organism: String,
+    pub strain: Option<String>,
+    pub gene: String,
+    pub protein: String,
+    pub accession: String,
+    pub start: u64,
+    pub end: u64,
+    pub minus_strand: bool,
+    /// The CDS, 5'->3' in the gene's own sense.
+    pub sequence: String,
+}
+
+/// The bits of a protein `esummary` record species selection needs.
+#[derive(Debug, Clone)]
+struct ProteinDocsum {
+    accession: String,
+    organism: String,
+    taxid: u64,
+    complete: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct SpeciesGroup {
+    species: String,
+    isolate: bool,
+    /// Candidate protein accessions, best first, at most `HOMOLOG_TRIES`.
+    proteins: Vec<String>,
+}
+
+/// Groups proteins by species, keeping only complete GenBank/RefSeq
+/// proteins that can carry a genome location (multi-genome WP_ ones
+/// can't) of identified organisms ("uncultured bacterium" can't anchor a
+/// species). Named species come first, then "sp." isolates, each in
+/// first-seen (relevance) order, at most `max` groups.
+fn group_by_species(docsums: &[ProteinDocsum], max: usize) -> Vec<SpeciesGroup> {
+    let mut groups: IndexMap<String, SpeciesGroup> = IndexMap::new();
+    for d in docsums {
+        if !d.complete || d.taxid == 0 || d.accession.is_empty() || d.accession.starts_with("WP_") {
+            continue;
+        }
+        let words: Vec<&str> = d.organism.split_whitespace().collect();
+        if words.len() < 2 || !words[0].starts_with(|c: char| c.is_ascii_uppercase()) {
+            continue;
+        }
+        let isolate = matches!(words[1], "sp." | "cf." | "bacterium");
+        let species = if isolate { d.organism.clone() } else { format!("{} {}", words[0], words[1]) };
+        let group = groups.entry(species.clone()).or_insert_with(|| SpeciesGroup { species, isolate, proteins: Vec::new() });
+        if group.proteins.len() < HOMOLOG_TRIES {
+            group.proteins.push(d.accession.clone());
+        }
+    }
+    let (named, isolates): (Vec<_>, Vec<_>) = groups.into_values().partition(|g| !g.isolate);
+    named.into_iter().chain(isolates).take(max).collect()
+}
+
+/// `NC_000017.11`, `CP151816.1`, `AB012345` - letters (optionally `_`),
+/// digits, optional version - as opposed to a chromosome name like `17`.
+fn is_nucleotide_accession(s: &str) -> bool {
+    let base = s.split_once('.').map_or(s, |(b, v)| if !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()) { b } else { "" });
+    let letters = base.trim_end_matches(|c: char| c.is_ascii_digit());
+    letters.len() < base.len() && letters.starts_with(|c: char| c.is_ascii_uppercase()) && letters.len() <= 8 && letters.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+}
+
+/// A single-exon transcript covering `start..=end`, for genes with no
+/// annotated mRNA (prokaryotes) and for loaded regions.
+fn single_region_transcript(transcript_name: String, chrom: String, chr_accession: String, strand: Strand, start: u64, end: u64) -> TranscriptInfo {
+    TranscriptInfo {
+        // Deliberately empty, NOT the synthetic id: Python's synthetic
+        // dict for this fallback never sets a "transcript_id" key at all,
+        // so `tinfo.get("transcript_id", "")` is falsy — this is what
+        // forces build_spliced_sequence/build_genomic_sequence/
+        // get_flanking_sequence down their per-region-fetch fallback path
+        // instead of trying (and failing) to `efetch` a fake accession
+        // like "dnaA_CDS" from NCBI. Confirmed empirically: NCBI returns
+        // HTTP 200 with a garbled text error body for such IDs, not a 4xx
+        // that Python's `except HTTPError` would catch — so this must stay
+        // empty for real correctness, not just Python-parity pedantry.
+        transcript_id: String::new(),
+        transcript_name,
+        chrom,
+        chr_accession,
+        strand,
+        exons: vec![(start, end)],
+        cds: vec![(start, end)],
+        utr5: vec![],
+        utr3: vec![],
+        utr: vec![],
+    }
+}
+
+/// Where a GenBank protein's CDS sits in its nucleotide record.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProteinCds {
+    pub protein: String,
+    pub gene: String,
+    pub organism: String,
+    pub strain: Option<String>,
+    /// The nucleotide record (e.g. a genome's `CP151816.1`).
+    pub accession: String,
+    /// 1-based inclusive.
+    pub start: u64,
+    pub end: u64,
+    pub strand: Strand,
+}
+
+/// The first record of an `efetch(db=protein, rettype=gp)` text whose
+/// `/gene` is `query` (case-insensitively) and whose `/coded_by` is one
+/// plain stretch - `ACC:a..b` or `complement(ACC:a..b)`. Joined or partial
+/// (`<`/`>`) locations are skipped rather than loaded as a wrong span.
+pub fn parse_coded_by_cds(text: &str, query: &str) -> Option<ProteinCds> {
+    parse_coded_by_cdss(text, query).into_iter().next()
+}
+
+/// Every record `parse_coded_by_cds` would accept, in document order.
+pub fn parse_coded_by_cdss(text: &str, query: &str) -> Vec<ProteinCds> {
+    let qualifier = |record: &str, name: &str| -> Option<String> {
+        let re = Regex::new(&format!(r#"/{name}="([^"]*)""#)).unwrap();
+        re.captures(record).map(|c| c[1].split_whitespace().collect::<Vec<_>>().join(" "))
+    };
+    let location = Regex::new(r"^(complement\()?([A-Za-z0-9_.]+):(\d+)\.\.(\d+)\)?$").unwrap();
+
+    text.split("\n//").filter_map(|record| {
+        let gene = qualifier(record, "gene")?;
+        if !gene.eq_ignore_ascii_case(query.trim()) {
+            return None;
+        }
+        let coded_by = qualifier(record, "coded_by")?.replace(' ', "");
+        let loc = location.captures(&coded_by)?;
+        let complement = loc.get(1).is_some();
+        if complement != coded_by.ends_with(')') {
+            return None;
+        }
+        let (start, end): (u64, u64) = (loc[3].parse().ok()?, loc[4].parse().ok()?);
+        let field = |key: &str| record.lines().find_map(|l| l.trim_start().strip_prefix(key).map(|v| v.trim().to_string()));
+        Some(ProteinCds {
+            protein: field("VERSION").and_then(|v| v.split_whitespace().next().map(str::to_string)).unwrap_or_default(),
+            gene,
+            organism: field("ORGANISM").unwrap_or_default(),
+            strain: qualifier(record, "strain"),
+            accession: loc[2].to_string(),
+            start: start.min(end),
+            end: start.max(end),
+            strand: if complement { Strand::Minus } else { Strand::Plus },
+        })
+    })
+    .collect()
 }
 
 /// One `esummary(db=snp)` record -> `VariantHit`. `None` for a uid that
@@ -488,14 +819,14 @@ fn extract_minor_allele(global_mafs: &[Value]) -> (Option<f64>, Option<String>) 
 impl SequenceProvider for NcbiProvider {
     async fn search_gene(&self, gene_name: &str, species: &str) -> Result<Option<GeneSearchResult>, ProviderError> {
         let gene_name = gene_name.trim();
-        let organism = ensembl_to_binomial_or_guess(species);
+        let organism = ncbi_organism_term(species);
 
         // Step 1: esearch -> gene ID
         // 1a: exact symbol match (fast path, e.g. MTHFR)
         // `[sym]` matches aliases too, in no useful order - "CSN2" returns
         // COPS2 (alias CSN2) ahead of CSN2 itself - so rank the hits rather
         // than taking the first.
-        let term = format!("{gene_name}[sym] AND {organism}[orgn]");
+        let term = format!("{gene_name}[sym] AND {organism}");
         let ids = self.esearch_ids("gene", &term, 20).await?;
         let ranked = self.rank_name_candidates(gene_name, &ids).await?;
         let (gene_id, matched_by, summary) = match ranked {
@@ -503,11 +834,14 @@ impl SequenceProvider for NcbiProvider {
             None => {
                 // 1b: name/protein-family fallback (e.g. "casein" -> CSN2),
                 // ranked strictly so summary-text mentions never win
-                let term2 = format!("{gene_name} AND {organism}[orgn]");
+                let term2 = format!("{gene_name} AND {organism}");
                 let candidates = self.esearch_ids("gene", &term2, 50).await?;
                 match self.rank_name_candidates(gene_name, &candidates).await? {
                     Some(hit) => hit,
-                    None => return Ok(None),
+                    // 1c: NCBI Gene has no records for most prokaryote
+                    // genomes (nirS in Pseudomonas fluorescens, say), but
+                    // their annotated GenBank proteins say where the gene is.
+                    None => return self.search_protein_cds(gene_name, &organism).await,
                 }
             }
         };
@@ -556,80 +890,11 @@ impl SequenceProvider for NcbiProvider {
         // from the esummary genomic span.
         if transcripts_data.is_empty() && gene_start != 0 && gene_end != 0 {
             let syn_id = format!("{official_name}_CDS");
-            transcripts_data.insert(
-                syn_id.clone(),
-                TranscriptInfo {
-                    // Deliberately empty, NOT `syn_id`: Python's synthetic
-                    // dict for this fallback never sets a "transcript_id"
-                    // key at all, so `tinfo.get("transcript_id", "")` is
-                    // falsy — this is what forces build_spliced_sequence/
-                    // build_genomic_sequence/get_flanking_sequence down
-                    // their per-region-fetch fallback path instead of
-                    // trying (and failing) to `efetch` a fake accession
-                    // like "dnaA_CDS" from NCBI. Confirmed empirically:
-                    // NCBI returns HTTP 200 with a garbled text error body
-                    // for such IDs, not a 4xx that Python's `except
-                    // HTTPError` would catch — so this must stay empty for
-                    // real correctness, not just Python-parity pedantry.
-                    transcript_id: String::new(),
-                    transcript_name: format!("{official_name} (CDS)"),
-                    chrom: if !chrom.is_empty() { chrom.clone() } else { chr_accession.clone() },
-                    chr_accession: chr_accession.clone(),
-                    strand,
-                    exons: vec![(gene_start, gene_end)],
-                    cds: vec![(gene_start, gene_end)],
-                    utr5: vec![],
-                    utr3: vec![],
-                    utr: vec![],
-                },
-            );
+            let chrom = if !chrom.is_empty() { chrom.clone() } else { chr_accession.clone() };
+            transcripts_data.insert(syn_id, single_region_transcript(format!("{official_name} (CDS)"), chrom, chr_accession.clone(), strand, gene_start, gene_end));
         }
 
-        // Cache all parsed transcript details.
-        {
-            let mut cache = self.transcript_cache.lock().await;
-            for (tid, tinfo) in &transcripts_data {
-                cache.insert(tid.clone(), tinfo.clone());
-            }
-        }
-
-        let mut transcripts: Vec<TranscriptSummary> = transcripts_data
-            .iter()
-            .map(|(tid, tinfo)| TranscriptSummary {
-                id: tid.clone(),
-                name: tinfo.transcript_name.clone(),
-                biotype: String::new(),
-                exon_count: tinfo.exons.len(),
-                strand,
-                is_canonical: false,
-            })
-            .collect();
-
-        // Sort: NM_ first, then by exon count descending.
-        transcripts.sort_by(|a, b| {
-            let a_key = (if a.id.starts_with("NM_") { 0 } else { 1 }, std::cmp::Reverse(a.exon_count));
-            let b_key = (if b.id.starts_with("NM_") { 0 } else { 1 }, std::cmp::Reverse(b.exon_count));
-            a_key.cmp(&b_key)
-        });
-
-        // Mark first NM_ as canonical; if none, mark the first transcript.
-        if let Some(t) = transcripts.iter_mut().find(|t| t.id.starts_with("NM_")) {
-            t.is_canonical = true;
-        }
-        if !transcripts.is_empty() && !transcripts.iter().any(|t| t.is_canonical) {
-            transcripts[0].is_canonical = true;
-        }
-
-        Ok(Some(GeneSearchResult {
-            gene_name: official_name,
-            matched_by,
-            gene_id,
-            chrom,
-            strand,
-            start: gene_start,
-            end: gene_end,
-            transcripts,
-        }))
+        Ok(Some(self.finish_search(official_name, matched_by, gene_id, chrom, strand, gene_start, gene_end, transcripts_data).await))
     }
 
     async fn get_transcript_details(&self, transcript_id: &str) -> Result<Option<TranscriptInfo>, ProviderError> {
@@ -1079,6 +1344,94 @@ mod tests {
 
         // Minus strand: at least one entry should show 5'UTR at higher coords.
         assert!(!t.utr.is_empty());
+    }
+
+    /// Trimmed from live `efetch(db=protein, rettype=gp)` output: a RefSeq
+    /// WP_ record (no `/coded_by`), then a GenBank one on a genome.
+    const GENPEPT_NIRS: &str = "LOCUS       WP_490620475             559 aa            linear   BCT 15-MAR-2025
+VERSION     WP_490620475.1
+SOURCE      Pseudomonas fluorescens
+  ORGANISM  Pseudomonas fluorescens
+FEATURES             Location/Qualifiers
+     CDS             1..559
+                     /gene=\"nirS\"
+//
+
+LOCUS       WZV51523                 513 aa            linear   BCT 22-APR-2024
+VERSION     WZV51523.1
+DBSOURCE    accession CP151816.1
+  ORGANISM  Pseudomonas fluorescens
+FEATURES             Location/Qualifiers
+     source          1..513
+                     /organism=\"Pseudomonas fluorescens\"
+                     /strain=\"IMGN2\"
+     CDS             1..513
+                     /gene=\"nirS\"
+                     /locus_tag=\"WLF14_12835\"
+                     /coded_by=\"complement(CP151816.1:2792077..2793618)\"
+//
+";
+
+    #[test]
+    fn nucleotide_accessions_vs_chromosome_names() {
+        for acc in ["NC_000017.11", "CP151816.1", "AB012345", "NZ_CP012345.1"] {
+            assert!(is_nucleotide_accession(acc), "{acc}");
+        }
+        for name in ["17", "X", "MT", "", "NC_", "CP151816."] {
+            assert!(!is_nucleotide_accession(name), "{name}");
+        }
+    }
+
+    fn docsum(accession: &str, organism: &str) -> ProteinDocsum {
+        ProteinDocsum { accession: accession.into(), organism: organism.into(), taxid: 1, complete: true }
+    }
+
+    #[test]
+    fn species_groups_reach_past_a_dominant_species() {
+        let mut docsums: Vec<ProteinDocsum> = (0..50).map(|i| docsum(&format!("AER{i}.1"), "Pseudomonas aeruginosa PAO1")).collect();
+        docsums.insert(3, docsum("SP1.1", "Pseudomonas sp. LY-1"));
+        docsums.push(docsum("WP_1.1", "Pseudomonas"));
+        docsums.push(docsum("UNC1.1", "uncultured bacterium"));
+        docsums.push(ProteinDocsum { complete: false, ..docsum("PART1.1", "Pseudomonas stutzeri") });
+        docsums.push(docsum("VER1.1", "Pseudomonas veronii"));
+        docsums.push(docsum("VER2.1", "Pseudomonas veronii strain X"));
+
+        let groups = group_by_species(&docsums, 10);
+        let names: Vec<&str> = groups.iter().map(|g| g.species.as_str()).collect();
+        assert_eq!(names, ["Pseudomonas aeruginosa", "Pseudomonas veronii", "Pseudomonas sp. LY-1"]);
+        assert_eq!(groups[0].proteins, ["AER0.1", "AER1.1", "AER2.1"]);
+        assert_eq!(groups[1].proteins, ["VER1.1", "VER2.1"]);
+        assert!(groups[2].isolate);
+        assert_eq!(group_by_species(&docsums, 1).len(), 1);
+    }
+
+    #[test]
+    fn coded_by_cds_skips_records_without_a_location() {
+        let cds = parse_coded_by_cds(GENPEPT_NIRS, "NIRS").unwrap();
+        assert_eq!(
+            cds,
+            ProteinCds {
+                protein: "WZV51523.1".into(),
+                gene: "nirS".into(),
+                organism: "Pseudomonas fluorescens".into(),
+                strain: Some("IMGN2".into()),
+                accession: "CP151816.1".into(),
+                start: 2792077,
+                end: 2793618,
+                strand: Strand::Minus,
+            }
+        );
+        assert_eq!(parse_coded_by_cds(GENPEPT_NIRS, "nirK"), None);
+    }
+
+    #[test]
+    fn coded_by_cds_rejects_joined_and_partial_locations() {
+        for loc in ["join(CP1.1:1..10,CP1.1:20..30)", "CP1.1:<1..30", "complement(CP1.1:1..30"] {
+            let text = format!("VERSION     X1.1\n                     /gene=\"abc\"\n                     /coded_by=\"{loc}\"\n//\n");
+            assert_eq!(parse_coded_by_cds(&text, "abc"), None, "{loc}");
+        }
+        let plus = parse_coded_by_cds("/gene=\"abc\"\n/coded_by=\"CP1.1:5..40\"\n", "abc").unwrap();
+        assert_eq!((plus.start, plus.end, plus.strand), (5, 40, Strand::Plus));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
-import { alignSequences, designConserved, type ConservedPair, type ConservedCandidate, type Coverage, type DesignConservedRequest } from '../api/align';
+import { alignSequences, designConserved, type ConservedPairOligo, type ConservedPair, type ConservedCandidate, type Coverage, type DesignConservedRequest } from '../api/align';
 import type { SequenceData } from '../api/sequence';
 import { getSequence } from '../api/sequence';
 import type { Transcript } from '../api/gene';
@@ -12,7 +12,7 @@ import HomologCollector from './HomologCollector';
 import Badge from './ui/Badge';
 import AlignmentPrimersPanel from './AlignmentPrimersPanel';
 import { analyzeAlignment, parseAlignedFasta, type ConservedWindow } from '../utils/alignedFasta';
-import { NO_ALIGN_PRIMERS, primerFromPick, type AlignPick, type AlignPrimer, type AlignPrimers } from '../utils/alignPrimers';
+import { NO_ALIGN_PRIMERS, degenerateSite, primerFromPick, type AlignPick, type AlignPrimer, type AlignPrimers } from '../utils/alignPrimers';
 import { analyzePrimer } from '../api/design';
 import { cleanDNA } from '../utils/dna';
 import ResultsTable from './ResultsTable';
@@ -21,7 +21,6 @@ import Button from './ui/Button';
 import Checkbox from './ui/Checkbox';
 import Field from './ui/Field';
 import TextInput, { controlClasses } from './ui/TextInput';
-import { fmt } from '../utils/format';
 
 /** Card 7: MAFFT multi-sequence alignment + conserved-region primer design
  * (Phase 7). New feature, not present in the legacy Primerool app - the
@@ -100,6 +99,8 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
   const [candidates, setCandidates] = useSessionState<ConservedCandidate[] | null>('align.candidates', null);
   const [pairs, setPairs] = useSessionState<ConservedPair[] | null>('align.pairs', null);
   // Rows taken out of the alignment view, and the F/R primers picked off it.
+  // Designed primers may carry IUPAC codes covering every sequence.
+  const [degenerate, setDegenerate] = useSessionState('align.degenerate', false);
   const [hiddenRows, setHiddenRows] = useSessionState<string[]>('align.hiddenRows', []);
   const [primers, setPrimers] = useSessionState<AlignPrimers>('align.primers', NO_ALIGN_PRIMERS);
   const alignedRows = useMemo(() => (alignment ? parseAlignedFasta(alignment) : []), [alignment]);
@@ -111,10 +112,11 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
 
   /** Makes a selection the forward or reverse primer (keeping a name the
    * user gave the one it replaces), then fills in its Strider analysis. */
-  function pickPrimer(side: 'F' | 'R', pick: AlignPick) {
+  function pickPrimer(side: 'F' | 'R', pick: AlignPick, degenerate: boolean) {
     const row = alignedRows.find((r) => r.id === pick.rowId);
     if (!row) return;
-    const primer = primerFromPick(row, pick, side, primers[side]?.name ?? (side === 'F' ? 'Cons-F' : 'Cons-R'));
+    const site = degenerate ? degenerateSite(visibleRows, pick.colStart, pick.colEnd) : undefined;
+    const primer = primerFromPick(row, pick, side, primers[side]?.name ?? (side === 'F' ? 'Cons-F' : 'Cons-R'), site);
     setPrimer(side, primer);
     analyzePrimer({ sequence: primer.sequence }).then(
       (analysis) => setPrimers((prev) => (prev[side]?.sequence === primer.sequence ? { ...prev, [side]: { ...prev[side]!, analysis } } : prev)),
@@ -231,6 +233,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
         target_end: useTarget ? targetEnd : undefined,
       };
     }
+    if (degenerate) req = { ...req, degenerate: true, max_degeneracy: MAX_DESIGN_DEGENERACY };
     try {
       const res = await designConserved(req);
       if (res.mode === 'pairs') {
@@ -300,6 +303,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
 
       {alignment && (
         <>
+          <DegenerateToggle checked={degenerate} onChange={setDegenerate} className="mt-4" />
           {analysis && analysis.rows.length >= 2 && (
             <ConservedWindows analysis={analysis} designing={designing} onDesignIn={(w) => void runDesign({ window: w })} onDesignPair={(left, right) => void runDesign({ left, right })} />
           )}
@@ -353,6 +357,8 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
               </div>
             )}
 
+            <DegenerateToggle checked={degenerate} onChange={setDegenerate} className="mb-3" />
+
             <Button variant="primary" disabled={designing} onClick={() => void runDesign()}>
               {designing ? 'Designing…' : 'Design Primers'}
             </Button>
@@ -367,11 +373,11 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
                 rows={candidates}
                 keyOf={(c, i) => `${i}-${c.sequence}`}
                 columns={[
-                  { header: "Sequence (5'→3')", render: (c) => <PrimerSequence sequence={c.sequence} />, className: 'font-mono text-ink' },
+                  { header: "Sequence (5'→3')", render: (c) => <DesignedSeq oligo={c} />, className: 'font-mono text-ink' },
                   { header: 'Covers', render: (c) => <CoverageBadge coverage={c.coverage} /> },
                   { header: 'Columns', render: (c) => `${c.col_start + 1}-${c.col_end}` },
-                  { header: 'Tm', render: (c) => fmt(c.tm) },
-                  { header: 'GC%', render: (c) => fmt(c.gc_percent) },
+                  { header: 'Tm', render: (c) => tmLabel(c) },
+                  { header: 'GC%', render: (c) => spread(c.gc_percent, c.degeneracy > 1 ? c.gc_min : null, c.gc_max) },
                   { header: 'Penalty', render: (c) => c.penalty.toFixed(2) },
                 ]}
               />
@@ -385,8 +391,8 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
                 rows={pairs}
                 keyOf={(p, i) => `${i}-${p.left.sequence}`}
                 columns={[
-                  { header: 'Left', render: (p) => <PrimerSequence sequence={p.left.sequence} label="Forward primer" />, className: 'font-mono text-ink' },
-                  { header: 'Right', render: (p) => <PrimerSequence sequence={p.right.sequence} label="Reverse primer" />, className: 'font-mono text-ink' },
+                  { header: 'Left', render: (p) => <DesignedSeq oligo={p.left} label="Forward primer" />, className: 'font-mono text-ink' },
+                  { header: 'Right', render: (p) => <DesignedSeq oligo={p.right} label="Reverse primer" />, className: 'font-mono text-ink' },
                   {
                     header: 'Covers',
                     render: (p) => (
@@ -398,8 +404,8 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
                   },
                   { header: 'Columns', render: (p) => `${p.left.col_start + 1}-${p.right.col_end}` },
                   { header: 'Product', render: (p) => `${p.product_size} bp` },
-                  { header: 'Left Tm', render: (p) => fmt(p.left.tm) },
-                  { header: 'Right Tm', render: (p) => fmt(p.right.tm) },
+                  { header: 'Left Tm', render: (p) => tmLabel(p.left) },
+                  { header: 'Right Tm', render: (p) => tmLabel(p.right) },
                   { header: 'Penalty', render: (p) => p.penalty.toFixed(2) },
                 ]}
               />
@@ -408,5 +414,50 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
         </>
       )}
     </div>
+  );
+}
+
+/** Most variants a designed degenerate primer may have. */
+const MAX_DESIGN_DEGENERACY = 64;
+
+function DegenerateToggle({ checked, onChange, className = '' }: { checked: boolean; onChange: (v: boolean) => void; className?: string }) {
+  return (
+    <Checkbox
+      className={className}
+      label={
+        <span className="text-sm">
+          Degenerate primers (IUPAC codes covering every sequence; up to {MAX_DESIGN_DEGENERACY}-fold, the 3′-most 5 bases kept exact)
+        </span>
+      }
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+    />
+  );
+}
+
+/** A value to one decimal, or a degenerate oligo's spread over its
+ * variants (`lo`/`hi`, when given and different). */
+function spread(value: number, lo: number | null, hi: number | null): string {
+  const a = lo?.toFixed(1);
+  const b = hi?.toFixed(1);
+  return a != null && b != null && a !== b ? `${a}–${b}` : (a ?? value.toFixed(1));
+}
+
+/** A designed oligo's Tm: a degenerate one's spread over its variants. */
+function tmLabel(o: ConservedPairOligo): string {
+  return spread(o.tm, o.degeneracy > 1 ? o.tm_min : null, o.tm_max);
+}
+
+/** A designed oligo, with its degeneracy when it has one. */
+function DesignedSeq({ oligo, label }: { oligo: ConservedPairOligo; label?: string }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <PrimerSequence sequence={oligo.sequence} label={label} />
+      {oligo.degeneracy > 1 && (
+        <span className="font-sans text-[11px] font-medium text-accent" title={`Consensus: ${oligo.consensus_sequence}`}>
+          {oligo.degeneracy}-fold
+        </span>
+      )}
+    </span>
   );
 }

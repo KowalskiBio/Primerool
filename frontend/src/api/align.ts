@@ -26,7 +26,15 @@ export interface Coverage {
 }
 
 export interface ConservedCandidate {
+  /** IUPAC when degenerate (then `consensus_sequence` is the plain oligo it
+   * was widened from, and `tm` that one's Tm). */
   sequence: string;
+  consensus_sequence: string;
+  degeneracy: number;
+  tm_min: number | null;
+  tm_max: number | null;
+  gc_min: number | null;
+  gc_max: number | null;
   start: number;
   end: number;
   /** The alignment columns it spans, `[col_start, col_end)`. */
@@ -47,7 +55,15 @@ export interface ConservedScanResponse {
 }
 
 export interface ConservedPairOligo {
+  /** IUPAC when degenerate (then `consensus_sequence` is the plain oligo it
+   * was widened from, and `tm` that one's Tm). */
   sequence: string;
+  consensus_sequence: string;
+  degeneracy: number;
+  tm_min: number | null;
+  tm_max: number | null;
+  gc_min: number | null;
+  gc_max: number | null;
   start: number;
   end: number;
   col_start: number;
@@ -93,6 +109,10 @@ export interface DesignConservedRequest {
   product_size_min?: number;
   product_size_max?: number;
   num_return?: number;
+  /** Widen primers to IUPAC-degenerate ones covering every sequence (the
+   * 3'-terminal 5 bases stay exact), up to `max_degeneracy` variants. */
+  degenerate?: boolean;
+  max_degeneracy?: number;
 }
 
 export function designConserved(req: DesignConservedRequest): Promise<ConservedScanResponse | ConservedPairsResponse> {

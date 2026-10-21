@@ -3,18 +3,20 @@
  * call sites — gene-name-vs-accession dispatch, and BLAST-identify input
  * validation). */
 
+import { baseBits, complementBase } from './iupac';
+
 export function cleanDNA(seq: string): string {
   return (seq || '').toUpperCase().replace(/[^ACGTN]/g, '');
 }
 
-const RC_MAP: Record<string, string> = { A: 'T', T: 'A', G: 'C', C: 'G', N: 'N' };
-
+/** Reverse complement, IUPAC-aware: ambiguity codes complement to their
+ * partner (R↔Y, K↔M, B↔V, D↔H; S, W, N stay). */
 export function reverseComplement(seq: string): string {
   return seq
     .toUpperCase()
     .split('')
     .reverse()
-    .map((b) => RC_MAP[b] || 'N')
+    .map((b) => (baseBits(b) ? complementBase(b) : 'N'))
     .join('');
 }
 

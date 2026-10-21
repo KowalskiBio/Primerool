@@ -1,6 +1,7 @@
 import type { PrimerAnalysis } from '../api/design';
 import type { AlignedRow } from './alignedFasta';
 import { reverseComplement } from './dna';
+import { baseBits, fitsCode, iupacCode } from './iupac';
 
 /** A stretch of one alignment row the user dragged across: gapped columns
  * `[colStart, colEnd)`. */
@@ -16,6 +17,12 @@ export interface AlignPick {
 export interface AlignPrimer extends AlignPick {
   side: 'F' | 'R';
   sequence: string;
+  /** The bases (or IUPAC codes) the primer accepts at each of its columns,
+   * template sense, `-` where it has none. Absent on picks saved before
+   * degenerate primers, which read the source row instead. */
+  site?: string;
+  /** Made from every shown sequence's bases, not just one row's. */
+  degenerate?: boolean;
   name: string;
   /** Strider's numbers: `undefined` while loading, `null` on failure. */
   analysis?: PrimerAnalysis | null;
@@ -38,13 +45,43 @@ export function rowBases(row: AlignedRow, from: number, to: number): string {
   return row.seq.slice(from, to).replace(/[-.]/g, '');
 }
 
-export function primerFromPick(row: AlignedRow, pick: Omit<AlignPick, 'rowId'>, side: 'F' | 'R', name: string): AlignPrimer {
-  const bases = rowBases(row, pick.colStart, pick.colEnd);
-  return { side, rowId: row.id, colStart: pick.colStart, colEnd: pick.colEnd, sequence: side === 'F' ? bases : reverseComplement(bases), name };
+/** The degenerate site over columns `[from, to)`: per column, the IUPAC
+ * code for every base the rows have there (`N`s carry no information and
+ * are skipped), or `-` where most rows have a gap. */
+export function degenerateSite(rows: AlignedRow[], from: number, to: number): string {
+  let site = '';
+  for (let c = from; c < to; c++) {
+    let bits = 0;
+    let gaps = 0;
+    for (const r of rows) {
+      const x = baseBits(r.seq[c]);
+      if (!x) gaps++;
+      else if (x !== 15) bits |= x;
+    }
+    site += gaps * 2 > rows.length ? '-' : iupacCode(bits || 15);
+  }
+  return site;
 }
 
-/** How one row matches a primer's binding stretch (the source row's
- * bases over the primer's columns): differing columns - a base against a
+/** A primer over a pick: the source row's own bases, or - given a
+ * `site` from `degenerateSite` - a degenerate one. */
+export function primerFromPick(row: AlignedRow, pick: Omit<AlignPick, 'rowId'>, side: 'F' | 'R', name: string, site?: string): AlignPrimer {
+  const s = site ?? row.seq.slice(pick.colStart, pick.colEnd);
+  const bases = s.replace(/[-.]/g, '');
+  return {
+    side,
+    rowId: row.id,
+    colStart: pick.colStart,
+    colEnd: pick.colEnd,
+    sequence: side === 'F' ? bases : reverseComplement(bases),
+    name,
+    site: s,
+    degenerate: site !== undefined,
+  };
+}
+
+/** How one row matches a primer's binding stretch (its `site`): columns
+ * where the row's base isn't one the primer accepts - a base against a
  * gap counts - and how many of them sit in the primer's 3'-most
  * `THREE_PRIME_WINDOW` bases (its right end for F, left end for R). */
 export interface RowMatch {
@@ -54,25 +91,25 @@ export interface RowMatch {
 }
 
 export function primerMatches(rows: AlignedRow[], p: AlignPrimer): RowMatch[] {
-  const src = rows.find((r) => r.id === p.rowId);
-  if (!src) return [];
-  // Distance of each column from the primer's 3' end, in source bases.
-  const n = rowBases(src, p.colStart, p.colEnd).length;
+  const site = p.site ?? rows.find((r) => r.id === p.rowId)?.seq.slice(p.colStart, p.colEnd);
+  if (site === undefined) return [];
+  // Distance of each column from the primer's 3' end, in primer bases.
+  const n = site.replace(/[-.]/g, '').length;
   const dist: number[] = [];
   let k = 0;
-  for (let c = p.colStart; c < p.colEnd; c++) {
+  for (let i = 0; i < site.length; i++) {
     const idx = Math.min(k, n - 1);
     dist.push(p.side === 'F' ? n - 1 - idx : idx);
-    if (!isGap(src.seq[c])) k++;
+    if (!isGap(site[i])) k++;
   }
   return rows.map((r) => {
     let mismatches = 0;
     let threePrime = 0;
     for (let c = p.colStart; c < p.colEnd; c++) {
-      const a = src.seq[c];
+      const a = site[c - p.colStart];
       const b = r.seq[c];
       if (isGap(a) && isGap(b)) continue;
-      if (isGap(a) || isGap(b) || a !== b) {
+      if (isGap(a) || isGap(b) || !fitsCode(b, a)) {
         mismatches++;
         if (dist[c - p.colStart] < THREE_PRIME_WINDOW) threePrime++;
       }

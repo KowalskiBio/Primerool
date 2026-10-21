@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { analyzeAlignment, type AlignedRow, type AlignmentAnalysis } from '../utils/alignedFasta';
-import { rowBases, type AlignPick, type AlignPrimers } from '../utils/alignPrimers';
+import { degenerateSite, rowBases, type AlignPick, type AlignPrimers } from '../utils/alignPrimers';
+import { degeneracy } from '../utils/iupac';
 import SequenceContextMenu, { type MenuEntry } from './SequenceContextMenu';
 import SegmentedControl from './ui/SegmentedControl';
 import Button from './ui/Button';
@@ -25,6 +26,9 @@ const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 /** Primer3's thermodynamic models analyze oligos up to 60 bases. */
 const MIN_PRIMER = 8;
 const MAX_PRIMER = 60;
+/** Most variants a degenerate primer can have and still be analyzed (the
+ * backend's `MAX_ANALYZED_VARIANTS`). */
+const MAX_VARIANTS = 512;
 
 /** Per row: its aligned span and prefix counts (length + 1) of mismatches
  * and internal gaps - how many fall in columns `[c0, c1)` is
@@ -131,7 +135,8 @@ interface Props {
   /** The "Design Primers in Conserved Region" column range `[colStart,
    * colEnd)`; outlined on the map unless it spans the whole alignment. */
   designRange?: { colStart: number; colEnd: number };
-  onPickPrimer: (side: 'F' | 'R', pick: AlignPick) => void;
+  /** `degenerate`: the primer covers every shown sequence's bases. */
+  onPickPrimer: (side: 'F' | 'R', pick: AlignPick, degenerate: boolean) => void;
   /** Sets the "Design Primers in Conserved Region" column range. */
   onSetDesignRange: (colStart: number, colEnd: number) => void;
 }
@@ -516,6 +521,36 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
     // The selection stays on the map after an action; a click elsewhere
     // (or a new drag) clears it.
     const done = () => setMenu(null);
+
+    /** The same pick widened to every shown sequence's bases (IUPAC). */
+    function degenerateEntry(): MenuEntry {
+      const site = degenerateSite(rows, selCols!.from, selCols!.to);
+      const n = site.replace(/-/g, '').length;
+      const fold = degeneracy(site);
+      const reason =
+        n < MIN_PRIMER
+          ? `Select at least ${MIN_PRIMER} bases (this is ${n})`
+          : n > MAX_PRIMER
+            ? `Primers are analyzed up to ${MAX_PRIMER} bases (this is ${n})`
+            : fold > MAX_VARIANTS
+              ? `${fmt(fold)}-fold degenerate - too many variants to analyze (max ${MAX_VARIANTS})`
+              : null;
+      const hint = fold === 1 ? 'no variation here - same as a plain primer' : `${fmt(fold)}-fold over the ${rows.length} sequences shown`;
+      const run = (side: 'F' | 'R') => () => {
+        onPickPrimer(side, pick, true);
+        done();
+      };
+      return {
+        shortcut: 'G',
+        label: 'Degenerate primer',
+        hint,
+        disabledReason: reason,
+        submenu: [
+          { shortcut: 'F', label: 'Degenerate forward primer', hint: site.replace(/-/g, ''), disabledReason: null, onRun: run('F') },
+          { shortcut: 'R', label: 'Degenerate reverse primer', hint: 'reverse complement, IUPAC-aware', disabledReason: null, onRun: run('R') },
+        ],
+      };
+    }
     return {
       heading: `${n} bp · columns ${fmt(selCols.from + 1)}–${fmt(selCols.to)} · ${selRow.id}`,
       entries: [
@@ -525,7 +560,7 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
           hint: primers.F ? `replaces ${primers.F.name}` : 'the selected bases, 5′→3′',
           disabledReason: tooShort ?? tooLong,
           onRun: () => {
-            onPickPrimer('F', pick);
+            onPickPrimer('F', pick, false);
             done();
           },
         },
@@ -535,10 +570,11 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
           hint: primers.R ? `replaces ${primers.R.name}` : 'reverse complement of the selection',
           disabledReason: tooShort ?? tooLong,
           onRun: () => {
-            onPickPrimer('R', pick);
+            onPickPrimer('R', pick, false);
             done();
           },
         },
+        degenerateEntry(),
         {
           shortcut: 'D',
           label: 'Set as design column range',

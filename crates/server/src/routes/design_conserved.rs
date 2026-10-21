@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 
 use engine::backend::ThermoParams;
 use engine::backend_native::NativeBackend;
-use engine::conserved::{design_pairs_between_windows, design_pairs_in_conserved_region, majority_consensus, parse_aligned_fasta, scan_conserved_region, ConservedError, ConservedOligo, ConservedPair};
+use engine::conserved::{design_pairs_between_windows, design_pairs_in_conserved_region, majority_consensus, parse_aligned_fasta, scan_conserved_region, ConservedError, ConservedOligo, ConservedPair, DegenerateOptions};
 use engine::picker::{CandidateConstraints, GcRange, PenaltyWeights, SizeRange, TmRange};
 
 use crate::error::AppError;
@@ -45,6 +45,11 @@ pub struct DesignConservedRequest {
     pub product_size_min: usize,
     pub product_size_max: usize,
     pub num_return: usize,
+    /// Widen primers to IUPAC-degenerate ones covering every sequence
+    /// (their 3'-terminal 5 bases stay exact), up to `max_degeneracy`
+    /// plain variants each.
+    pub degenerate: bool,
+    pub max_degeneracy: u64,
 }
 
 impl Default for DesignConservedRequest {
@@ -68,6 +73,8 @@ impl Default for DesignConservedRequest {
             product_size_min: 100,
             product_size_max: 1000,
             num_return: 5,
+            degenerate: false,
+            max_degeneracy: DegenerateOptions::default().max_degeneracy,
         }
     }
 }
@@ -91,6 +98,7 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
         gc: GcRange { min: req.gc_min, max: req.gc_max },
     };
     let thermo = ThermoParams::default();
+    let degenerate = req.degenerate.then_some(DegenerateOptions { max_degeneracy: req.max_degeneracy.clamp(1, 256) });
 
     // CPU-bound candidate scanning/scoring — see `design_probe.rs`'s
     // identical comment on why this runs via `spawn_blocking`.
@@ -108,7 +116,7 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
         };
 
         let pairs = if let Some((left, right)) = windows {
-            Some(design_pairs_between_windows(&backend, &records, left, right, &constraints, (req.product_size_min, req.product_size_max), thermo, req.num_return).map_err(map_conserved_error)?)
+            Some(design_pairs_between_windows(&backend, &records, left, right, &constraints, (req.product_size_min, req.product_size_max), thermo, req.num_return, degenerate).map_err(map_conserved_error)?)
         } else if let (Some(target_start), Some(target_end)) = (req.target_start, req.target_end) {
             Some(
                 design_pairs_in_conserved_region(
@@ -122,6 +130,7 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
                     (req.product_size_min, req.product_size_max),
                     thermo,
                     req.num_return,
+                    degenerate,
                 )
                 .map_err(map_conserved_error)?,
             )
@@ -143,7 +152,7 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
             let pairs_json: Vec<Value> = pairs.iter().map(pair_json).collect();
             Ok(Json(json!({ "mode": "pairs", "consensus_length": consensus.len(), "pairs": pairs_json })))
         } else {
-            let scored = scan_conserved_region(&backend, &records, req.col_start, req.col_end, &constraints, thermo, &PenaltyWeights::default(), req.num_return).map_err(map_conserved_error)?;
+            let scored = scan_conserved_region(&backend, &records, req.col_start, req.col_end, &constraints, thermo, &PenaltyWeights::default(), req.num_return, degenerate).map_err(map_conserved_error)?;
 
             if scored.is_empty() {
                 return Err(AppError::not_found("No candidates found in this conserved region satisfying the given constraints."));
@@ -154,8 +163,9 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
                 .iter()
                 .map(|o| {
                     let mut v = oligo_json(o);
-                    v["hairpin"] = json!(o.oligo.hairpin);
-                    v["self_dimer"] = json!(o.oligo.self_dimer);
+                    let d = o.degenerate.as_ref();
+                    v["hairpin"] = json!(d.and_then(|d| d.hairpin.as_ref()).unwrap_or(&o.oligo.hairpin));
+                    v["self_dimer"] = json!(d.and_then(|d| d.self_dimer.as_ref()).unwrap_or(&o.oligo.self_dimer));
                     v
                 })
                 .collect();
@@ -168,10 +178,19 @@ pub async fn design_conserved(Json(req): Json<DesignConservedRequest>) -> Result
 }
 
 /// One oligo's JSON: consensus offsets (`start`/`end`), the alignment
-/// columns it spans, and how many sequences it matches.
+/// columns it spans, and how many sequences it matches. A degenerate oligo
+/// reports its IUPAC `sequence` (`consensus_sequence` is the plain one it
+/// was widened from, `tm` that one's Tm) with its variants' Tm/GC spread.
 fn oligo_json(o: &ConservedOligo) -> Value {
+    let d = o.degenerate.as_ref();
     json!({
-        "sequence": o.oligo.sequence,
+        "sequence": d.map_or(&o.oligo.sequence, |d| &d.sequence),
+        "consensus_sequence": o.oligo.sequence,
+        "degeneracy": d.map_or(1, |d| d.degeneracy),
+        "tm_min": d.map(|d| d.tm_range.0),
+        "tm_max": d.map(|d| d.tm_range.1),
+        "gc_min": d.map(|d| d.gc_range.0),
+        "gc_max": d.map(|d| d.gc_range.1),
         "start": o.oligo.candidate.start,
         "end": o.oligo.candidate.end,
         "col_start": o.columns.0,

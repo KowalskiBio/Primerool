@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { AlignedRow } from '../utils/alignedFasta';
 import { ampliconSizes, primerMatches, THREE_PRIME_WINDOW, type AlignPrimer, type AlignPrimers } from '../utils/alignPrimers';
 import { NameInput } from './PrimerSetsPanel';
+import { baseBits, degeneracy, isDegenerate } from '../utils/iupac';
 import PrimerStructureModal from './PrimerStructureModal';
 import Button from './ui/Button';
 
@@ -14,6 +15,45 @@ interface Props {
 
 function fmt(v: number | null | undefined, unit: string) {
   return v == null ? '–' : `${v}${unit}`;
+}
+
+/** Above this many variants each one is a small share of the primer mix,
+ * so a degenerate primer's effective concentration drops. */
+const DEGENERACY_WARN = 64;
+
+const range = (lo: number | null, hi: number | null, unit: string) => (lo == null || hi == null ? '–' : lo === hi ? `${lo}${unit}` : `${lo}–${hi}${unit}`);
+
+/** The variant whose structures are drawn for a degenerate primer: the one
+ * with the strongest self-dimer (the plain sequence otherwise). */
+function structureSeq(p: AlignPrimer): string {
+  return p.analysis?.degenerate?.strongest_dimer_variant ?? p.sequence;
+}
+
+/** The sequence with its ambiguity codes picked out. */
+function DegenerateSeq({ seq }: { seq: string }) {
+  return (
+    <>
+      {[...seq].map((b, i) =>
+        baseBits(b) && (baseBits(b) & (baseBits(b) - 1)) !== 0 ? (
+          <span key={i} className="font-semibold text-accent">
+            {b}
+          </span>
+        ) : (
+          b
+        ),
+      )}
+    </>
+  );
+}
+
+/** Cautions for a degenerate primer: too many variants, or ambiguity in
+ * the 3'-most bases (where a mismatched variant stops extension). */
+function degenerateWarnings(p: AlignPrimer): string[] {
+  const out: string[] = [];
+  const fold = degeneracy(p.sequence);
+  if (fold > DEGENERACY_WARN) out.push(`${fold}-fold: over ${DEGENERACY_WARN} variants, each is a small share of the primer - consider a shorter or less variable site`);
+  if (isDegenerate(p.sequence.slice(-THREE_PRIME_WINDOW))) out.push(`ambiguity in the 3′-most ${THREE_PRIME_WINDOW} bases - variants mismatching a template there extend poorly`);
+  return out;
 }
 
 function ampliconLabel(rows: AlignedRow[], f: AlignPrimer | null, r: AlignPrimer | null): string | null {
@@ -88,8 +128,8 @@ export default function AlignmentPrimersPanel({ rows, primers, onChange }: Props
                 onClick={() =>
                   setStructurePair(
                     primers.F && primers.R
-                      ? { label: `${primers.F.name} × ${primers.R.name}`, forward: primers.F.sequence, reverse: primers.R.sequence }
-                      : { label: list[0].name, forward: list[0].sequence },
+                      ? { label: `${primers.F.name} × ${primers.R.name}${list.some((p) => isDegenerate(p.sequence)) ? ' (strongest-dimer variants)' : ''}`, forward: structureSeq(primers.F), reverse: structureSeq(primers.R) }
+                      : { label: `${list[0].name}${isDegenerate(list[0].sequence) ? ' (strongest-dimer variant)' : ''}`, forward: structureSeq(list[0]) },
                   )
                 }
               >
@@ -116,7 +156,16 @@ export default function AlignmentPrimersPanel({ rows, primers, onChange }: Props
                     <span aria-hidden="true" className="h-2.5 w-2.5 rounded-[2px]" style={{ backgroundColor: p.side === 'F' ? 'var(--aln-fwd)' : 'var(--aln-rev)' }} />
                     <span className="text-[11px] uppercase tracking-wider text-ink-faint">{p.side === 'F' ? 'Forward' : 'Reverse'}</span>
                     <span className="text-[11px] text-ink-faint">
-                      from <span className="font-mono">{p.rowId}</span> · columns {(p.colStart + 1).toLocaleString('en-US')}–{p.colEnd.toLocaleString('en-US')}
+                      {p.degenerate ? (
+                        <>
+                          <span className="font-medium text-accent">degenerate {degeneracy(p.sequence)}-fold</span> · from the sequences shown
+                        </>
+                      ) : (
+                        <>
+                          from <span className="font-mono">{p.rowId}</span>
+                        </>
+                      )}{' '}
+                      · columns {(p.colStart + 1).toLocaleString('en-US')}–{p.colEnd.toLocaleString('en-US')}
                     </span>
                     <span className="ml-auto flex gap-1">
                       <Button size="sm" variant="ghost" onClick={() => copy(p)}>
@@ -129,7 +178,7 @@ export default function AlignmentPrimersPanel({ rows, primers, onChange }: Props
                   </div>
                   <div className="break-all px-1.5 font-mono text-[13px] text-ink">
                     <span className="text-ink-faint">5&apos;-</span>
-                    {p.sequence}
+                    <DegenerateSeq seq={p.sequence} />
                     <span className="text-ink-faint">-3&apos;</span>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 px-1.5 text-[12px] text-ink-muted">
@@ -138,6 +187,23 @@ export default function AlignmentPrimersPanel({ rows, primers, onChange }: Props
                       <span className="italic text-ink-faint">Strider…</span>
                     ) : a === null ? (
                       <span className="text-ink-faint">analysis unavailable</span>
+                    ) : a.degenerate && a.degenerate.analyzed === 0 ? (
+                      <span className="text-warning">{a.degenerate.degeneracy}-fold - too many variants to analyze</span>
+                    ) : a.degenerate ? (
+                      <>
+                        <span title={`Over all ${a.degenerate.analyzed} variants`}>
+                          Tm <span className="font-mono text-ink">{range(a.degenerate.tm_min, a.degenerate.tm_max, '°C')}</span>
+                        </span>
+                        <span>
+                          GC <span className="font-mono text-ink">{range(a.degenerate.gc_min, a.degenerate.gc_max, '%')}</span>
+                        </span>
+                        <span title={`Highest-Tm hairpin among the variants: ${a.degenerate.strongest_hairpin_variant ?? ''}`}>
+                          Hairpin (worst) <span className="font-mono text-ink">{a.hairpin.structure_found ? fmt(a.hairpin.tm, '°C') : 'none'}</span>
+                        </span>
+                        <span title={`Strongest self-dimer among the variants: ${a.degenerate.strongest_dimer_variant ?? ''}`}>
+                          Self-dimer (worst) <span className="font-mono text-ink">{fmt(a.homodimer.dg, ' kcal/mol')}</span>
+                        </span>
+                      </>
                     ) : (
                       <>
                         <span>
@@ -158,6 +224,11 @@ export default function AlignmentPrimersPanel({ rows, primers, onChange }: Props
                   <div className="mt-0.5 px-1.5 text-[12px] text-ink-muted">
                     <Conservation rows={rows} primer={p} />
                   </div>
+                  {degenerateWarnings(p).map((w) => (
+                    <div key={w} className="mt-0.5 px-1.5 text-[12px] text-warning">
+                      ⚠ {w}
+                    </div>
+                  ))}
                 </div>
               );
             })}

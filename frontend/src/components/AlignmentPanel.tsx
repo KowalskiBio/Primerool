@@ -10,7 +10,10 @@ import AlignmentView from './AlignmentView';
 import ConservedWindows from './ConservedWindows';
 import HomologCollector from './HomologCollector';
 import Badge from './ui/Badge';
+import AlignmentPrimersPanel from './AlignmentPrimersPanel';
 import { analyzeAlignment, parseAlignedFasta, type ConservedWindow } from '../utils/alignedFasta';
+import { NO_ALIGN_PRIMERS, primerFromPick, type AlignPick, type AlignPrimer, type AlignPrimers } from '../utils/alignPrimers';
+import { analyzePrimer } from '../api/design';
 import { cleanDNA } from '../utils/dna';
 import ResultsTable from './ResultsTable';
 import PrimerSequence from './PrimerSequence';
@@ -96,12 +99,36 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
   const [designError, setDesignError] = useState<string | null>(null);
   const [candidates, setCandidates] = useSessionState<ConservedCandidate[] | null>('align.candidates', null);
   const [pairs, setPairs] = useSessionState<ConservedPair[] | null>('align.pairs', null);
+  // Rows taken out of the alignment view, and the F/R primers picked off it.
+  const [hiddenRows, setHiddenRows] = useSessionState<string[]>('align.hiddenRows', []);
+  const [primers, setPrimers] = useSessionState<AlignPrimers>('align.primers', NO_ALIGN_PRIMERS);
+  const alignedRows = useMemo(() => (alignment ? parseAlignedFasta(alignment) : []), [alignment]);
+  const visibleRows = useMemo(() => alignedRows.filter((r) => !hiddenRows.includes(r.id)), [alignedRows, hiddenRows]);
+
+  function setPrimer(side: 'F' | 'R', primer: AlignPrimer | null) {
+    setPrimers((prev) => ({ ...prev, [side]: primer }));
+  }
+
+  /** Makes a selection the forward or reverse primer (keeping a name the
+   * user gave the one it replaces), then fills in its Strider analysis. */
+  function pickPrimer(side: 'F' | 'R', pick: AlignPick) {
+    const row = alignedRows.find((r) => r.id === pick.rowId);
+    if (!row) return;
+    const primer = primerFromPick(row, pick, side, primers[side]?.name ?? (side === 'F' ? 'Cons-F' : 'Cons-R'));
+    setPrimer(side, primer);
+    analyzePrimer({ sequence: primer.sequence }).then(
+      (analysis) => setPrimers((prev) => (prev[side]?.sequence === primer.sequence ? { ...prev, [side]: { ...prev[side]!, analysis } } : prev)),
+      () => setPrimers((prev) => (prev[side]?.sequence === primer.sequence ? { ...prev, [side]: { ...prev[side]!, analysis: null } } : prev)),
+    );
+  }
 
   async function runAlign() {
     setAlignError(null);
     setAlignment(null);
     setCandidates(null);
     setPairs(null);
+    setPrimers(NO_ALIGN_PRIMERS);
+    setHiddenRows([]);
     const records = parseMultiFasta(fastaText);
     const extraRecords: { id: string; seq: string }[] = [];
     if (includeQuery && loadedSequence) {
@@ -169,7 +196,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     }
   }
 
-  const analysis = useMemo(() => (alignment ? analyzeAlignment(parseAlignedFasta(alignment)) : null), [alignment]);
+  const analysis = useMemo(() => (alignment ? analyzeAlignment(alignedRows) : null), [alignment, alignedRows]);
 
   /** Runs the design with the column fields' settings, or over one
    * conserved window, or as a pair across two of them. */
@@ -222,7 +249,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     <div>
       <h3 className="mb-2 text-sm font-semibold text-ink">Multi-Sequence Alignment</h3>
       <p className="mb-4 text-sm text-ink-muted">
-        Collect a gene&rsquo;s homologs across species, or paste two or more sequences - FASTA, GenBank (a whole record or just its numbered sequence lines), or one bare sequence per line. MAFFT aligns them; then pick a conserved window to design primers in. Each primer shows how many of the aligned sequences it matches.
+        Collect a gene&rsquo;s homologs across species, or paste two or more sequences - FASTA, GenBank (a whole record or just its numbered sequence lines), or one bare sequence per line. MAFFT aligns them; then pick primers straight off the alignment (drag across a row, right-click) or a conserved window to design primers in. Each primer shows how many of the aligned sequences it matches.
       </p>
 
       <HomologCollector
@@ -274,7 +301,19 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
       {alignment && (
         <>
           <h4 className="mb-2 mt-4 text-sm font-semibold text-ink">Alignment</h4>
-          <AlignmentView alignment={alignment} />
+          <AlignmentView
+            alignment={alignment}
+            rows={alignedRows}
+            hiddenRows={hiddenRows}
+            onHiddenRowsChange={setHiddenRows}
+            primers={primers}
+            onPickPrimer={pickPrimer}
+            onSetDesignRange={(start, end) => {
+              setColStart(start);
+              setColEnd(end);
+            }}
+          />
+          <AlignmentPrimersPanel rows={visibleRows} primers={primers} onChange={setPrimer} />
           <details className="mt-2">
             <summary className="cursor-pointer text-xs font-medium text-ink-muted hover:text-ink">Aligned FASTA</summary>
             <pre className="sequence-viewer mt-2 max-h-[300px] overflow-auto rounded-lg border border-line bg-base p-4 text-xs">{alignment}</pre>

@@ -128,7 +128,7 @@ function IdtTm({ result }: { result: IdtTmResult | 'loading' }) {
   );
 }
 
-function NameInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+export function NameInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
   const [draft, setDraft] = useState(value);
   const [prev, setPrev] = useState(value);
   if (value !== prev) {

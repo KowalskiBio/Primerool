@@ -128,6 +128,9 @@ interface Props {
   hiddenRows: string[];
   onHiddenRowsChange: (ids: string[]) => void;
   primers: AlignPrimers;
+  /** The "Design Primers in Conserved Region" column range `[colStart,
+   * colEnd)`; outlined on the map unless it spans the whole alignment. */
+  designRange?: { colStart: number; colEnd: number };
   onPickPrimer: (side: 'F' | 'R', pick: AlignPick) => void;
   /** Sets the "Design Primers in Conserved Region" column range. */
   onSetDesignRange: (colStart: number, colEnd: number) => void;
@@ -139,7 +142,7 @@ interface Props {
  * majority, breaks at gaps; zoomed in far enough the bars become letters.
  * Drag across a row to select bases, then right-click to make them a
  * forward or reverse primer. */
-export default function AlignmentView({ alignment, rows: allRows, hiddenRows, onHiddenRowsChange, primers, onPickPrimer, onSetDesignRange }: Props) {
+export default function AlignmentView({ alignment, rows: allRows, hiddenRows, onHiddenRowsChange, primers, designRange, onPickPrimer, onSetDesignRange }: Props) {
   const rows = useMemo(() => allRows.filter((r) => !hiddenRows.includes(r.id)), [allRows, hiddenRows]);
   const a = useMemo(() => analyzeAlignment(rows), [rows]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -214,7 +217,13 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
       drawRef.current();
     });
   }, []);
-  useEffect(() => () => cancelAnimationFrame(frameRef.current), []);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = 0;
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
     // A zoom resizes the scroll content first; the scroll position it
@@ -274,6 +283,21 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
         ctx.fillStyle = col.accent;
         ctx.fillRect(x(selCols.from), TOP, (selCols.to - selCols.from) * cellW, rows.length * ROW_H);
         ctx.globalAlpha = 1;
+      }
+
+      // Design column range: a dashed frame down every row.
+      if (designRange && designRange.colEnd > designRange.colStart && (designRange.colStart > 0 || designRange.colEnd < len)) {
+        const dx = x(designRange.colStart);
+        const dw = Math.max(2, (designRange.colEnd - designRange.colStart) * cellW);
+        ctx.globalAlpha = 0.06;
+        ctx.fillStyle = col.accent;
+        ctx.fillRect(dx, TOP, dw, rows.length * ROW_H);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = col.accent;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.strokeRect(dx + 0.5, TOP + 0.5, dw - 1, rows.length * ROW_H - 1);
+        ctx.setLineDash([]);
       }
 
       // Primer track.
@@ -394,7 +418,7 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
 
   useEffect(() => {
     scheduleDraw();
-  }, [scheduleDraw, a, tracks, rows, width, totalH, vf, labelW, sel, hover?.row, primers, themeTick]);
+  }, [scheduleDraw, a, tracks, rows, width, totalH, vf, labelW, sel, hover?.row, primers, designRange?.colStart, designRange?.colEnd, themeTick]);
 
   /** Zooms to `nextFraction`, keeping the column under `anchorPx` (from
    * the sequence area's left edge) where it is. */
@@ -489,10 +513,9 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
     const tooShort = n < MIN_PRIMER ? `Select at least ${MIN_PRIMER} bases (this is ${n})` : null;
     const tooLong = n > MAX_PRIMER ? `Primers are analyzed up to ${MAX_PRIMER} bases (this is ${n})` : null;
     const pick: AlignPick = { rowId: selRow.id, colStart: selCols.from, colEnd: selCols.to };
-    const done = () => {
-      setMenu(null);
-      setSel(null);
-    };
+    // The selection stays on the map after an action; a click elsewhere
+    // (or a new drag) clears it.
+    const done = () => setMenu(null);
     return {
       heading: `${n} bp · columns ${fmt(selCols.from + 1)}–${fmt(selCols.to)} · ${selRow.id}`,
       entries: [

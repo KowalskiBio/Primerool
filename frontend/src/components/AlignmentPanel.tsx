@@ -300,6 +300,10 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
 
       {alignment && (
         <>
+          {analysis && analysis.rows.length >= 2 && (
+            <ConservedWindows analysis={analysis} designing={designing} onDesignIn={(w) => void runDesign({ window: w })} onDesignPair={(left, right) => void runDesign({ left, right })} />
+          )}
+
           <h4 className="mb-2 mt-4 text-sm font-semibold text-ink">Alignment</h4>
           <AlignmentView
             alignment={alignment}
@@ -307,6 +311,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
             hiddenRows={hiddenRows}
             onHiddenRowsChange={setHiddenRows}
             primers={primers}
+            designRange={{ colStart, colEnd }}
             onPickPrimer={pickPrimer}
             onSetDesignRange={(start, end) => {
               setColStart(start);
@@ -318,10 +323,6 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
             <summary className="cursor-pointer text-xs font-medium text-ink-muted hover:text-ink">Aligned FASTA</summary>
             <pre className="sequence-viewer mt-2 max-h-[300px] overflow-auto rounded-lg border border-line bg-base p-4 text-xs">{alignment}</pre>
           </details>
-
-          {analysis && analysis.rows.length >= 2 && (
-            <ConservedWindows analysis={analysis} designing={designing} onDesignIn={(w) => void runDesign({ window: w })} onDesignPair={(left, right) => void runDesign({ left, right })} />
-          )}
 
           <div className="mt-4 rounded-md border border-line bg-surface-2 p-4">
             <h4 className="mb-3 text-sm font-semibold text-ink">Design Primers in Conserved Region</h4>

@@ -8,13 +8,24 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
-use providers::ncbi::{Homolog, REQUEST_API_KEY};
+use providers::ncbi::{Homolog, REQUEST_API_KEY, VIA_ASSEMBLIES};
 use providers::species_map::ncbi_organism_term;
 
 use crate::error::AppError;
 use crate::state::AppState;
 
-pub type HomologJobStore = crate::jobs::JobStore<Vec<Homolog>>;
+/// The homologs found, and (for NCBI Datasets) which route found them.
+pub type HomologJobStore = crate::jobs::JobStore<(Vec<Homolog>, Option<&'static str>)>;
+
+/// Where homologs come from: GenBank proteins through E-utilities (the
+/// original route), or NCBI Datasets' orthologs / reference genomes.
+#[derive(Debug, Deserialize, Default, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum HomologSource {
+    #[default]
+    Eutils,
+    Datasets,
+}
 
 const DEFAULT_MAX_SPECIES: usize = 25;
 const MAX_SPECIES_CAP: usize = 60;
@@ -26,6 +37,7 @@ pub struct CollectHomologsRequest {
     /// A taxon name ("Pseudomonas") or NCBI Taxonomy ID ("286").
     pub taxon: String,
     pub max_species: Option<usize>,
+    pub source: HomologSource,
 }
 
 #[derive(Debug, Serialize)]
@@ -38,6 +50,9 @@ pub struct HomologJobStatus {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub homologs: Option<Vec<Homolog>>,
+    /// NCBI Datasets only: "orthologs" or "reference assemblies".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -67,10 +82,22 @@ pub async fn collect_homologs(State(state): State<AppState>, Json(req): Json<Col
     // The spawned task leaves this request's scope, so carry its NCBI key.
     let api_key = REQUEST_API_KEY.try_with(|k| k.clone()).ok().flatten();
     tokio::spawn(REQUEST_API_KEY.scope(api_key, async move {
-        let outcome = match ncbi.collect_homologs(&gene, &ncbi_organism_term(&taxon), max_species).await {
-            Ok(homologs) if homologs.is_empty() => Err(format!("No GenBank protein named '{gene}' with a genome location was found in {taxon}. Check the gene symbol and taxon spelling.")),
-            Ok(homologs) => Ok(homologs),
-            Err(e) => Err(e.to_string()),
+        let term = ncbi_organism_term(&taxon);
+        let outcome = match req.source {
+            HomologSource::Eutils => match ncbi.collect_homologs(&gene, &term, max_species).await {
+                Ok(homologs) if homologs.is_empty() => Err(format!("No GenBank protein named '{gene}' with a genome location was found in {taxon}. Check the gene symbol and taxon spelling.")),
+                Ok(homologs) => Ok((homologs, None)),
+                Err(e) => Err(e.to_string()),
+            },
+            HomologSource::Datasets => match ncbi.collect_homologs_datasets(&gene, &taxon, &term, max_species).await {
+                Ok((homologs, via)) if homologs.is_empty() => Err(if via == VIA_ASSEMBLIES {
+                    format!("NCBI Datasets found no ortholog group for '{gene}' in {taxon}, and no reference genome there annotates a gene named '{gene}'. Check the symbol, or try GenBank proteins.")
+                } else {
+                    format!("NCBI Datasets found nothing for '{gene}' in {taxon}.")
+                }),
+                Ok((homologs, via)) => Ok((homologs, Some(via))),
+                Err(e) => Err(e.to_string()),
+            },
         };
         store.finish(&task_job_id, outcome);
     }));
@@ -81,8 +108,8 @@ pub async fn collect_homologs(State(state): State<AppState>, Json(req): Json<Col
 pub async fn collect_homologs_status(State(state): State<AppState>, Path(job_id): Path<String>) -> Result<Json<HomologJobStatus>, AppError> {
     match state.homolog_jobs.status(&job_id) {
         None => Err(AppError::not_found("Unknown or expired homolog job id")),
-        Some(None) => Ok(Json(HomologJobStatus { status: "running", homologs: None, error: None })),
-        Some(Some(Ok(homologs))) => Ok(Json(HomologJobStatus { status: "done", homologs: Some(homologs), error: None })),
-        Some(Some(Err(message))) => Ok(Json(HomologJobStatus { status: "error", homologs: None, error: Some(message) })),
+        Some(None) => Ok(Json(HomologJobStatus { status: "running", homologs: None, via: None, error: None })),
+        Some(Some(Ok((homologs, via)))) => Ok(Json(HomologJobStatus { status: "done", homologs: Some(homologs), via, error: None })),
+        Some(Some(Err(message))) => Ok(Json(HomologJobStatus { status: "error", homologs: None, via: None, error: Some(message) })),
     }
 }

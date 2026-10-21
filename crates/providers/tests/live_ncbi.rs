@@ -120,3 +120,16 @@ async fn nirs_homologs_across_pseudomonas_cover_many_species() {
         assert!(["ATG", "GTG", "TTG"].contains(&&h.sequence[..3]), "{} opens with {}", h.species, &h.sequence[..3]);
     }
 }
+
+#[tokio::test]
+#[ignore = "hits live NCBI Datasets and E-utilities; run explicitly"]
+async fn datasets_collects_ortholog_cdss_for_a_eukaryotic_gene() {
+    let provider = providers::ncbi::NcbiProvider::new();
+    let (homologs, via) = provider.collect_homologs_datasets("INS", "Mammalia", "\"Mammalia\"[orgn]", 8).await.unwrap();
+    assert_eq!(via, providers::ncbi::VIA_ORTHOLOGS);
+    assert!(homologs.len() >= 5, "only {} orthologs", homologs.len());
+    assert_eq!(homologs[0].species, "Homo sapiens");
+    for h in &homologs {
+        assert!(h.sequence.starts_with("ATG") && h.sequence.len() % 3 == 0, "{} CDS looks wrong", h.species);
+    }
+}

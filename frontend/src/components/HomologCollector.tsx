@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
-import { getHomologJob, startCollectHomologs, type Homolog } from '../api/homologs';
+import { getHomologJob, startCollectHomologs, type Homolog, type HomologJob, type HomologSource } from '../api/homologs';
+import SegmentedControl from './ui/SegmentedControl';
 import Button from './ui/Button';
 import Checkbox from './ui/Checkbox';
 import Field from './ui/Field';
@@ -31,6 +32,8 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
   const [gene, setGene] = useSessionState('align.homologGene', '');
   const [taxon, setTaxon] = useSessionState('align.homologTaxon', '');
   const [maxSpecies, setMaxSpecies] = useSessionState('align.homologMax', 25);
+  const [source, setSource] = useSessionState<HomologSource>('align.homologSource', 'eutils');
+  const [via, setVia] = useSessionState<HomologJob['via'] | null>('align.homologVia', null);
   const [homologs, setHomologs] = useSessionState<Homolog[] | null>('align.homologs', null);
   const [ticked, setTicked] = useSessionState<string[]>('align.homologTicked', []);
   const [running, setRunning] = useState(false);
@@ -46,12 +49,13 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
     }
     setError(null);
     setHomologs(null);
+    setVia(null);
     setRunning(true);
     setElapsed(0);
     const started = Date.now();
     const tick = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
     try {
-      const { job_id } = await startCollectHomologs(g, t, maxSpecies);
+      const { job_id } = await startCollectHomologs(g, t, maxSpecies, source);
       let job = await getHomologJob(job_id);
       while (job.status === 'running') {
         await new Promise((resolve) => setTimeout(resolve, POLL_MS));
@@ -60,6 +64,7 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
       if (job.status === 'error') throw new Error(job.error || 'Collecting homologs failed.');
       const found = job.homologs ?? [];
       setHomologs(found);
+      setVia(job.via ?? null);
       setTicked(found.map((h) => h.protein));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -81,8 +86,25 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
     <div className="mb-4 rounded-md border border-line bg-surface-2 p-4">
       <h4 className="mb-1 text-sm font-semibold text-ink">Collect homologs across species</h4>
       <p className="mb-3 text-sm text-ink-muted">
-        Fetches one coding sequence of the gene per species within a taxon, from GenBank proteins annotated with that gene. Align them to find where the gene is conserved.
+        Fetches one coding sequence of the gene per species within a taxon. Align them to find where the gene is conserved.
       </p>
+      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <SegmentedControl
+          size="sm"
+          ariaLabel="Homolog source"
+          value={source}
+          onChange={setSource}
+          options={[
+            { value: 'eutils', label: 'GenBank proteins', title: 'Proteins annotated with the gene, then where each is coded (E-utilities)' },
+            { value: 'datasets', label: 'NCBI Datasets', title: "The gene's ortholog group, or the taxon's reference genomes (prototype)" },
+          ]}
+        />
+        <span className="text-xs text-ink-faint">
+          {source === 'eutils'
+            ? 'Any GenBank protein named after the gene, one per species.'
+            : "Prototype: NCBI's curated orthologs (fast, mostly eukaryotes); when there are none, each species' reference genome is searched for the gene (slow, prokaryotes)."}
+        </span>
+      </div>
       <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
         <Field label="Gene symbol" className="w-40">
           <TextInput value={gene} placeholder={defaultGene || 'e.g. nirS'} onChange={(e) => setGene(e.target.value)} spellCheck={false} />
@@ -97,7 +119,11 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
           {running ? `Collecting… ${elapsed}s` : 'Collect homologs'}
         </Button>
       </div>
-      {running && <p className="mt-2 text-xs text-ink-muted">NCBI can take a minute or two for this, faster with an NCBI API key in Settings.</p>}
+      {running && (
+        <p className="mt-2 text-xs text-ink-muted">
+          NCBI can take {source === 'datasets' ? 'a few minutes when it has to search reference genomes one by one' : 'a minute or two for this'}, faster with an NCBI API key in Settings.
+        </p>
+      )}
       {error && <div role="alert" className="mt-3 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{error}</div>}
 
       {homologs && homologs.length > 0 && (
@@ -147,7 +173,7 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
               Add {tickedCount} to the alignment input
             </Button>
             <span className="text-xs text-ink-muted">
-              {homologs.length} species found. The records are appended to the box below; then align them.
+              {homologs.length} species found{via ? ` via NCBI Datasets ${via}` : ''}. The records are appended to the box below; then align them.
             </span>
           </div>
         </div>

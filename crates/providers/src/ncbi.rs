@@ -25,6 +25,9 @@ use tokio::sync::Mutex;
 use crate::species_map::ncbi_organism_term;
 use crate::{revcomp, strip_fasta, Feature, GeneMatch, GeneSearchResult, Interval, ProviderError, SeqType, SequenceProvider, Strand, TranscriptInfo, TranscriptSummary, VariantHit};
 
+mod datasets;
+pub use datasets::{VIA_ASSEMBLIES, VIA_ORTHOLOGS};
+
 const EUTILS: &str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const MIN_INTERVAL: Duration = Duration::from_millis(340); // ~3 req/s, no API key
 /// Retries after an HTTP 429 (rate limit exceeded), waiting 1 s, then 2 s.
@@ -63,6 +66,8 @@ const PREFERRED_STUDIES: [&str; 5] = ["1000Genomes", "1000Genomes_30X", "GnomAD_
 pub struct NcbiProvider {
     client: reqwest::Client,
     last_request: Mutex<Instant>,
+    /// NCBI Datasets is paced on its own (see `datasets`).
+    datasets_last_request: Mutex<Instant>,
     transcript_cache: Arc<Mutex<HashMap<String, TranscriptInfo>>>,
 }
 
@@ -88,6 +93,7 @@ impl NcbiProvider {
         Self {
             client: reqwest::Client::new(),
             last_request: Mutex::new(Instant::now() - Duration::from_secs(1)),
+            datasets_last_request: Mutex::new(Instant::now() - Duration::from_secs(1)),
             transcript_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }

@@ -75,11 +75,11 @@ function genusOf(species: string): string {
 
 export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneContext }: Props) {
   const [fastaText, setFastaText] = useSessionState('align.fastaText', '');
-  // When set, the currently loaded sequence (flanks + gene) is prepended to
-  // the alignment input as '>loaded query' - e.g. to compare the NCBI-sourced
-  // sequence the rest of the app is working against with Ensembl's take on
-  // the same transcript pasted below.
-  const [includeQuery, setIncludeQuery] = useSessionState('align.includeQuery', false);
+  // The loaded sequence (flanks + gene) is always aligned, as the query:
+  // the first row, which the Rows picker can't hide. Its record name is kept
+  // with the alignment, to find it again in MAFFT's output.
+  const queryName = loadedSequence ? `${geneContext?.geneName ?? 'loaded sequence'} (query)` : null;
+  const [queryId, setQueryId] = useSessionState<string | null>('align.queryId', null);
   // When set, every OTHER transcript variant of the same gene is fetched via
   // `/get_sequence` (same view options as the loaded sequence) and added to
   // the alignment as its own record, so variants can be compared straight
@@ -103,8 +103,12 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
   const [degenerate, setDegenerate] = useSessionState('align.degenerate', false);
   const [hiddenRows, setHiddenRows] = useSessionState<string[]>('align.hiddenRows', []);
   const [primers, setPrimers] = useSessionState<AlignPrimers>('align.primers', NO_ALIGN_PRIMERS);
-  const alignedRows = useMemo(() => (alignment ? parseAlignedFasta(alignment) : []), [alignment]);
-  const visibleRows = useMemo(() => alignedRows.filter((r) => !hiddenRows.includes(r.id)), [alignedRows, hiddenRows]);
+  const alignedRows = useMemo(() => {
+    const rows = alignment ? parseAlignedFasta(alignment) : [];
+    const q = rows.findIndex((r) => r.id === queryId);
+    return q > 0 ? [rows[q], ...rows.slice(0, q), ...rows.slice(q + 1)] : rows;
+  }, [alignment, queryId]);
+  const visibleRows = useMemo(() => alignedRows.filter((r) => r.id === queryId || !hiddenRows.includes(r.id)), [alignedRows, hiddenRows, queryId]);
 
   function setPrimer(side: 'F' | 'R', primer: AlignPrimer | null) {
     setPrimers((prev) => ({ ...prev, [side]: primer }));
@@ -133,10 +137,15 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     setHiddenRows([]);
     const records = parseMultiFasta(fastaText);
     const extraRecords: { id: string; seq: string }[] = [];
-    if (includeQuery && loadedSequence) {
+    let query: string | null = null;
+    if (loadedSequence && queryName) {
       const querySeq = cleanDNA((loadedSequence.upstream_seq || '') + (loadedSequence.gene_seq || '') + (loadedSequence.downstream_seq || ''));
-      if (querySeq) extraRecords.push({ id: 'loaded query', seq: querySeq });
+      if (querySeq) {
+        extraRecords.push({ id: queryName, seq: querySeq });
+        query = queryName;
+      }
     }
+    setQueryId(query);
 
     const variants =
       includeVariants && geneTranscripts && geneContext && loadedSequence
@@ -271,15 +280,9 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
 
       {loadedSequence && (
         <div className="mb-3 flex flex-col gap-1.5">
-          <Checkbox
-            label={
-              <span className="text-sm">
-                Include the loaded sequence as the first entry (<span className="font-mono">&gt;loaded query</span>)
-              </span>
-            }
-            checked={includeQuery}
-            onChange={(e) => setIncludeQuery(e.target.checked)}
-          />
+          <p className="text-sm text-ink-muted">
+            The loaded sequence is always aligned as the query - the first row (<span className="font-mono">{queryName}</span>).
+          </p>
           {geneTranscripts && geneTranscripts.length > 1 && (
             <Checkbox
               label={
@@ -312,6 +315,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
           <AlignmentView
             alignment={alignment}
             rows={alignedRows}
+            queryId={queryId}
             hiddenRows={hiddenRows}
             onHiddenRowsChange={setHiddenRows}
             primers={primers}

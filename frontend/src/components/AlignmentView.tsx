@@ -128,6 +128,9 @@ interface Selection {
 interface Props {
   alignment: string;
   rows: AlignedRow[];
+  /** The query's row id (the loaded sequence) - first, marked, and never
+   * hidden. */
+  queryId?: string | null;
   /** Row ids taken out of view by the Rows picker. */
   hiddenRows: string[];
   onHiddenRowsChange: (ids: string[]) => void;
@@ -147,8 +150,8 @@ interface Props {
  * majority, breaks at gaps; zoomed in far enough the bars become letters.
  * Drag across a row to select bases, then right-click to make them a
  * forward or reverse primer. */
-export default function AlignmentView({ alignment, rows: allRows, hiddenRows, onHiddenRowsChange, primers, designRange, onPickPrimer, onSetDesignRange }: Props) {
-  const rows = useMemo(() => allRows.filter((r) => !hiddenRows.includes(r.id)), [allRows, hiddenRows]);
+export default function AlignmentView({ alignment, rows: allRows, queryId, hiddenRows, onHiddenRowsChange, primers, designRange, onPickPrimer, onSetDesignRange }: Props) {
+  const rows = useMemo(() => allRows.filter((r) => r.id === queryId || !hiddenRows.includes(r.id)), [allRows, hiddenRows, queryId]);
   const a = useMemo(() => analyzeAlignment(rows), [rows]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -407,7 +410,9 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
       names.forEach((name, i) => {
         const y = TOP + i * ROW_H + ROW_H / 2 + 0.5;
         ctx.textAlign = 'left';
-        ctx.fillStyle = i === hover?.row || i === sel?.row ? col.ink : col.muted;
+        const isQuery = rows[i].id === queryId;
+        ctx.fillStyle = isQuery ? col.accent : i === hover?.row || i === sel?.row ? col.ink : col.muted;
+        ctx.font = `${isQuery ? '600 ' : ''}11px ${MONO}`;
         ctx.fillText(name, 6, y);
         if (letters) {
           const rb = a.residuesBefore[i];
@@ -642,7 +647,7 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
           <Button size="sm" aria-expanded={rowsOpen} aria-haspopup="true" onClick={() => setRowsOpen((o) => !o)}>
             Rows {rows.length}/{allRows.length} ▾
           </Button>
-          {rowsOpen && <RowsPicker rows={allRows} hidden={hiddenRows} onChange={onHiddenRowsChange} onClose={() => setRowsOpen(false)} />}
+          {rowsOpen && <RowsPicker rows={allRows} queryId={queryId} hidden={hiddenRows} onChange={onHiddenRowsChange} onClose={() => setRowsOpen(false)} />}
         </div>
         <span className="ml-auto text-xs text-ink-faint" aria-live="polite">
           {copied
@@ -688,7 +693,7 @@ export default function AlignmentView({ alignment, rows: allRows, hiddenRows, on
 }
 
 /** Checkbox list of every aligned sequence; at least one stays shown. */
-function RowsPicker({ rows, hidden, onChange, onClose }: { rows: AlignedRow[]; hidden: string[]; onChange: (ids: string[]) => void; onClose: () => void }) {
+function RowsPicker({ rows, queryId, hidden, onChange, onClose }: { rows: AlignedRow[]; queryId?: string | null; hidden: string[]; onChange: (ids: string[]) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -710,18 +715,19 @@ function RowsPicker({ rows, hidden, onChange, onClose }: { rows: AlignedRow[]; h
           Show all
         </Button>
         <Button size="sm" variant="ghost" onClick={() => onChange(rows.slice(1).map((r) => r.id))}>
-          First only
+          {queryId ? 'Query only' : 'First only'}
         </Button>
       </div>
       <div className="flex flex-col gap-1 pt-1">
         {rows.map((r, i) => {
-          const on = !hidden.includes(r.id);
+          const isQuery = r.id === queryId;
+          const on = isQuery || !hidden.includes(r.id);
           return (
             <Checkbox
               key={`${i}-${r.id}`}
               checked={on}
-              disabled={on && shown <= 1}
-              title={r.id}
+              disabled={isQuery || (on && shown <= 1)}
+              title={isQuery ? 'The query (loaded sequence) always stays shown' : r.id}
               label={<span className="truncate font-mono text-xs">{r.id}</span>}
               className="min-w-0"
               onChange={() => onChange(on ? [...hidden, r.id] : hidden.filter((h) => h !== r.id))}

@@ -131,6 +131,8 @@ interface Props {
   /** The query's row id (the loaded sequence) - first, marked, and never
    * hidden. */
   queryId?: string | null;
+  /** Each other row's percent identity to the query, when there is one. */
+  identities?: Map<string, number>;
   /** Row ids taken out of view by the Rows picker. */
   hiddenRows: string[];
   onHiddenRowsChange: (ids: string[]) => void;
@@ -150,7 +152,7 @@ interface Props {
  * majority, breaks at gaps; zoomed in far enough the bars become letters.
  * Drag across a row to select bases, then right-click to make them a
  * forward or reverse primer. */
-export default function AlignmentView({ alignment, rows: allRows, queryId, hiddenRows, onHiddenRowsChange, primers, designRange, onPickPrimer, onSetDesignRange }: Props) {
+export default function AlignmentView({ alignment, rows: allRows, queryId, identities, hiddenRows, onHiddenRowsChange, primers, designRange, onPickPrimer, onSetDesignRange }: Props) {
   const rows = useMemo(() => allRows.filter((r) => r.id === queryId || !hiddenRows.includes(r.id)), [allRows, hiddenRows, queryId]);
   const a = useMemo(() => analyzeAlignment(rows), [rows]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -647,7 +649,7 @@ export default function AlignmentView({ alignment, rows: allRows, queryId, hidde
           <Button size="sm" aria-expanded={rowsOpen} aria-haspopup="true" onClick={() => setRowsOpen((o) => !o)}>
             Rows {rows.length}/{allRows.length} ▾
           </Button>
-          {rowsOpen && <RowsPicker rows={allRows} queryId={queryId} hidden={hiddenRows} onChange={onHiddenRowsChange} onClose={() => setRowsOpen(false)} />}
+          {rowsOpen && <RowsPicker rows={allRows} queryId={queryId} identities={identities} hidden={hiddenRows} onChange={onHiddenRowsChange} onClose={() => setRowsOpen(false)} />}
         </div>
         <span className="ml-auto text-xs text-ink-faint" aria-live="polite">
           {copied
@@ -693,7 +695,18 @@ export default function AlignmentView({ alignment, rows: allRows, queryId, hidde
 }
 
 /** Checkbox list of every aligned sequence; at least one stays shown. */
-function RowsPicker({ rows, queryId, hidden, onChange, onClose }: { rows: AlignedRow[]; queryId?: string | null; hidden: string[]; onChange: (ids: string[]) => void; onClose: () => void }) {
+function RowsPicker({
+  rows,
+  queryId,
+  identities,
+  hidden,
+  onChange,
+  onClose,
+}: {
+  rows: AlignedRow[];
+  queryId?: string | null;
+  identities?: Map<string, number>;
+  hidden: string[]; onChange: (ids: string[]) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -728,8 +741,17 @@ function RowsPicker({ rows, queryId, hidden, onChange, onClose }: { rows: Aligne
               checked={on}
               disabled={isQuery || (on && shown <= 1)}
               title={isQuery ? 'The query (loaded sequence) always stays shown' : r.id}
-              label={<span className="truncate font-mono text-xs">{r.id}</span>}
-              className="min-w-0"
+              label={
+                <span className="flex min-w-0 flex-1 items-baseline justify-between gap-2">
+                  <span className="truncate font-mono text-xs">{r.id}</span>
+                  {identities?.has(r.id) && (
+                    <span className="shrink-0 text-[11px] tabular-nums text-ink-faint" title="Identity to the query, over the columns both have a base">
+                      {identities.get(r.id)!.toFixed(1)}%
+                    </span>
+                  )}
+                </span>
+              }
+              className="min-w-0 w-full"
               onChange={() => onChange(on ? [...hidden, r.id] : hidden.filter((h) => h !== r.id))}
             />
           );

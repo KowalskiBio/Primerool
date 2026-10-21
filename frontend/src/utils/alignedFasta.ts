@@ -106,3 +106,20 @@ export function findConservedWindows(identity: number[], minIdentity: number, mi
   }
   return windows;
 }
+
+/** Percent identity of two aligned rows over the columns where both have
+ * a base (BLAST-style: gaps don't count against it), and how many such
+ * columns there are - the overlap, which breaks ties. */
+export function percentIdentity(a: AlignedRow, b: AlignedRow): { identity: number; overlap: number } {
+  let same = 0;
+  let overlap = 0;
+  const n = Math.min(a.seq.length, b.seq.length);
+  for (let c = 0; c < n; c++) {
+    const x = a.seq[c];
+    const y = b.seq[c];
+    if (x === '-' || x === '.' || y === '-' || y === '.') continue;
+    overlap++;
+    if (x === y) same++;
+  }
+  return { identity: overlap ? (100 * same) / overlap : 0, overlap };
+}

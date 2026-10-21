@@ -11,7 +11,7 @@ import ConservedWindows from './ConservedWindows';
 import HomologCollector from './HomologCollector';
 import Badge from './ui/Badge';
 import AlignmentPrimersPanel from './AlignmentPrimersPanel';
-import { analyzeAlignment, parseAlignedFasta, type ConservedWindow } from '../utils/alignedFasta';
+import { analyzeAlignment, parseAlignedFasta, percentIdentity, type ConservedWindow } from '../utils/alignedFasta';
 import { NO_ALIGN_PRIMERS, degenerateSite, primerFromPick, type AlignPick, type AlignPrimer, type AlignPrimers } from '../utils/alignPrimers';
 import { analyzePrimer } from '../api/design';
 import { cleanDNA } from '../utils/dna';
@@ -103,10 +103,15 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
   const [degenerate, setDegenerate] = useSessionState('align.degenerate', false);
   const [hiddenRows, setHiddenRows] = useSessionState<string[]>('align.hiddenRows', []);
   const [primers, setPrimers] = useSessionState<AlignPrimers>('align.primers', NO_ALIGN_PRIMERS);
-  const alignedRows = useMemo(() => {
+  // The query first, then the rest by percent identity to it, most similar
+  // first (larger overlap breaks ties). Without a query: MAFFT's order.
+  const { alignedRows, identities } = useMemo(() => {
     const rows = alignment ? parseAlignedFasta(alignment) : [];
-    const q = rows.findIndex((r) => r.id === queryId);
-    return q > 0 ? [rows[q], ...rows.slice(0, q), ...rows.slice(q + 1)] : rows;
+    const query = rows.find((r) => r.id === queryId);
+    if (!query) return { alignedRows: rows, identities: undefined };
+    const scored = rows.filter((r) => r !== query).map((r) => ({ r, ...percentIdentity(query, r) }));
+    scored.sort((x, y) => y.identity - x.identity || y.overlap - x.overlap);
+    return { alignedRows: [query, ...scored.map((s) => s.r)], identities: new Map(scored.map((s) => [s.r.id, s.identity])) };
   }, [alignment, queryId]);
   const visibleRows = useMemo(() => alignedRows.filter((r) => r.id === queryId || !hiddenRows.includes(r.id)), [alignedRows, hiddenRows, queryId]);
 
@@ -281,7 +286,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
       {loadedSequence && (
         <div className="mb-3 flex flex-col gap-1.5">
           <p className="text-sm text-ink-muted">
-            The loaded sequence is always aligned as the query - the first row (<span className="font-mono">{queryName}</span>).
+            The loaded sequence is always aligned as the query - the first row (<span className="font-mono">{queryName}</span>); the others follow by percent identity to it, most similar first.
           </p>
           {geneTranscripts && geneTranscripts.length > 1 && (
             <Checkbox
@@ -316,6 +321,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
             alignment={alignment}
             rows={alignedRows}
             queryId={queryId}
+            identities={identities}
             hiddenRows={hiddenRows}
             onHiddenRowsChange={setHiddenRows}
             primers={primers}

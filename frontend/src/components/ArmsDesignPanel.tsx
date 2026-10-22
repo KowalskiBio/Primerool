@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { isCustomSequence } from '../utils/sequenceData';
 import { dropUnfinished, useSessionState } from '../session/sessionContext';
 import type { SequenceData } from '../api/sequence';
 import { lookupVariant, searchVariants, type VariantHit } from '../api/variants';
@@ -613,111 +614,115 @@ export default function ArmsDesignPanel({ data, species, apiSource, onSelect, id
 
   return (
     <div>
-      <div className="mb-6 rounded-md border border-line bg-surface-2 p-4">
-        <h3 className="mb-2 text-sm font-semibold text-ink">Search known variants ({apiSource === 'ncbi' ? 'NCBI dbSNP' : 'Ensembl'})</h3>
-        {!canUseVariantSearch && (
-          <div className="mb-3 rounded-md border border-warning/25 bg-warning-subtle p-2 text-sm text-warning">
-            Enable &ldquo;Include introns&rdquo; in step 2 to search for known variants (genomic coordinates only map exactly onto the intron-inclusive gene sequence). You can still enter a variant manually below.
+      {/* A pasted sequence has no genomic coordinates to place database
+          variants by - only a manually entered one fits it. */}
+      {!isCustomSequence(data) && (
+        <div className="mb-6 rounded-md border border-line bg-surface-2 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-ink">Search known variants ({apiSource === 'ncbi' ? 'NCBI dbSNP' : 'Ensembl'})</h3>
+          {!canUseVariantSearch && (
+            <div className="mb-3 rounded-md border border-warning/25 bg-warning-subtle p-2 text-sm text-warning">
+              Enable &ldquo;Include introns&rdquo; in step 2 to search for known variants (genomic coordinates only map exactly onto the intron-inclusive gene sequence). You can still enter a variant manually below.
+            </div>
+          )}
+          <div className="mb-3 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Field label="Region start (bp, 0-based into gene sequence)">
+              <TextInput type="number" min={0} value={regionStart} onChange={(e) => setRegionStart(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
+            </Field>
+            <Field label="Region end (bp, exclusive)">
+              <TextInput type="number" min={0} value={regionEnd} onChange={(e) => setRegionEnd(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
+            </Field>
+            <div className="flex items-end">
+              <Button variant="primary" disabled={searchLoading} onClick={() => void runSearch()} className="w-full">
+                {searchLoading ? 'Searching…' : 'Search Variants'}
+              </Button>
+            </div>
           </div>
-        )}
-        <div className="mb-3 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Field label="Region start (bp, 0-based into gene sequence)">
-            <TextInput type="number" min={0} value={regionStart} onChange={(e) => setRegionStart(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
-          </Field>
-          <Field label="Region end (bp, exclusive)">
-            <TextInput type="number" min={0} value={regionEnd} onChange={(e) => setRegionEnd(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />
-          </Field>
-          <div className="flex items-end">
-            <Button variant="primary" disabled={searchLoading} onClick={() => void runSearch()} className="w-full">
-              {searchLoading ? 'Searching…' : 'Search Variants'}
+
+          <div className="my-3 flex items-center gap-3 text-xs text-ink-faint">
+            <div className="flex-1 border-t border-line" />
+            or look up a specific variant by its database ID
+            <div className="flex-1 border-t border-line" />
+          </div>
+          <div className="flex gap-3">
+            <TextInput
+              type="text"
+              placeholder="e.g. rs1042522…"
+              value={lookupId}
+              onChange={(e) => setLookupId(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void runLookupById();
+              }}
+              className="flex-1 font-mono"
+            />
+            <Button variant="primary" disabled={lookupLoading} onClick={() => void runLookupById()}>
+              {lookupLoading ? 'Looking up…' : 'Look Up'}
             </Button>
           </div>
-        </div>
 
-        <div className="my-3 flex items-center gap-3 text-xs text-ink-faint">
-          <div className="flex-1 border-t border-line" />
-          or look up a specific variant by its database ID
-          <div className="flex-1 border-t border-line" />
-        </div>
-        <div className="flex gap-3">
-          <TextInput
-            type="text"
-            placeholder="e.g. rs1042522…"
-            value={lookupId}
-            onChange={(e) => setLookupId(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void runLookupById();
-            }}
-            className="flex-1 font-mono"
-          />
-          <Button variant="primary" disabled={lookupLoading} onClick={() => void runLookupById()}>
-            {lookupLoading ? 'Looking up…' : 'Look Up'}
-          </Button>
-        </div>
+          {searchError && <div role="alert" className="mt-3 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{searchError}</div>}
 
-        {searchError && <div role="alert" className="mt-3 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{searchError}</div>}
-
-        {hits && hits.length > 0 && (
-          <>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-muted">
-              <span>
-                {sort ? `Sorted by ${visibleColumns[sort.columnIndex]?.column.header ?? ''} (${sort.direction})` : 'Sorted by clinical relevance'}, showing {pagedHits.length ? clampedPage * pageSize + 1 : 0}-{clampedPage * pageSize + pagedHits.length} of {sortedHits.length}
-              </span>
-              <div className="flex flex-wrap items-center gap-2">
-                {pageMissingFreq && (
-                  <Button size="sm" disabled={bulkFreqLoading} onClick={() => void showFrequencyForPage()}>
-                    {bulkFreqLoading ? 'Fetching frequencies…' : 'Show frequency'}
-                  </Button>
-                )}
-                <div className="relative">
-                  <Button size="sm" aria-haspopup="menu" aria-expanded={columnsMenuOpen} onClick={() => setColumnsMenuOpen((o) => !o)}>
-                    Columns ▾
-                  </Button>
-                  {columnsMenuOpen && (
-                    <div className="absolute right-0 z-10 mt-1 w-56 rounded-md border border-line bg-surface p-2 shadow-md">
-                      {allColumns.map((c) => (
-                        <label key={c.key} className="flex cursor-pointer items-center gap-2 px-1 py-1 text-xs text-ink">
-                          <input type="checkbox" checked={!hiddenColumns.has(c.key)} onChange={() => toggleColumn(c.key)} className="h-3.5 w-3.5 accent-accent" />
-                          {c.column.header}
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <label className="text-xs text-ink-muted" htmlFor="arms-page-size">Per page:</label>
-                <select
-                  id="arms-page-size"
-                  className="h-7 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink"
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(parseInt(e.target.value, 10));
-                    setPage(0);
-                  }}
-                >
-                  {PAGE_SIZES.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-                <Button size="sm" disabled={clampedPage === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
-                  Prev
-                </Button>
-                <span className="text-xs tabular-nums text-ink-muted">
-                  Page {clampedPage + 1} of {totalPages}
+          {hits && hits.length > 0 && (
+            <>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-muted">
+                <span>
+                  {sort ? `Sorted by ${visibleColumns[sort.columnIndex]?.column.header ?? ''} (${sort.direction})` : 'Sorted by clinical relevance'}, showing {pagedHits.length ? clampedPage * pageSize + 1 : 0}-{clampedPage * pageSize + pagedHits.length} of {sortedHits.length}
                 </span>
-                <Button size="sm" disabled={clampedPage >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>
-                  Next
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {pageMissingFreq && (
+                    <Button size="sm" disabled={bulkFreqLoading} onClick={() => void showFrequencyForPage()}>
+                      {bulkFreqLoading ? 'Fetching frequencies…' : 'Show frequency'}
+                    </Button>
+                  )}
+                  <div className="relative">
+                    <Button size="sm" aria-haspopup="menu" aria-expanded={columnsMenuOpen} onClick={() => setColumnsMenuOpen((o) => !o)}>
+                      Columns ▾
+                    </Button>
+                    {columnsMenuOpen && (
+                      <div className="absolute right-0 z-10 mt-1 w-56 rounded-md border border-line bg-surface p-2 shadow-md">
+                        {allColumns.map((c) => (
+                          <label key={c.key} className="flex cursor-pointer items-center gap-2 px-1 py-1 text-xs text-ink">
+                            <input type="checkbox" checked={!hiddenColumns.has(c.key)} onChange={() => toggleColumn(c.key)} className="h-3.5 w-3.5 accent-accent" />
+                            {c.column.header}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <label className="text-xs text-ink-muted" htmlFor="arms-page-size">Per page:</label>
+                  <select
+                    id="arms-page-size"
+                    className="h-7 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink"
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(parseInt(e.target.value, 10));
+                      setPage(0);
+                    }}
+                  >
+                    {PAGE_SIZES.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                  <Button size="sm" disabled={clampedPage === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                    Prev
+                  </Button>
+                  <span className="text-xs tabular-nums text-ink-muted">
+                    Page {clampedPage + 1} of {totalPages}
+                  </span>
+                  <Button size="sm" disabled={clampedPage >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>
+                    Next
+                  </Button>
+                </div>
               </div>
-            </div>
-            <ResultsTable rows={pagedHits} keyOf={(h) => h.id} columns={visibleColumns.map((c) => c.column)} sort={sort} onSortChange={handleSortChange} />
-          </>
-        )}
-      </div>
+              <ResultsTable rows={pagedHits} keyOf={(h) => h.id} columns={visibleColumns.map((c) => c.column)} sort={sort} onSortChange={handleSortChange} />
+            </>
+          )}
+        </div>
+      )}
 
       <div className="mb-6 rounded-md border border-line bg-surface-2 p-4">
-        <h3 className="mb-2 text-sm font-semibold text-ink">Or enter a variant manually</h3>
+        <h3 className="mb-2 text-sm font-semibold text-ink">{isCustomSequence(data) ? 'Enter a variant' : 'Or enter a variant manually'}</h3>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Field label="Position (bp, 0-based into gene sequence)">
             <TextInput type="number" min={0} value={manualPos} onChange={(e) => setManualPos(parseInt(e.target.value, 10) || 0)} className="tabular-nums" />

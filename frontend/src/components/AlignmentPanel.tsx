@@ -50,6 +50,9 @@ interface Props {
     upstreamBp: number;
     downstreamBp: number;
   };
+  /** A pasted sequence's best BLAST hit (no `geneContext` then): the gene
+   * and organism its homologs are collected for. */
+  homologHint?: { gene: string | null; organism: string };
 }
 
 /** "18/20 sequences", flagged when some would fail at the primer's 3' end. */
@@ -73,12 +76,12 @@ function genusOf(species: string): string {
   return /^[a-z]+$/i.test(first) ? first[0].toUpperCase() + first.slice(1).toLowerCase() : '';
 }
 
-export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneContext }: Props) {
+export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneContext, homologHint }: Props) {
   const [fastaText, setFastaText] = useSessionState('align.fastaText', '');
   // The loaded sequence (flanks + gene) is always aligned, as the query:
   // the first row, which the Rows picker can't hide. Its record name is kept
   // with the alignment, to find it again in MAFFT's output.
-  const queryName = loadedSequence ? `${geneContext?.geneName ?? 'loaded sequence'} (query)` : null;
+  const queryName = loadedSequence ? `${geneContext?.geneName || loadedSequence.gene_name || 'loaded sequence'} (query)` : null;
   const [queryId, setQueryId] = useSessionState<string | null>('align.queryId', null);
   // When set, every OTHER transcript variant of the same gene is fetched via
   // `/get_sequence` (same view options as the loaded sequence) and added to
@@ -270,8 +273,8 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
       </p>
 
       <HomologCollector
-        defaultGene={geneContext?.geneName}
-        defaultTaxon={geneContext ? genusOf(geneContext.species) : undefined}
+        defaultGene={geneContext?.geneName ?? homologHint?.gene ?? undefined}
+        defaultTaxon={geneContext ? genusOf(geneContext.species) : homologHint ? genusOf(homologHint.organism) : undefined}
         onAdd={(fasta) => setFastaText((fastaText.trim() ? `${fastaText.trim()}\n` : '') + fasta)}
       />
 

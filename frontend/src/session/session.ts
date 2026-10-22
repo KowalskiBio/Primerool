@@ -55,8 +55,10 @@ export function withoutBlastHits(state: SessionState): SessionState {
   return Object.fromEntries(Object.entries(state).filter(([key]) => key !== 'input.blastHits' && key !== 'snpBatch.blastChecks'));
 }
 
+/** The sequence the session's input mode shows: the pasted one in FASTA
+ * mode, else the gene search's. */
 function sequenceOf(state: SessionState): SequenceData | null {
-  const d = state['app.sequenceData'];
+  const d = state[state['input.inputMode'] === 'fasta' ? 'app.pastedData' : 'app.sequenceData'];
   return d && typeof d === 'object' ? (d as SequenceData) : null;
 }
 

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import { alignSequences, designConserved, type ConservedPairOligo, type ConservedPair, type ConservedCandidate, type Coverage, type DesignConservedRequest } from '../api/align';
 import type { SequenceData } from '../api/sequence';
-import { getSequence } from '../api/sequence';
+import { fetchNucleotide, getSequence } from '../api/sequence';
 import type { Transcript } from '../api/gene';
 import { ApiError } from '../api/client';
 import { parseMultiFasta } from '../utils/fasta';
@@ -21,6 +21,7 @@ import Button from './ui/Button';
 import Checkbox from './ui/Checkbox';
 import Field from './ui/Field';
 import TextInput, { controlClasses } from './ui/TextInput';
+import Select from './ui/Select';
 
 /** Card 7: MAFFT multi-sequence alignment + conserved-region primer design
  * (Phase 7). New feature, not present in the legacy Primerool app - the
@@ -55,6 +56,83 @@ interface Props {
   homologHint?: { gene: string | null; organism: string };
 }
 
+/** The alignment's reference (query row): any record being aligned, or a
+ * new one by NCBI accession or pasted sequence. */
+function ReferencePicker({
+  options,
+  value,
+  loadedName,
+  externalRef,
+  aligned,
+  input,
+  onInputChange,
+  busy,
+  error,
+  onChoose,
+  onUseNew,
+  onDropExternal,
+}: {
+  options: string[];
+  value: string | null;
+  loadedName: string | null;
+  externalRef: ExternalReference | null;
+  aligned: boolean;
+  input: string;
+  onInputChange: (v: string) => void;
+  busy: boolean;
+  error: string | null;
+  onChoose: (id: string) => void;
+  onUseNew: () => void;
+  onDropExternal: () => void;
+}) {
+  return (
+    <div className="mb-3 rounded-md border border-line bg-surface-2 p-3">
+      <h4 className="mb-1 text-sm font-semibold text-ink">Reference</h4>
+      <p className="mb-2 text-sm text-ink-muted">
+        The reference is the first row: the other sequences follow by percent identity to it, and their bases are marked red where they differ from it.{' '}
+        {aligned ? 'Swapping it to another aligned sequence is instant; a new one is aligned in.' : 'It applies when you align.'}
+      </p>
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+        <Field label="Swap to" htmlFor="aln-reference" className="min-w-56 max-w-md flex-1">
+          <Select id="aln-reference" value={value ?? ''} onChange={(e) => onChoose(e.target.value)} disabled={busy || options.length === 0}>
+            {options.length === 0 && <option value="">Nothing to align yet</option>}
+            {options.map((id) => (
+              <option key={id} value={id}>
+                {id === loadedName ? `${id} - your sequence` : id}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Or a new one: NCBI accession (optionally :start-end) or a sequence" htmlFor="aln-new-reference" className="min-w-64 flex-[2]">
+          <TextInput
+            id="aln-new-reference"
+            value={input}
+            onChange={(e) => onInputChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onUseNew();
+            }}
+            placeholder="e.g. CP151816.1:5733700-5735400, or ACGT…"
+            spellCheck={false}
+            className="font-mono"
+          />
+        </Field>
+        <Button disabled={busy} onClick={onUseNew}>
+          {busy ? 'Working…' : 'Use as reference'}
+        </Button>
+      </div>
+      {externalRef && (
+        <p className="mt-2 text-xs text-ink-muted">
+          Added reference <span className="font-mono text-ink">{externalRef.id}</span> ({externalRef.seq.length.toLocaleString('en-US')} bp{externalRef.title ? ` - ${externalRef.title}` : ''}).{' '}
+          <button type="button" className="text-accent hover:underline" disabled={busy} onClick={onDropExternal}>
+            Remove it
+          </button>
+        </p>
+      )}
+      {error && <div role="alert" className="mt-2 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-sm font-medium text-danger">{error}</div>}
+    </div>
+  );
+}
+
 /** "18/20 sequences", flagged when some would fail at the primer's 3' end. */
 function CoverageBadge({ coverage, label }: { coverage: Coverage; label?: string }) {
   const { matching_rows: ok, total_rows: total, three_prime_mismatch_rows: bad3 } = coverage;
@@ -69,6 +147,18 @@ function CoverageBadge({ coverage, label }: { coverage: Coverage; label?: string
   );
 }
 
+/** An NCBI nucleotide accession, optionally with a range:
+ * `CP151816.1`, `NC_000017.11:43044295-43125483`. */
+const ACCESSION_INPUT = /^[A-Za-z]{1,6}_?\d{4,}(\.\d+)?(:\s*[\d,]+\s*-\s*[\d,]+)?$/;
+
+/** A reference that isn't the loaded sequence or one of the input's
+ * records: fetched from NCBI or pasted, aligned as a record of its own. */
+interface ExternalReference {
+  id: string;
+  seq: string;
+  title?: string;
+}
+
 /** "Pseudomonas" from a species slug, name or BLAST organism - the
  * default taxon to collect homologs in. Empty for a taxonomy ID. */
 function genusOf(species: string): string {
@@ -78,11 +168,19 @@ function genusOf(species: string): string {
 
 export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneContext, homologHint }: Props) {
   const [fastaText, setFastaText] = useSessionState('align.fastaText', '');
-  // The loaded sequence (flanks + gene) is always aligned, as the query:
-  // the first row, which the Rows picker can't hide. Its record name is kept
-  // with the alignment, to find it again in MAFFT's output.
-  const queryName = loadedSequence ? `${geneContext?.geneName || loadedSequence.gene_name || 'loaded sequence'} (query)` : null;
+  // The loaded sequence (flanks + gene) is always aligned. The reference -
+  // the query row: first, never hidden, what identity and mismatches are
+  // measured against - is the loaded sequence unless swapped for another
+  // record (`referenceChoice`), which may be one fetched or pasted just for
+  // that (`externalRef`). Record names are kept with the alignment, to find
+  // the rows again in MAFFT's output.
+  const loadedName = loadedSequence ? `${geneContext?.geneName || loadedSequence.gene_name || 'loaded sequence'} (loaded)` : null;
   const [queryId, setQueryId] = useSessionState<string | null>('align.queryId', null);
+  const [referenceChoice, setReferenceChoice] = useSessionState<string | null>('align.reference', null);
+  const [externalRef, setExternalRef] = useSessionState<ExternalReference | null>('align.externalRef', null);
+  const [newRefInput, setNewRefInput] = useSessionState('align.newRefInput', '');
+  const [fetchingRef, setFetchingRef] = useState(false);
+  const [refError, setRefError] = useState<string | null>(null);
   // When set, every OTHER transcript variant of the same gene is fetched via
   // `/get_sequence` (same view options as the loaded sequence) and added to
   // the alignment as its own record, so variants can be compared straight
@@ -136,7 +234,11 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     );
   }
 
-  async function runAlign() {
+  /** Aligns the input. `override` stands in for the reference state when
+   * it has just been set, ahead of React. */
+  async function runAlign(override?: { externalRef: ExternalReference | null; reference: string | null }) {
+    const external = override ? override.externalRef : externalRef;
+    const reference = override ? override.reference : referenceChoice;
     setAlignError(null);
     setAlignment(null);
     setCandidates(null);
@@ -145,15 +247,11 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     setHiddenRows([]);
     const records = parseMultiFasta(fastaText);
     const extraRecords: { id: string; seq: string }[] = [];
-    let query: string | null = null;
-    if (loadedSequence && queryName) {
-      const querySeq = cleanDNA((loadedSequence.upstream_seq || '') + (loadedSequence.gene_seq || '') + (loadedSequence.downstream_seq || ''));
-      if (querySeq) {
-        extraRecords.push({ id: queryName, seq: querySeq });
-        query = queryName;
-      }
+    if (loadedSequence && loadedName) {
+      const loadedSeq = cleanDNA((loadedSequence.upstream_seq || '') + (loadedSequence.gene_seq || '') + (loadedSequence.downstream_seq || ''));
+      if (loadedSeq) extraRecords.push({ id: loadedName, seq: loadedSeq });
     }
-    setQueryId(query);
+    if (external) extraRecords.push({ id: external.id, seq: external.seq });
 
     const variants =
       includeVariants && geneTranscripts && geneContext && loadedSequence
@@ -190,6 +288,10 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     }
 
     const all = [...extraRecords, ...records];
+    // The chosen reference while it's still among the records, else the
+    // loaded sequence; without either, MAFFT's order and no query.
+    const ids = new Set(all.map((r) => r.id));
+    setQueryId(reference && ids.has(reference) ? reference : loadedName && ids.has(loadedName) ? loadedName : null);
     if (all.length < 2) {
       setAlignError('Paste at least two sequences to align (FASTA, GenBank, or one bare sequence per line).');
       return;
@@ -265,6 +367,65 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     }
   }
 
+  // What can be the reference: the aligned rows once there's an alignment
+  // (swapping among them is instant), else the records about to be aligned.
+  const referenceOptions = alignment
+    ? alignedRows.map((r) => r.id)
+    : [...(loadedName ? [loadedName] : []), ...(externalRef ? [externalRef.id] : []), ...parseMultiFasta(fastaText).map((r) => r.id)];
+  const currentReference = alignment ? queryId : referenceChoice && referenceOptions.includes(referenceChoice) ? referenceChoice : loadedName;
+
+  function chooseReference(id: string) {
+    setRefError(null);
+    setReferenceChoice(id === loadedName ? null : id);
+    if (alignment && alignedRows.some((r) => r.id === id)) {
+      setQueryId(id);
+      setHiddenRows((prev) => prev.filter((h) => h !== id));
+    }
+  }
+
+  /** The new-reference box's accession (fetched from NCBI) or sequence
+   * (FASTA or bare) becomes the reference, re-aligning if aligned. */
+  async function applyNewReference() {
+    setRefError(null);
+    const text = newRefInput.trim();
+    if (!text) {
+      setRefError('Enter an NCBI accession (optionally with a range) or paste a sequence.');
+      return;
+    }
+    let ref: ExternalReference;
+    if (ACCESSION_INPUT.test(text)) {
+      setFetchingRef(true);
+      try {
+        const res = await fetchNucleotide(text);
+        ref = { id: `${res.id.replace(/\s+/g, '')} (reference)`, seq: cleanDNA(res.sequence), title: res.title };
+      } catch (e) {
+        setRefError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
+        return;
+      } finally {
+        setFetchingRef(false);
+      }
+    } else {
+      const first = parseMultiFasta(text)[0];
+      if (!first || first.seq.length < 20) {
+        setRefError('That is neither an NCBI accession nor a DNA sequence of at least 20 bp.');
+        return;
+      }
+      const name = /^seq\d+$/.test(first.id) ? 'pasted' : first.id.split(/\s+/)[0];
+      ref = { id: `${name} (reference)`, seq: first.seq };
+    }
+    setExternalRef(ref);
+    setReferenceChoice(ref.id);
+    setNewRefInput('');
+    if (alignment) await runAlign({ externalRef: ref, reference: ref.id });
+  }
+
+  /** Drops the fetched/pasted reference; the loaded sequence takes over. */
+  async function dropExternalReference() {
+    setExternalRef(null);
+    setReferenceChoice(null);
+    if (alignment) await runAlign({ externalRef: null, reference: null });
+  }
+
   return (
     <div>
       <h3 className="mb-2 text-sm font-semibold text-ink">Multi-Sequence Alignment</h3>
@@ -286,11 +447,23 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
         className={`${controlClasses} mb-3 resize-y p-3 font-mono`}
       />
 
+      <ReferencePicker
+        options={referenceOptions}
+        value={currentReference}
+        loadedName={loadedName}
+        externalRef={externalRef}
+        aligned={alignment !== null}
+        input={newRefInput}
+        onInputChange={setNewRefInput}
+        busy={fetchingRef || aligning}
+        error={refError}
+        onChoose={chooseReference}
+        onUseNew={() => void applyNewReference()}
+        onDropExternal={() => void dropExternalReference()}
+      />
+
       {loadedSequence && (
         <div className="mb-3 flex flex-col gap-1.5">
-          <p className="text-sm text-ink-muted">
-            The loaded sequence is always aligned as the query - the first row (<span className="font-mono">{queryName}</span>); the others follow by percent identity to it, most similar first.
-          </p>
           {geneTranscripts && geneTranscripts.length > 1 && (
             <Checkbox
               label={
@@ -306,7 +479,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
         </div>
       )}
 
-      <Button variant="primary" disabled={aligning} onClick={() => void runAlign()}>
+      <Button variant="primary" disabled={aligning || fetchingRef} onClick={() => void runAlign()}>
         {aligning ? 'Aligning…' : 'Align Sequences'}
       </Button>
 

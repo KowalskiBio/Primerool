@@ -32,6 +32,7 @@ export default defineConfig({
       '/lookup_variant': 'http://127.0.0.1:5050',
       '/design_arms': 'http://127.0.0.1:5050',
       '/align': 'http://127.0.0.1:5050',
+      '/fetch_nucleotide': 'http://127.0.0.1:5050',
       '/design_conserved': 'http://127.0.0.1:5050',
       '/idt': 'http://127.0.0.1:5050',
       '/import_snp_blocks': 'http://127.0.0.1:5050',

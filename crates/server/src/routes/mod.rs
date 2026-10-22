@@ -13,6 +13,7 @@ pub mod design_conserved;
 pub mod design_from_sequence;
 pub mod design_primers;
 pub mod design_probe;
+pub mod fetch_nucleotide;
 pub mod gene;
 pub mod hit_genes;
 pub mod homologs;

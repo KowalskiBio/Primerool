@@ -25,6 +25,15 @@ function recordName(h: Homolog): string {
   return `${genus[0]}. ${rest.join(' ')} ${h.accession}`;
 }
 
+/** Whether a homolog matches the table's search: every word of `query`
+ * found in its species, organism, strain, accession or protein. */
+function matchesFilter(h: Homolog, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const text = [h.species, h.organism, h.strain ?? '', h.accession, h.protein, h.gene].join(' ').toLowerCase();
+  return words.every((w) => text.includes(w));
+}
+
 /** Collects one CDS of a gene per species within a taxon (from GenBank
  * proteins that record where they are coded), for a cross-species
  * alignment: the starting point for finding a conserved region. */
@@ -36,6 +45,8 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
   const [via, setVia] = useSessionState<HomologJob['via'] | null>('align.homologVia', null);
   const [homologs, setHomologs] = useSessionState<Homolog[] | null>('align.homologs', null);
   const [ticked, setTicked] = useSessionState<string[]>('align.homologTicked', []);
+  /** Narrows the found homologs' table; ticking all ticks only those shown. */
+  const [filter, setFilter] = useSessionState('align.homologFilter', '');
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +92,12 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
 
   const toggle = (protein: string, on: boolean) => setTicked(on ? [...ticked, protein] : ticked.filter((p) => p !== protein));
   const tickedCount = (homologs ?? []).filter((h) => ticked.includes(h.protein)).length;
+  const shown = (homologs ?? []).filter((h) => matchesFilter(h, filter));
+  const shownTicked = shown.filter((h) => ticked.includes(h.protein)).length;
+  function tickShown(on: boolean) {
+    const ids = shown.map((h) => h.protein);
+    setTicked(on ? [...new Set([...ticked, ...ids])] : ticked.filter((p) => !ids.includes(p)));
+  }
 
   return (
     <div className="mb-4 rounded-md border border-line bg-surface-2 p-4">
@@ -128,6 +145,22 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
 
       {homologs && homologs.length > 0 && (
         <div className="mt-4">
+          <div className="mb-2 flex flex-wrap items-center gap-3">
+            <TextInput
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search species, strain, accession or protein"
+              aria-label="Search the found homologs"
+              className="max-w-sm"
+              spellCheck={false}
+            />
+            {filter.trim() && (
+              <span className="text-xs tabular-nums text-ink-muted">
+                {shown.length} of {homologs.length} shown
+              </span>
+            )}
+          </div>
           <div className="max-h-72 overflow-auto rounded-md border border-line bg-surface">
             <table className="w-full text-left text-xs text-ink-muted">
               <thead className="sticky top-0 bg-surface-2 uppercase">
@@ -135,10 +168,10 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
                   <th className="border-b border-line px-3 py-2">
                     <input
                       type="checkbox"
-                      aria-label="Tick all"
+                      aria-label={filter.trim() ? 'Tick all shown' : 'Tick all'}
                       className="h-4 w-4 cursor-pointer accent-accent"
-                      checked={tickedCount === homologs.length}
-                      onChange={(e) => setTicked(e.target.checked ? homologs.map((h) => h.protein) : [])}
+                      checked={shown.length > 0 && shownTicked === shown.length}
+                      onChange={(e) => tickShown(e.target.checked)}
                     />
                   </th>
                   <th className="border-b border-line px-3 py-2 font-medium">Species</th>
@@ -148,7 +181,14 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
                 </tr>
               </thead>
               <tbody>
-                {homologs.map((h) => (
+                {shown.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-3 text-center text-ink-faint">
+                      No homolog matches &ldquo;{filter.trim()}&rdquo;.
+                    </td>
+                  </tr>
+                )}
+                {shown.map((h) => (
                   <tr key={h.protein} className="border-b border-line last:border-0 hover:bg-surface-2">
                     <td className="px-3 py-1.5">
                       <Checkbox label="" aria-label={h.species} checked={ticked.includes(h.protein)} onChange={(e) => toggle(h.protein, e.target.checked)} />

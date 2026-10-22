@@ -135,8 +135,8 @@ interface Selection {
 interface Props {
   alignment: string;
   rows: AlignedRow[];
-  /** The query's row id (the loaded sequence) - first, marked, and never
-   * hidden. */
+  /** The reference (query) row's id - the loaded sequence unless swapped;
+   * first, marked, and never hidden. */
   queryId?: string | null;
   /** Each other row's percent identity to the query, when there is one. */
   identities?: Map<string, number>;
@@ -671,7 +671,7 @@ export default function AlignmentView({ alignment, rows: allRows, queryId, ident
       </div>
       <p className="mb-2 text-xs text-ink-muted">
         {rows.length} sequences{rows.length < allRows.length ? ` shown (of ${allRows.length})` : ''} · {fmt(len)} columns · <span className="text-ink">{fmt(identical)}</span> identical ({pct(identical)}) ·{' '}
-        <span className="aln-mismatch rounded px-0.5">{fmt(mismatch)}</span> mismatch{mismatch === 1 ? '' : 'es'} · {fmt(gapColumns)} with gaps. {queryIndex >= 0 ? 'Red bases differ from the query.' : <>Mismatches are against each column&apos;s majority among the rows shown.</>}
+        <span className="aln-mismatch rounded px-0.5">{fmt(mismatch)}</span> mismatch{mismatch === 1 ? '' : 'es'} · {fmt(gapColumns)} with gaps. {queryIndex >= 0 ? 'Red bases differ from the reference (first row).' : <>Mismatches are against each column&apos;s majority among the rows shown.</>}
       </p>
       <div
         ref={scrollRef}
@@ -736,7 +736,7 @@ function RowsPicker({
           Show all
         </Button>
         <Button size="sm" variant="ghost" onClick={() => onChange(rows.slice(1).map((r) => r.id))}>
-          {queryId ? 'Query only' : 'First only'}
+          {queryId ? 'Reference only' : 'First only'}
         </Button>
       </div>
       <div className="flex flex-col gap-1 pt-1">
@@ -748,12 +748,12 @@ function RowsPicker({
               key={`${i}-${r.id}`}
               checked={on}
               disabled={isQuery || (on && shown <= 1)}
-              title={isQuery ? 'The query (loaded sequence) always stays shown' : r.id}
+              title={isQuery ? 'The reference always stays shown' : r.id}
               label={
                 <span className="flex min-w-0 flex-1 items-baseline justify-between gap-2">
                   <span className="truncate font-mono text-xs">{r.id}</span>
                   {identities?.has(r.id) && (
-                    <span className="shrink-0 text-[11px] tabular-nums text-ink-faint" title="Identity to the query, over the columns both have a base">
+                    <span className="shrink-0 text-[11px] tabular-nums text-ink-faint" title="Identity to the reference, over the columns both have a base">
                       {identities.get(r.id)!.toFixed(1)}%
                     </span>
                   )}

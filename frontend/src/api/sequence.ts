@@ -66,3 +66,17 @@ export interface SequenceData {
 export function getSequence(req: GetSequenceRequest): Promise<SequenceData> {
   return postJson<SequenceData>('/get_sequence', req);
 }
+
+/** `POST /fetch_nucleotide`: one NCBI nucleotide record, or a range of it. */
+export interface FetchedNucleotide {
+  /** The accession as asked for (with its range). */
+  id: string;
+  title: string;
+  sequence: string;
+}
+
+/** `accession` is `CP151816.1`, or a 1-based range of it,
+ * `CP151816.1:5733700-5735400` (start > end reads the minus strand). */
+export function fetchNucleotide(accession: string): Promise<FetchedNucleotide> {
+  return postJson<FetchedNucleotide>('/fetch_nucleotide', { accession });
+}

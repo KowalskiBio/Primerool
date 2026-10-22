@@ -186,6 +186,41 @@ impl NcbiProvider {
         Ok(strip_fasta(&text))
     }
 
+    /// One nucleotide record, or the 1-based inclusive `range` of it (read
+    /// off the minus strand when `minus`), with the record's title.
+    /// `Ok(None)` when NCBI doesn't know the accession. A whole record
+    /// longer than `max_len` is refused - a genome needs a range.
+    pub async fn fetch_nucleotide(&self, accession: &str, range: Option<(u64, u64)>, minus: bool, max_len: u64) -> Result<Option<(String, String)>, ProviderError> {
+        let summary = match self.get_json(&format!("{EUTILS}/esummary.fcgi"), &[("db", "nuccore"), ("id", accession), ("retmode", "json")]).await {
+            Ok(v) => v,
+            Err(ProviderError::UpstreamStatus { .. }) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let Some(uid) = summary["result"]["uids"][0].as_str() else { return Ok(None) };
+        let record = &summary["result"][uid];
+        let title = record["title"].as_str().unwrap_or_default().to_string();
+        let slen = record["slen"].as_u64().unwrap_or(0);
+        let (start, stop) = range.unwrap_or((1, slen));
+        if slen > 0 && stop > slen {
+            return Err(ProviderError::Failed(format!("{accession} is {slen} bp long; the range ends past it.")));
+        }
+        if stop - start + 1 > max_len {
+            return Err(ProviderError::Failed(format!(
+                "{accession} is {} bp - too long to align whole. Give a range, like {accession}:1000-2500.",
+                stop - start + 1
+            )));
+        }
+        let (start_s, stop_s) = (start.to_string(), stop.to_string());
+        let strand = if minus { "2" } else { "1" };
+        let seq = self
+            .fetch_fasta_seq(
+                &[("db", "nucleotide"), ("id", accession), ("seq_start", &start_s), ("seq_stop", &stop_s), ("strand", strand), ("rettype", "fasta"), ("retmode", "text")],
+                Duration::from_secs(60),
+            )
+            .await?;
+        Ok(seq.filter(|s| !s.is_empty()).map(|s| (title, s)))
+    }
+
     /// The genes annotated over one GenBank accession's 1-based inclusive
     /// range `[start, stop]` - which gene a BLAST hit actually lies in,
     /// from the record's own feature table rather than its title (a

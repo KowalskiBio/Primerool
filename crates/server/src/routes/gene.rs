@@ -72,7 +72,7 @@ pub async fn search_gene(State(state): State<AppState>, Json(req): Json<SearchGe
                 None => providers::species_map::ensembl_to_binomial_or_guess(&species),
             };
             format!(
-                "No gene '{gene_name_raw}' found in NCBI for {organism} - neither NCBI Gene nor its annotated GenBank proteins have it. Check the spelling of the gene and organism, or BLAST the gene's sequence instead."
+                "No gene '{gene_name_raw}' found in NCBI for {organism} - neither NCBI Gene nor its annotated GenBank proteins have it. Check the spelling of the gene and organism. Names used in papers are often not NCBI gene symbols (the gene may be annotated only as a locus tag or 'hypothetical protein'), and strain-specific genes may be absent from this strain - BLAST the gene's sequence instead."
             )
         } else {
             format!(

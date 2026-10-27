@@ -89,6 +89,11 @@ export default function GeneNotFoundPanel({ message, species, organismLabel, onU
         />
       </div>
 
+      <p className="mt-2 text-xs text-ink-muted">
+        A gene described in a paper may not be in this strain at all - untick the organism
+        filter to find which genomes carry it, then pick one of those as the reference.
+      </p>
+
       {running && <BlastProgress progress={blastProgress.progress} />}
       {error && <div role="alert" className="mt-3 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{error}</div>}
 

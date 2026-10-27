@@ -32,8 +32,11 @@ const MAX_VARIANTS = 512;
 
 /** Per row: its aligned span and prefix counts (length + 1) of mismatches
  * and internal gaps - how many fall in columns `[c0, c1)` is
- * `mis[c1] - mis[c0]`. A mismatch is a base differing from its column's
- * majority - with two sequences, any differing column, both sides. */
+ * `mis[c1] - mis[c0]`. With a query row (`ref`), a mismatch is a base
+ * differing from the query's in that column - the query itself never has
+ * any, and bases opposite a query gap are insertions, not mismatches.
+ * Without one, it's a base differing from its column's majority - with two
+ * sequences, any differing column, both sides. */
 interface RowTrack {
   start: number;
   end: number;
@@ -41,9 +44,10 @@ interface RowTrack {
   gap: Int32Array;
 }
 
-function rowTracks(a: AlignmentAnalysis): RowTrack[] {
+function rowTracks(a: AlignmentAnalysis, ref: number): RowTrack[] {
   const pair = a.rows.length === 2;
-  return a.rows.map((r) => {
+  const refSeq = ref >= 0 ? a.rows[ref].seq.toUpperCase() : null;
+  return a.rows.map((r, i) => {
     const start = r.seq.search(/[^-.]/);
     let end = r.seq.length - 1;
     while (end >= 0 && (r.seq[end] === '-' || r.seq[end] === '.')) end--;
@@ -52,7 +56,10 @@ function rowTracks(a: AlignmentAnalysis): RowTrack[] {
     for (let c = 0; c < a.length; c++) {
       const b = r.seq[c] ?? '-';
       const isGap = b === '-' || b === '.';
-      const isMis = !isGap && (pair ? !a.conserved[c] && !a.gapped[c] : b !== a.consensus[c]);
+      const q = refSeq?.[c] ?? '-';
+      const isMis =
+        !isGap &&
+        (refSeq ? i !== ref && q !== '-' && q !== '.' && b.toUpperCase() !== q : pair ? !a.conserved[c] && !a.gapped[c] : b !== a.consensus[c]);
       mis[c + 1] = mis[c] + (isMis ? 1 : 0);
       gap[c + 1] = gap[c] + (isGap && c > start && c < end ? 1 : 0);
     }
@@ -128,8 +135,8 @@ interface Selection {
 interface Props {
   alignment: string;
   rows: AlignedRow[];
-  /** The query's row id (the loaded sequence) - first, marked, and never
-   * hidden. */
+  /** The reference (query) row's id - the loaded sequence unless swapped;
+   * first, marked, and never hidden. */
   queryId?: string | null;
   /** Each other row's percent identity to the query, when there is one. */
   identities?: Map<string, number>;
@@ -148,8 +155,8 @@ interface Props {
 
 /** The alignment as Oligool draws it: one strip per sequence on a shared
  * column axis. Zoomed out it is an overview - each sequence a grey bar
- * over its aligned span, red ticks where a base differs from the column's
- * majority, breaks at gaps; zoomed in far enough the bars become letters.
+ * over its aligned span, red ticks where a base differs from the query's
+ * (without a query, the column's majority), breaks at gaps; zoomed in far enough the bars become letters.
  * Drag across a row to select bases, then right-click to make them a
  * forward or reverse primer. */
 export default function AlignmentView({ alignment, rows: allRows, queryId, identities, hiddenRows, onHiddenRowsChange, primers, designRange, onPickPrimer, onSetDesignRange }: Props) {
@@ -184,7 +191,8 @@ export default function AlignmentView({ alignment, rows: allRows, queryId, ident
   const totalH = TOP + rows.length * ROW_H + 4;
   /** Whether the canvas (not the plain-text fallback) is on screen. */
   const drawable = allRows.length >= 2 && len > 0;
-  const tracks = useMemo(() => rowTracks(a), [a]);
+  const queryIndex = rows.findIndex((r) => r.id === queryId);
+  const tracks = useMemo(() => rowTracks(a, queryIndex), [a, queryIndex]);
 
   // A new alignment or a different set of rows: drop the selection.
   const selScope = `${alignment}\0${hiddenRows.join('\n')}`;
@@ -663,7 +671,7 @@ export default function AlignmentView({ alignment, rows: allRows, queryId, ident
       </div>
       <p className="mb-2 text-xs text-ink-muted">
         {rows.length} sequences{rows.length < allRows.length ? ` shown (of ${allRows.length})` : ''} · {fmt(len)} columns · <span className="text-ink">{fmt(identical)}</span> identical ({pct(identical)}) ·{' '}
-        <span className="aln-mismatch rounded px-0.5">{fmt(mismatch)}</span> mismatch{mismatch === 1 ? '' : 'es'} · {fmt(gapColumns)} with gaps. Mismatches are against each column&apos;s majority among the rows shown.
+        <span className="aln-mismatch rounded px-0.5">{fmt(mismatch)}</span> mismatch{mismatch === 1 ? '' : 'es'} · {fmt(gapColumns)} with gaps. {queryIndex >= 0 ? 'Red bases differ from the reference (first row).' : <>Mismatches are against each column&apos;s majority among the rows shown.</>}
       </p>
       <div
         ref={scrollRef}
@@ -728,7 +736,7 @@ function RowsPicker({
           Show all
         </Button>
         <Button size="sm" variant="ghost" onClick={() => onChange(rows.slice(1).map((r) => r.id))}>
-          {queryId ? 'Query only' : 'First only'}
+          {queryId ? 'Reference only' : 'First only'}
         </Button>
       </div>
       <div className="flex flex-col gap-1 pt-1">
@@ -740,12 +748,12 @@ function RowsPicker({
               key={`${i}-${r.id}`}
               checked={on}
               disabled={isQuery || (on && shown <= 1)}
-              title={isQuery ? 'The query (loaded sequence) always stays shown' : r.id}
+              title={isQuery ? 'The reference always stays shown' : r.id}
               label={
                 <span className="flex min-w-0 flex-1 items-baseline justify-between gap-2">
                   <span className="truncate font-mono text-xs">{r.id}</span>
                   {identities?.has(r.id) && (
-                    <span className="shrink-0 text-[11px] tabular-nums text-ink-faint" title="Identity to the query, over the columns both have a base">
+                    <span className="shrink-0 text-[11px] tabular-nums text-ink-faint" title="Identity to the reference, over the columns both have a base">
                       {identities.get(r.id)!.toFixed(1)}%
                     </span>
                   )}

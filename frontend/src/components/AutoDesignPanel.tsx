@@ -10,6 +10,7 @@ import PrimerCard from './PrimerCard';
 import ArmsDesignPanel from './ArmsDesignPanel';
 import GeneralPrimerPreview from './GeneralPrimerPreview';
 import { generalSelection } from '../utils/generalSelection';
+import { isCustomSequence } from '../utils/sequenceData';
 import SegmentedControl from './ui/SegmentedControl';
 import Field from './ui/Field';
 import TextInput from './ui/TextInput';
@@ -55,7 +56,11 @@ interface Props {
   conservedPanel: ReactNode;
 }
 
-export default function AutoDesignPanel({ data, species, apiSource, primerMode, onPrimerModeChange, onSelect, idtCredentials, truncateIntrons, conservedPanel }: Props) {
+export default function AutoDesignPanel({ data, species, apiSource, primerMode: requestedMode, onPrimerModeChange, onSelect, idtCredentials, truncateIntrons, conservedPanel }: Props) {
+  // A pasted sequence has no flanks or exon junctions, so WGA and Junction
+  // aren't offered for it; a mode it can't use falls back to General.
+  const custom = isCustomSequence(data);
+  const primerMode: PrimerMode = custom && (requestedMode === 'flanking' || requestedMode === 'junction') ? 'general' : requestedMode;
   const [junctionPos, setJunctionPos] = useSessionState('auto.junctionPos', '');
   const [overlapMin, setOverlapMin] = useSessionState('auto.overlapMin', 6);
   const [overlapMax, setOverlapMax] = useSessionState('auto.overlapMax', 12);
@@ -195,11 +200,15 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode, 
         value={primerMode}
         onChange={onPrimerModeChange}
         options={[
-          { value: 'general', label: 'General', title: 'The best primer pair anywhere in the gene' },
-          { value: 'flanking', label: 'WGA', title: 'Primers in flanking regions' },
-          { value: 'junction', label: 'Junction', title: 'Exon-exon junction primers' },
-          { value: 'arms', label: 'SNP/indel', title: 'ARMS-PCR allele-specific primers' },
-          { value: 'conserved', label: 'Conserved', title: 'Primers in a region conserved across species or sequences, from a multi-sequence alignment' },
+          { value: 'general' as const, label: 'General', title: 'The best primer pair anywhere in the gene' },
+          ...(custom
+            ? []
+            : [
+                { value: 'flanking' as const, label: 'WGA', title: 'Primers in flanking regions' },
+                { value: 'junction' as const, label: 'Junction', title: 'Exon-exon junction primers' },
+              ]),
+          { value: 'arms' as const, label: 'SNP/indel', title: 'ARMS-PCR allele-specific primers' },
+          { value: 'conserved' as const, label: 'Conserved', title: 'Primers in a region conserved across species or sequences, from a multi-sequence alignment' },
         ]}
       />
 

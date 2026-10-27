@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Transcript } from './api/gene';
 import type { SequenceData } from './api/sequence';
+import type { BlastHit } from './api/blast';
+import { isCustomSequence as isCustom } from './utils/sequenceData';
 import { EMPTY_SELECTIONS, type Selection, type Selections } from './utils/regionMapping';
 import { loadPrimerSets, primerSetKey, savePrimerSets } from './utils/primerSetStore';
 import Section from './components/ui/Section';
@@ -68,13 +70,20 @@ function App() {
   // the user is analyzing can still be found.
   const [selectedSpecies, setSelectedSpecies] = useSessionState('app.selectedSpecies', 'homo_sapiens');
   const [apiSource, setApiSource] = useSessionState<'ensembl' | 'ncbi'>('app.apiSource', 'ncbi');
-  // The input panel's mode. Sections 2-4 (transcript, sequence, automatic
-  // design) belong to the gene search, so they're hidden - not cleared -
-  // while the FASTA/BLAST mode is shown, and come back as they were.
+  // The input panel's mode. Each mode has its own sequence: the gene
+  // search's (section 2's transcript) and the pasted one. Sections 3-4 show
+  // the current mode's, remounted on a switch so no panel state crosses
+  // over; the other mode's sequence is kept and comes back on switching back.
   const [inputMode, setInputMode] = useSessionState<'gene' | 'fasta'>('input.inputMode', 'gene');
   const geneMode = inputMode === 'gene';
   const [transcripts, setTranscripts] = useSessionState<Transcript[]>('app.transcripts', []);
   const [sequenceData, setSequenceData] = useSessionState<SequenceData | null>('app.sequenceData', null);
+  const [pastedData, setPastedData] = useSessionState<SequenceData | null>('app.pastedData', null);
+  // The pasted sequence's best BLAST hit, kept with the sequence it was for,
+  // so it only names the homologs of that same sequence.
+  const [pasteHint, setPasteHint] = useSessionState<{ sequence: string; hit: BlastHit } | null>('app.pasteHint', null);
+  const activeData = geneMode ? sequenceData : pastedData;
+  const pasteHit = pastedData && pasteHint?.sequence === pastedData.gene_seq ? pasteHint.hit : null;
   const [truncateIntrons, setTruncateIntrons] = useSessionState('app.truncateIntrons', true);
   const [storedSelections, setSelections] = useSessionState<Selections>('app.selections', EMPTY_SELECTIONS);
   // Mirrors of TranscriptPanel's own fetch options (session keys
@@ -92,7 +101,7 @@ function App() {
   // sets made on it, and every change is saved back. Switched at render
   // time, not in an effect, so the save below can never write one
   // sequence's sets under another's key.
-  const setKey = primerSetKey(sequenceData);
+  const setKey = primerSetKey(activeData);
   // Starts at the mounted sequence's key, so a restored session's own
   // `selections` aren't replaced by that sequence's stored sets.
   const [loadedSetKey, setLoadedSetKey] = useState<string | null>(() => setKey);
@@ -235,7 +244,10 @@ function App() {
     setSelections((prev) => ({ ...prev, [key]: value, ...(dropsAlleleTwin ? { geneProbeAlt: null } : {}) }));
   }
 
-  const isCustomSequence = sequenceData?.transcript_id === 'custom';
+  const isCustomSequence = isCustom(activeData);
+  // Sections 3-4 remount on a mode switch, and on each new pasted sequence,
+  // so no panel state (design results, an alignment) outlives its sequence.
+  const sectionKey = geneMode ? 'gene' : `paste|${setKey}`;
 
   const session = useSession();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -332,7 +344,14 @@ function App() {
 
       <main className="mx-auto max-w-[110rem] px-4 py-6 sm:px-6 lg:px-8">
         <Section step={1} title="Input Sequence" persistKey="section.input">
-          <InputPanel onGeneFound={handleGeneFound} inputMode={inputMode} onInputModeChange={setInputMode} onSpeciesSelectionChange={setSelectedSpecies} />
+          <InputPanel
+            onGeneFound={handleGeneFound}
+            inputMode={inputMode}
+            onInputModeChange={setInputMode}
+            onSpeciesSelectionChange={setSelectedSpecies}
+            onUseSequence={setPastedData}
+            onIdentified={(hit, sequence) => setPasteHint({ sequence, hit })}
+          />
         </Section>
 
         {geneMode && transcripts.length > 0 && (
@@ -350,10 +369,10 @@ function App() {
           </Section>
         )}
 
-        {geneMode && sequenceData && (
-          <Section step={3} title="Sequence & Features" persistKey="section.features">
+        {activeData && (
+          <Section key={`${sectionKey}|3`} step={3} title="Sequence & Features" persistKey="section.features">
             <SequenceFeaturesPanel
-              data={sequenceData}
+              data={activeData}
               selections={selections}
               truncateIntrons={truncateIntrons}
               primerMode={primerMode}
@@ -368,23 +387,27 @@ function App() {
           </Section>
         )}
 
-        {geneMode && sequenceData && !isCustomSequence && (
-          <Section step={4} title="Primer Design: Automatic" persistKey="section.auto">
+        {activeData && (
+          <Section key={`${sectionKey}|4`} step={4} title="Primer Design: Automatic" persistKey="section.auto">
             <AutoDesignPanel
-              data={sequenceData}
-              species={species}
-              apiSource={apiSource}
+              data={activeData}
+              species={isCustomSequence ? selectedSpecies : species}
+              apiSource={isCustomSequence ? 'ncbi' : apiSource}
               primerMode={primerMode}
               onPrimerModeChange={setPrimerMode}
               onSelect={handleSelect}
               idtCredentials={idtReady ? idtCredentials : undefined}
               truncateIntrons={truncateIntrons}
               conservedPanel={
-                <AlignmentPanel
-                  loadedSequence={sequenceData}
-                  geneTranscripts={transcripts.length > 0 ? transcripts : undefined}
-                  geneContext={{ geneName, species, apiSource, includeIntrons, includeUtr, upstreamBp: upFlank, downstreamBp: downFlank }}
-                />
+                isCustomSequence ? (
+                  <AlignmentPanel loadedSequence={activeData} homologHint={pasteHit ? { gene: pasteHit.gene_symbol, organism: pasteHit.organism } : undefined} />
+                ) : (
+                  <AlignmentPanel
+                    loadedSequence={activeData}
+                    geneTranscripts={transcripts.length > 0 ? transcripts : undefined}
+                    geneContext={{ geneName, species, apiSource, includeIntrons, includeUtr, upstreamBp: upFlank, downstreamBp: downFlank }}
+                  />
+                )
               }
             />
           </Section>

@@ -4,7 +4,10 @@ import { loadBlastHit, searchGene } from '../api/gene';
 import { ApiError } from '../api/client';
 import { blastSequence, type BlastHit } from '../api/blast';
 import type { Transcript } from '../api/gene';
+import type { SequenceData } from '../api/sequence';
 import { isAccessionId } from '../utils/dna';
+import { parseMultiFasta } from '../utils/fasta';
+import { customSequenceData } from '../utils/sequenceData';
 import { SPECIES_BY_KINGDOM, KINGDOM_LABELS, findKingdomForSpecies, type Kingdom, type SpeciesOption } from '../utils/species';
 import BlastProgress from './BlastProgress';
 import BlastResultsTable from './BlastResultsTable';
@@ -31,6 +34,13 @@ interface Props {
    * `syncDropdownsToSpecies`) - lets App track "the organism the user is
    * analyzing" live, not just whenever the next gene search happens. */
   onSpeciesSelectionChange?: (species: string) => void;
+  /** The pasted sequence, loaded as-is for the sequence map and primer
+   * design (FASTA mode's "Use This Sequence"). */
+  onUseSequence: (data: SequenceData) => void;
+  /** The best BLAST hit of a pasted sequence (`sequence`, as "Use This
+   * Sequence" would load it) - names the gene and organism its homologs
+   * are collected for. */
+  onIdentified: (hit: BlastHit, sequence: string) => void;
 }
 
 /** Organism option content: "Common (Latin)" with the latin name italic, or
@@ -49,7 +59,7 @@ function speciesContent(s: SpeciesOption): ReactNode {
   );
 }
 
-export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: setInputMode, onSpeciesSelectionChange }: Props) {
+export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: setInputMode, onSpeciesSelectionChange, onUseSequence, onIdentified }: Props) {
   const [lastOrganism] = useState(readLastOrganism);
   const [apiSource, setApiSource] = useSessionState<'ensembl' | 'ncbi'>('input.apiSource', lastOrganism.apiSource ?? 'ncbi');
   const [kingdom, setKingdom] = useSessionState<Kingdom>('input.kingdom', lastOrganism.kingdom ?? 'animals');
@@ -197,12 +207,34 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
         return;
       }
       setBlastHits(hits);
+      const first = parseMultiFasta(raw)[0];
+      if (first) onIdentified(hits.find((h) => h.gene_symbol) ?? hits[0], first.seq);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       blastProgress.finish();
       setBlastRunning(false);
     }
+  }
+
+  function useSequence() {
+    setError(null);
+    setWarning(null);
+    setSuccess(null);
+    if (isAccessionId(fastaInput.trim())) {
+      setError('That looks like an accession ID - identify it with BLAST, or paste the sequence itself.');
+      return;
+    }
+    const records = parseMultiFasta(fastaInput);
+    const first = records[0];
+    if (!first || first.seq.length < 20) {
+      setError('Paste a DNA sequence of at least 20 bp.');
+      return;
+    }
+    const name = /^seq\d+$/.test(first.id) ? 'Pasted sequence' : first.id.split(/\s+/)[0];
+    onUseSequence(customSequenceData(name, first.seq));
+    const more = records.length > 1 ? ` Only the first of the ${records.length} pasted sequences is used - paste the others into the alignment.` : '';
+    setSuccess(`Loaded ${name} (${first.seq.length.toLocaleString('en-US')} bp). Scroll down to see it and design primers.${more}`);
   }
 
   function useBlastHit(hit: BlastHit) {
@@ -370,7 +402,10 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
           </Field>
 
           <div className="flex flex-wrap gap-3">
-            <Button variant="primary" disabled={blastRunning} onClick={() => void identifySequence()} className="w-full sm:w-auto">
+            <Button variant="primary" onClick={useSequence} className="w-full sm:w-auto" title="Load the pasted sequence as it is, to view it and design primers on it">
+              Use This Sequence
+            </Button>
+            <Button disabled={blastRunning} onClick={() => void identifySequence()} className="w-full sm:w-auto" title="Find what the sequence is - also names the gene and organism its homologs are collected for">
               {blastRunning ? 'Running BLAST…' : 'Identify Sequence (NCBI BLAST)'}
             </Button>
             <Button onClick={() => setShowSnpBatch((v) => !v)} className="w-full sm:w-auto">

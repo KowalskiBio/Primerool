@@ -33,6 +33,8 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
   const [rev, setRev] = useState(0);
   const [hasContent, setHasContent] = useState(false);
   const [pending, setPending] = useState<PrimeroolSession | null>(readAutosave);
+  // Whether `pending` is last visit's autosave (forgettable) or a loaded file.
+  const [pendingIsAutosave, setPendingIsAutosave] = useState(true);
 
   // Track "is there anything to save" and autosave, debounced.
   useEffect(() => {
@@ -82,8 +84,10 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
       },
       loadFile: async (file: File) => {
         setPending(parseSessionText(await file.text()));
+        setPendingIsAutosave(false);
       },
       pending,
+      pendingIsAutosave,
       confirmPending: () => {
         if (!pending) return;
         store.setSeed(pending.state);
@@ -92,8 +96,12 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
         setRev((r) => r + 1);
       },
       dismissPending: () => setPending(null),
+      forgetPending: () => {
+        setPending(null);
+        clearAutosave();
+      },
     }),
-    [hasContent, pending, store],
+    [hasContent, pending, pendingIsAutosave, store],
   );
 
   return (

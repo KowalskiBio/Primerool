@@ -8,12 +8,15 @@ interface Props {
   session: PrimeroolSession | null;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Shown only for last visit's autosave: drop it for good instead of
+   * offering it again on the next visit. */
+  onForget?: () => void;
 }
 
 /** "Restore session?" - a preview of a loaded session file (or last
  * visit's autosave) before it replaces the current work. Same small
  * centred shape as `ArmsTwinDialog`. */
-export default function SessionRestoreDialog({ session, onConfirm, onCancel }: Props) {
+export default function SessionRestoreDialog({ session, onConfirm, onCancel, onForget }: Props) {
   useEffect(() => {
     if (!session) return;
     const onKey = (e: KeyboardEvent) => {
@@ -48,6 +51,11 @@ export default function SessionRestoreDialog({ session, onConfirm, onCancel }: P
         </dl>
 
         <div className="flex justify-end gap-2">
+          {onForget && (
+            <Button type="button" variant="danger" className="mr-auto" onClick={onForget} title="Delete the autosaved session so it isn't offered again">
+              Forget
+            </Button>
+          )}
           <Button type="button" onClick={onCancel}>
             Cancel
           </Button>

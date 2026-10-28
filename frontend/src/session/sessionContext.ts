@@ -54,8 +54,12 @@ export interface SessionControls {
   /** A session waiting on the "Restore session?" confirmation - from a
    * loaded file, or last visit's autosave. */
   pending: PrimeroolSession | null;
+  /** Whether `pending` is last visit's autosave rather than a loaded file. */
+  pendingIsAutosave: boolean;
   confirmPending: () => void;
   dismissPending: () => void;
+  /** Dismisses `pending` and deletes the autosave, so it isn't offered again. */
+  forgetPending: () => void;
 }
 
 export const SessionControlsContext = createContext<SessionControls | null>(null);

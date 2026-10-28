@@ -151,6 +151,9 @@ interface Props {
   onPickPrimer: (side: 'F' | 'R', pick: AlignPick, degenerate: boolean) => void;
   /** Sets the "Design Primers in Conserved Region" column range. */
   onSetDesignRange: (colStart: number, colEnd: number) => void;
+  /** Column ranges `[colStart, colEnd)` of a designed primer (or pair)
+   * picked in the results below: banded down every row, and scrolled to. */
+  highlight?: { colStart: number; colEnd: number }[] | null;
 }
 
 /** The alignment as Oligool draws it: one strip per sequence on a shared
@@ -159,7 +162,7 @@ interface Props {
  * (without a query, the column's majority), breaks at gaps; zoomed in far enough the bars become letters.
  * Drag across a row to select bases, then right-click to make them a
  * forward or reverse primer. */
-export default function AlignmentView({ alignment, rows: allRows, queryId, identities, hiddenRows, onHiddenRowsChange, primers, designRange, onPickPrimer, onSetDesignRange }: Props) {
+export default function AlignmentView({ alignment, rows: allRows, queryId, identities, hiddenRows, onHiddenRowsChange, primers, designRange, onPickPrimer, onSetDesignRange, highlight }: Props) {
   const rows = useMemo(() => allRows.filter((r) => r.id === queryId || !hiddenRows.includes(r.id)), [allRows, hiddenRows, queryId]);
   const a = useMemo(() => analyzeAlignment(rows), [rows]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -318,6 +321,19 @@ export default function AlignmentView({ alignment, rows: allRows, queryId, ident
         ctx.setLineDash([]);
       }
 
+      // Highlighted designed primer(s): a stronger band, outlined.
+      for (const h of highlight ?? []) {
+        const hx = x(h.colStart);
+        const hw = Math.max(2, (h.colEnd - h.colStart) * cellW);
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = col.accent;
+        ctx.fillRect(hx, RULER_H, hw, PRIMER_TRACK_H + rows.length * ROW_H);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = col.accent;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(hx + 0.75, RULER_H + 0.75, hw - 1.5, PRIMER_TRACK_H + rows.length * ROW_H - 1.5);
+      }
+
       // Primer track.
       for (const p of [primers.F, primers.R]) {
         if (!p) continue;
@@ -438,7 +454,21 @@ export default function AlignmentView({ alignment, rows: allRows, queryId, ident
 
   useEffect(() => {
     scheduleDraw();
-  }, [scheduleDraw, a, tracks, rows, width, totalH, vf, labelW, sel, hover?.row, primers, designRange?.colStart, designRange?.colEnd, themeTick]);
+  }, [scheduleDraw, a, tracks, rows, width, totalH, vf, labelW, sel, hover?.row, primers, designRange?.colStart, designRange?.colEnd, highlight, themeTick]);
+
+  // A newly highlighted primer: bring the map on screen and, when the
+  // highlight lies outside the columns in view, center it horizontally.
+  useEffect(() => {
+    if (!highlight?.length) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    const from = Math.min(...highlight.map((h) => h.colStart)) * cellW;
+    const to = Math.max(...highlight.map((h) => h.colEnd)) * cellW;
+    if (from < el.scrollLeft || to > el.scrollLeft + seqW) el.scrollLeft = Math.max(0, (from + to) / 2 - seqW / 2);
+    // Only on a new highlight - not on every zoom or resize after it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight]);
 
   /** Zooms to `nextFraction`, keeping the column under `anchorPx` (from
    * the sequence area's left edge) where it is. */

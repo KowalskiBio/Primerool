@@ -204,6 +204,11 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
   const [degenerate, setDegenerate] = useSessionState('align.degenerate', false);
   const [hiddenRows, setHiddenRows] = useSessionState<string[]>('align.hiddenRows', []);
   const [primers, setPrimers] = useSessionState<AlignPrimers>('align.primers', NO_ALIGN_PRIMERS);
+  // The designed candidate/pair clicked in the results, highlighted on the map.
+  const [picked, setPicked] = useState<{ key: string; ranges: { colStart: number; colEnd: number }[] } | null>(null);
+  function togglePicked(key: string, ranges: { colStart: number; colEnd: number }[]) {
+    setPicked((prev) => (prev?.key === key ? null : { key, ranges }));
+  }
   // The query first, then the rest by percent identity to it, most similar
   // first (larger overlap breaks ties). Without a query: MAFFT's order.
   const { alignedRows, identities } = useMemo(() => {
@@ -244,6 +249,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     setCandidates(null);
     setPairs(null);
     setPrimers(NO_ALIGN_PRIMERS);
+    setPicked(null);
     setHiddenRows([]);
     const records = parseMultiFasta(fastaText);
     const extraRecords: { id: string; seq: string }[] = [];
@@ -326,6 +332,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     setDesignError(null);
     setCandidates(null);
     setPairs(null);
+    setPicked(null);
     setDesigning(true);
     let req: DesignConservedRequest;
     if (region && 'window' in region) {
@@ -507,6 +514,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
               setColStart(start);
               setColEnd(end);
             }}
+            highlight={picked?.ranges}
           />
           <AlignmentPrimersPanel rows={visibleRows} primers={primers} onChange={setPrimer} />
           <details className="mt-2">
@@ -554,10 +562,13 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
 
           {candidates && candidates.length > 0 && (
             <div className="mt-4">
-              <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Conserved-Region Candidates</h4>
+              <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Conserved-Region Candidates</h4>
+              <p className="mb-2 text-xs text-ink-muted">Click a row to highlight it on the alignment map.</p>
               <ResultsTable
                 rows={candidates}
-                keyOf={(c, i) => `${i}-${c.sequence}`}
+                keyOf={(c, i) => `c${i}-${c.sequence}`}
+                selectedKey={picked?.key}
+                onRowClick={(c, i) => togglePicked(`c${i}-${c.sequence}`, [{ colStart: c.col_start, colEnd: c.col_end }])}
                 columns={[
                   { header: "Sequence (5'→3')", render: (c) => <DesignedSeq oligo={c} />, className: 'font-mono text-ink' },
                   { header: 'Covers', render: (c) => <CoverageBadge coverage={c.coverage} /> },
@@ -572,10 +583,18 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
 
           {pairs && pairs.length > 0 && (
             <div className="mt-4">
-              <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Conserved-Region Pairs</h4>
+              <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Conserved-Region Pairs</h4>
+              <p className="mb-2 text-xs text-ink-muted">Click a row to highlight its primers on the alignment map.</p>
               <ResultsTable
                 rows={pairs}
-                keyOf={(p, i) => `${i}-${p.left.sequence}`}
+                keyOf={(p, i) => `p${i}-${p.left.sequence}`}
+                selectedKey={picked?.key}
+                onRowClick={(p, i) =>
+                  togglePicked(`p${i}-${p.left.sequence}`, [
+                    { colStart: p.left.col_start, colEnd: p.left.col_end },
+                    { colStart: p.right.col_start, colEnd: p.right.col_end },
+                  ])
+                }
                 columns={[
                   { header: 'Left', render: (p) => <DesignedSeq oligo={p.left} label="Forward primer" />, className: 'font-mono text-ink' },
                   { header: 'Right', render: (p) => <DesignedSeq oligo={p.right} label="Reverse primer" />, className: 'font-mono text-ink' },

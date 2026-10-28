@@ -29,6 +29,10 @@ interface Props<T> {
    * clicked. The caller owns the asc → desc → none cycle and re-sorting
    * `rows` accordingly. */
   onSortChange?: (columnIndex: number) => void;
+  /** Makes rows clickable (e.g. to highlight a result elsewhere); the row
+   * whose key is `selectedKey` is marked selected. */
+  onRowClick?: (row: T, index: number) => void;
+  selectedKey?: string | null;
 }
 
 /** One shared, parameterized table for every primer/probe results list
@@ -37,7 +41,7 @@ interface Props<T> {
  * string builders for these; collapsed into one component here since the
  * columns (index, sequence, Tm, GC%, hairpin/homodimer, an action button)
  * are the only thing that actually varies between them. */
-export default function ResultsTable<T>({ columns, rows, keyOf, sort = null, onSortChange }: Props<T>) {
+export default function ResultsTable<T>({ columns, rows, keyOf, sort = null, onSortChange, onRowClick, selectedKey = null }: Props<T>) {
   return (
     <div className="rounded-lg border border-line">
       {/* `table-fixed` + `break-words` (not `overflow-x-auto` + natural
@@ -72,15 +76,24 @@ export default function ResultsTable<T>({ columns, rows, keyOf, sort = null, onS
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={keyOf(row, i)} className="border-b border-line bg-surface text-xs text-ink-muted last:border-0 hover:bg-surface-2">
+          {rows.map((row, i) => {
+            const key = keyOf(row, i);
+            const selected = selectedKey !== null && key === selectedKey;
+            return (
+            <tr
+              key={key}
+              aria-selected={onRowClick ? selected : undefined}
+              onClick={onRowClick ? () => onRowClick(row, i) : undefined}
+              className={`border-b border-line text-xs text-ink-muted last:border-0 hover:bg-surface-2 ${selected ? 'bg-accent-subtle shadow-[inset_3px_0_0_var(--accent)]' : 'bg-surface'} ${onRowClick ? 'cursor-pointer' : ''}`}
+            >
               {columns.map((c, ci) => (
                 <td key={ci} className={`break-words px-2 py-2 ${c.className || ''}`}>
                   {c.render(row, i)}
                 </td>
               ))}
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

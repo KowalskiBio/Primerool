@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import { loadBlastHit, searchGene } from '../api/gene';
 import { ApiError } from '../api/client';
@@ -8,7 +8,7 @@ import type { SequenceData } from '../api/sequence';
 import { isAccessionId } from '../utils/dna';
 import { parseMultiFasta } from '../utils/fasta';
 import { customSequenceData } from '../utils/sequenceData';
-import { SPECIES_BY_KINGDOM, KINGDOM_LABELS, findKingdomForSpecies, type Kingdom } from '../utils/species';
+import { SPECIES_BY_KINGDOM, KINGDOM_LABELS, findKingdomForSpecies, type Kingdom, type SpeciesOption } from '../utils/species';
 import BlastProgress from './BlastProgress';
 import BlastResultsTable from './BlastResultsTable';
 import GeneNotFoundPanel from './GeneNotFoundPanel';
@@ -16,7 +16,7 @@ import SnpBatchPanel from './SnpBatchPanel';
 import SegmentedControl from './ui/SegmentedControl';
 import Field from './ui/Field';
 import TextInput from './ui/TextInput';
-import Select from './ui/Select';
+import RichSelect from './ui/RichSelect';
 import Button from './ui/Button';
 import { controlClasses } from './ui/TextInput';
 import { useBlastProgress } from '../utils/useBlastProgress';
@@ -41,6 +41,22 @@ interface Props {
    * Sequence" would load it) - names the gene and organism its homologs
    * are collected for. */
   onIdentified: (hit: BlastHit, sequence: string) => void;
+}
+
+/** Organism option content: "Common (Latin)" with the latin name italic, or
+ * just the italic latin name for bacteria/archaea/fungi/protists; strain
+ * designations stay upright (nomenclature convention). */
+function speciesContent(s: SpeciesOption): ReactNode {
+  if (!s.rich) return s.label;
+  const { common, latin, strain } = s.rich;
+  return (
+    <>
+      {common ? `${common} (` : null}
+      <em>{latin}</em>
+      {strain ? ` ${strain}` : null}
+      {common ? ')' : null}
+    </>
+  );
 }
 
 export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: setInputMode, onSpeciesSelectionChange, onUseSequence, onIdentified }: Props) {
@@ -294,24 +310,19 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
               </div>
             </Field>
 
-            <Field label="Kingdom" className="w-full sm:w-56">
-              <Select
-                aria-label="Kingdom"
+            <Field label="Target group" className="w-full sm:w-56">
+              <RichSelect
+                aria-label="Target group"
                 value={kingdom}
-                onChange={(e) => {
-                  const k = e.target.value as Kingdom;
+                onChange={(v) => {
+                  const k = v as Kingdom;
                   const first = SPECIES_BY_KINGDOM[k][0]?.value || '';
                   setKingdom(k);
                   setSpeciesValue(first);
                   onSpeciesSelectionChange?.(first);
                 }}
-              >
-                {(Object.keys(KINGDOM_LABELS) as Kingdom[]).map((k) => (
-                  <option key={k} value={k}>
-                    {KINGDOM_LABELS[k]}
-                  </option>
-                ))}
-              </Select>
+                options={(Object.keys(KINGDOM_LABELS) as Kingdom[]).map((k) => ({ value: k, label: KINGDOM_LABELS[k] }))}
+              />
             </Field>
 
             <Field label="Organism" className="w-full sm:w-72">
@@ -328,21 +339,15 @@ export default function InputPanel({ onGeneFound, inputMode, onInputModeChange: 
                   draggable={false}
                   className="pointer-events-none absolute bottom-[calc(100%-37px)] left-1/2 z-10 hidden h-[170px] w-auto -translate-x-1/2 select-none opacity-90 xl:block"
                 />
-                <Select
+                <RichSelect
                   aria-label="Species"
                   value={speciesValue}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                  onChange={(v) => {
                     setSpeciesValue(v);
                     onSpeciesSelectionChange?.(v === '__custom__' ? customSpecies.trim() : v);
                   }}
-                >
-                  {speciesOptions.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </Select>
+                  options={speciesOptions.map((s) => ({ value: s.value, label: s.label, content: speciesContent(s) }))}
+                />
               </div>
             </Field>
 

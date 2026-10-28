@@ -51,7 +51,7 @@ export const SPECIES_BY_KINGDOM: Record<Kingdom, SpeciesOption[]> = {
   ],
   plants: [
     { label: 'Arabidopsis thaliana', value: 'arabidopsis_thaliana', rich: { latin: 'Arabidopsis thaliana' } },
-    { label: 'Rice (Oryza sativa Japonica)', value: 'oryza_sativa', rich: { common: 'Rice', latin: 'Oryza sativa Japonica' } },
+    { label: 'Rice (Oryza sativa Japonica)', value: 'oryza_sativa', rich: { common: 'Rice', latin: 'Oryza sativa', strain: 'Japonica' } },
     { label: 'Maize (Zea mays)', value: 'zea_mays', rich: { common: 'Maize', latin: 'Zea mays' } },
     { label: 'Wheat (Triticum aestivum)', value: 'triticum_aestivum', rich: { common: 'Wheat', latin: 'Triticum aestivum' } },
     { label: 'Tomato (Solanum lycopersicum)', value: 'solanum_lycopersicum', rich: { common: 'Tomato', latin: 'Solanum lycopersicum' } },

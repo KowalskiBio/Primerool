@@ -21,7 +21,7 @@ Primerool is a cloud-based, local web application that allows molecular biologis
    - Retrieves all annotated transcripts, canonical transcript auto-selection, full genomic DNA, spliced mRNA, UTRs, and configurable flanking regions.
 
 2. **Multi-Organism Support**
-   - Support for 6 kingdoms (Animals, Plants, Bacteria, Fungi, Protists, Viruses) and over 40 pre-configured species.
+   - Support for 6 target groups (Animals, Plants, Bacteria, Fungi, Protists, Viruses) and over 40 pre-configured species.
    - Custom Ensembl species identifier support.
 
 3. **Dual Data Source**

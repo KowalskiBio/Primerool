@@ -12,6 +12,7 @@ import SequenceFeaturesPanel from './components/SequenceFeaturesPanel';
 import AutoDesignPanel from './components/AutoDesignPanel';
 import AlignmentPanel from './components/AlignmentPanel';
 import SessionRestoreDialog from './components/SessionRestoreDialog';
+import ReportIssueDialog from './components/ReportIssueDialog';
 import SettingsModal, { DEFAULT_THEME_PREFS, type ThemePrefs } from './components/SettingsModal';
 import Button from './components/ui/Button';
 import { useSession, useSessionState } from './session/sessionContext';
@@ -54,6 +55,15 @@ function SettingsIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="h-4 w-4">
       <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
       <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function ReportIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="h-4 w-4">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <path d="M12 7v4M12 14h.01" />
     </svg>
   );
 }
@@ -150,6 +160,7 @@ function App() {
   const [accentPreset, setAccentPreset] = useState(() => localStorage.getItem('accent_preset') || '');
   const [customAccentColor, setCustomAccentColor] = useState(() => localStorage.getItem('custom_accent_color') || '#1d4ed8');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   function handleApiKeyChange(key: string) {
     setNcbiApiKey(key);
@@ -331,6 +342,14 @@ function App() {
             </Button>
             <ThemeToggle theme={theme} onThemeChange={applyTheme} />
             <button
+              onClick={() => setReportOpen(true)}
+              aria-label="Report an issue"
+              title="Report an issue or suggest an idea"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              <ReportIcon />
+            </button>
+            <button
               onClick={() => setSettingsOpen(true)}
               aria-label="Settings"
               title="Settings (,)"
@@ -426,9 +445,19 @@ function App() {
         onResetTheme={handleResetTheme}
       />
 
+      <ReportIssueDialog
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        context={[
+          { label: 'Gene', value: geneName ? `${geneName} (${species})` : '' },
+          { label: 'Input', value: isCustomSequence ? 'pasted sequence' : '' },
+        ]}
+      />
+
       <SessionRestoreDialog
         session={session.pending}
         onCancel={session.dismissPending}
+        onForget={session.pendingIsAutosave ? session.forgetPending : undefined}
         onConfirm={() => {
           const name = session.pending?.name;
           session.confirmPending();

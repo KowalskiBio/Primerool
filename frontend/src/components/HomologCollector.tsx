@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import { getHomologJob, startCollectHomologs, type Homolog, type HomologJob, type HomologSource } from '../api/homologs';
+import { ApiError } from '../api/client';
 import SegmentedControl from './ui/SegmentedControl';
 import Button from './ui/Button';
 import Checkbox from './ui/Checkbox';
@@ -8,6 +9,8 @@ import Field from './ui/Field';
 import TextInput from './ui/TextInput';
 
 const POLL_MS = 3000;
+/** Times a job lost to a server restart is started again. */
+const MAX_RESTARTS = 2;
 
 interface Props {
   /** Used while the fields are left empty: the loaded gene and the
@@ -66,11 +69,27 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
     const started = Date.now();
     const tick = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
     try {
-      const { job_id } = await startCollectHomologs(g, t, maxSpecies, source);
-      let job = await getHomologJob(job_id);
+      let { job_id } = await startCollectHomologs(g, t, maxSpecies, source);
+      let restarts = 0;
+      let job: HomologJob = { status: 'running' };
       while (job.status === 'running') {
-        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-        job = await getHomologJob(job_id);
+        try {
+          job = await getHomologJob(job_id);
+        } catch (e) {
+          // Jobs live in server memory: a restart (a deploy) mid-run loses
+          // this one - the poll 404s - so start it again; while the server
+          // is still coming back the proxy answers 502-504, so keep polling.
+          if (!(e instanceof ApiError)) throw e;
+          if (e.status === 404 && restarts < MAX_RESTARTS) {
+            restarts += 1;
+            ({ job_id } = await startCollectHomologs(g, t, maxSpecies, source));
+          } else if (e.status === 404) {
+            throw new Error('The server restarted while collecting (an update going live). Try again in a moment.');
+          } else if (e.status < 502 || e.status > 504) {
+            throw e;
+          }
+        }
+        if (job.status === 'running') await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       }
       if (job.status === 'error') throw new Error(job.error || 'Collecting homologs failed.');
       const found = job.homologs ?? [];

@@ -7,6 +7,7 @@ import Button from './ui/Button';
 import Checkbox from './ui/Checkbox';
 import Field from './ui/Field';
 import TextInput from './ui/TextInput';
+import { cleanDNA } from '../utils/dna';
 
 const POLL_MS = 3000;
 /** Times a job lost to a server restart is started again. */
@@ -19,6 +20,9 @@ interface Props {
   defaultTaxon?: string;
   /** Adds the ticked homologs to the alignment input as FASTA. */
   onAdd: (fasta: string) => void;
+  /** The records already in the alignment input: a homolog among them
+   * (by name or sequence) isn't added twice. */
+  existing: { id: string; seq: string }[];
 }
 
 /** "P. veronii CP012345.1": short enough for the alignment's name column
@@ -40,7 +44,7 @@ function matchesFilter(h: Homolog, query: string): boolean {
 /** Collects one CDS of a gene per species within a taxon (from GenBank
  * proteins that record where they are coded), for a cross-species
  * alignment: the starting point for finding a conserved region. */
-export default function HomologCollector({ defaultGene = '', defaultTaxon = '', onAdd }: Props) {
+export default function HomologCollector({ defaultGene = '', defaultTaxon = '', onAdd, existing }: Props) {
   const [gene, setGene] = useSessionState('align.homologGene', '');
   const [taxon, setTaxon] = useSessionState('align.homologTaxon', '');
   const [maxSpecies, setMaxSpecies] = useSessionState('align.homologMax', 25);
@@ -53,6 +57,8 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  /** What the last "Add" did: how many went in, which were already there. */
+  const [added, setAdded] = useState<{ count: number; already: string[] } | null>(null);
 
   async function collect() {
     const g = gene.trim() || defaultGene;
@@ -62,6 +68,7 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
       return;
     }
     setError(null);
+    setAdded(null);
     setHomologs(null);
     setVia(null);
     setRunning(true);
@@ -104,9 +111,16 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
     }
   }
 
+  const inputIds = new Set(existing.map((r) => r.id));
+  const inputSeqs = new Set(existing.map((r) => r.seq));
+  const alreadyIn = (h: Homolog) => inputIds.has(recordName(h)) || inputSeqs.has(cleanDNA(h.sequence));
+
+  /** Appends the ticked homologs not yet in the input. */
   function add() {
     const chosen = (homologs ?? []).filter((h) => ticked.includes(h.protein));
-    onAdd(chosen.map((h) => `>${recordName(h)}\n${h.sequence}`).join('\n'));
+    const fresh = chosen.filter((h) => !alreadyIn(h));
+    setAdded({ count: fresh.length, already: chosen.filter(alreadyIn).map(recordName) });
+    if (fresh.length > 0) onAdd(fresh.map((h) => `>${recordName(h)}\n${h.sequence}`).join('\n'));
   }
 
   const toggle = (protein: string, on: boolean) => setTicked(on ? [...ticked, protein] : ticked.filter((p) => p !== protein));
@@ -214,6 +228,11 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
                     </td>
                     <td className="px-3 py-1.5 text-ink">
                       <em>{h.species}</em>
+                      {alreadyIn(h) && (
+                        <span className="ml-2 whitespace-nowrap rounded bg-surface-2 px-1.5 py-0.5 text-[11px] not-italic text-ink-faint" title="Already in the alignment input">
+                          already used
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-1.5">{h.strain ?? '-'}</td>
                     <td className="px-3 py-1.5 font-mono">
@@ -235,6 +254,14 @@ export default function HomologCollector({ defaultGene = '', defaultTaxon = '', 
               {homologs.length} species found{via ? ` via NCBI Datasets ${via}` : ''}. The records are appended to the box below; then align them.
             </span>
           </div>
+          {added && (
+            <p role="status" className={`mt-2 rounded-md border px-3 py-2 text-sm ${added.count === 0 ? 'border-warning/25 bg-warning-subtle text-warning' : 'border-line bg-surface text-ink-muted'}`}>
+              {added.count === 0
+                ? `Already used: ${added.already.length === 1 ? `${added.already[0]} is` : `all ${added.already.length} ticked are`} already in the alignment input. Nothing added.`
+                : `Added ${added.count} to the alignment input.`}
+              {added.count > 0 && added.already.length > 0 && ` Skipped ${added.already.length} already used: ${added.already.join(', ')}.`}
+            </p>
+          )}
         </div>
       )}
     </div>

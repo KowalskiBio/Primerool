@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useSessionState } from '../session/sessionContext';
 import { alignSequences, designConserved, type ConservedPairOligo, type ConservedPair, type ConservedCandidate, type Coverage, type DesignConservedRequest } from '../api/align';
 import type { SequenceData } from '../api/sequence';
@@ -469,6 +469,16 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     if (alignment) void runAlign({ strand });
   }
 
+  /** After homologs are added: brings the Align button on screen and
+   * rings it for a moment - the next step. */
+  const alignButtonRef = useRef<HTMLDivElement>(null);
+  const [alignNudge, setAlignNudge] = useState(false);
+  function showAlignButton() {
+    alignButtonRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setAlignNudge(true);
+    setTimeout(() => setAlignNudge(false), 2000);
+  }
+
   /** Drops the fetched/pasted reference; the loaded sequence takes over. */
   async function dropExternalReference() {
     setExternalRef(null);
@@ -486,7 +496,11 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
       <HomologCollector
         defaultGene={geneContext?.geneName ?? homologHint?.gene ?? undefined}
         defaultTaxon={geneContext ? genusOf(geneContext.species) : homologHint ? genusOf(homologHint.organism) : undefined}
-        onAdd={(fasta) => setFastaText((fastaText.trim() ? `${fastaText.trim()}\n` : '') + fasta)}
+        existing={parseMultiFasta(fastaText)}
+        onAdd={(fasta) => {
+          setFastaText((fastaText.trim() ? `${fastaText.trim()}\n` : '') + fasta);
+          showAlignButton();
+        }}
       />
 
       <textarea
@@ -531,7 +545,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
         </div>
       )}
 
-      <div>
+      <div ref={alignButtonRef} className={`inline-block rounded-md transition-shadow duration-500 ${alignNudge ? 'ring-4 ring-accent/40' : ''}`}>
         <Button variant="primary" disabled={aligning || fetchingRef} onClick={() => void runAlign()}>
           {aligning ? 'Aligning…' : 'Align Sequences'}
         </Button>

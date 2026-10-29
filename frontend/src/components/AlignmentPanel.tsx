@@ -14,7 +14,7 @@ import AlignmentPrimersPanel from './AlignmentPrimersPanel';
 import { analyzeAlignment, parseAlignedFasta, percentIdentity, type ConservedWindow } from '../utils/alignedFasta';
 import { NO_ALIGN_PRIMERS, degenerateSite, primerFromPick, type AlignPick, type AlignPrimer, type AlignPrimers } from '../utils/alignPrimers';
 import { analyzePrimer } from '../api/design';
-import { cleanDNA } from '../utils/dna';
+import { cleanDNA, reverseComplement } from '../utils/dna';
 import ResultsTable from './ResultsTable';
 import PrimerSequence from './PrimerSequence';
 import Button from './ui/Button';
@@ -22,6 +22,7 @@ import Checkbox from './ui/Checkbox';
 import Field from './ui/Field';
 import TextInput, { controlClasses } from './ui/TextInput';
 import Select from './ui/Select';
+import SegmentedControl from './ui/SegmentedControl';
 
 /** Card 7: MAFFT multi-sequence alignment + conserved-region primer design
  * (Phase 7). New feature, not present in the legacy Primerool app - the
@@ -63,6 +64,8 @@ function ReferencePicker({
   value,
   loadedName,
   externalRef,
+  strand,
+  onStrandChange,
   aligned,
   input,
   onInputChange,
@@ -76,6 +79,8 @@ function ReferencePicker({
   value: string | null;
   loadedName: string | null;
   externalRef: ExternalReference | null;
+  strand: Strand;
+  onStrandChange: (s: Strand) => void;
   aligned: boolean;
   input: string;
   onInputChange: (v: string) => void;
@@ -90,7 +95,10 @@ function ReferencePicker({
       <h4 className="mb-1 text-sm font-semibold text-ink">Reference</h4>
       <p className="mb-2 text-sm text-ink-muted">
         The reference is the first row: the other sequences follow by percent identity to it, and their bases are marked red where they differ from it.{' '}
-        {aligned ? 'Swapping it to another aligned sequence is instant; a new one is aligned in.' : 'It applies when you align.'}
+        {aligned
+          ? `Swapping it to another aligned sequence is instant${strand === '-' ? ' (on the − strand it re-aligns)' : ''}; a new one or a strand change is aligned in.`
+          : 'It applies when you align.'}{' '}
+        On the − strand it is aligned as its reverse complement, for homologs that read the other way.
       </p>
       <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
         <Field label="Swap to" htmlFor="aln-reference" className="min-w-56 max-w-md flex-1">
@@ -102,6 +110,17 @@ function ReferencePicker({
               </option>
             ))}
           </Select>
+        </Field>
+        <Field label="Strand" className="shrink-0">
+          <SegmentedControl
+            ariaLabel="Reference strand"
+            options={STRAND_OPTIONS}
+            value={strand}
+            onChange={(s) => {
+              if (!busy && value) onStrandChange(s);
+            }}
+            className="h-9"
+          />
         </Field>
         <Field label="Or a new one: NCBI accession (optionally :start-end) or a sequence" htmlFor="aln-new-reference" className="min-w-64 flex-[2]">
           <TextInput
@@ -132,6 +151,13 @@ function ReferencePicker({
     </div>
   );
 }
+
+/** The reference as given (+) or reverse-complemented (−) for aligning. */
+type Strand = '+' | '-';
+const STRAND_OPTIONS = [
+  { value: '+', label: '+', title: 'Align the reference as it is' },
+  { value: '-', label: '−', title: 'Align the reverse complement of the reference' },
+] as const;
 
 /** "18/20 sequences", flagged when some would fail at the primer's 3' end. */
 function CoverageBadge({ coverage, label }: { coverage: Coverage; label?: string }) {
@@ -177,6 +203,7 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
   const loadedName = loadedSequence ? `${geneContext?.geneName || loadedSequence.gene_name || 'loaded sequence'} (loaded)` : null;
   const [queryId, setQueryId] = useSessionState<string | null>('align.queryId', null);
   const [referenceChoice, setReferenceChoice] = useSessionState<string | null>('align.reference', null);
+  const [referenceStrand, setReferenceStrand] = useSessionState<Strand>('align.referenceStrand', '+');
   const [externalRef, setExternalRef] = useSessionState<ExternalReference | null>('align.externalRef', null);
   const [newRefInput, setNewRefInput] = useSessionState('align.newRefInput', '');
   const [fetchingRef, setFetchingRef] = useState(false);
@@ -241,9 +268,10 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
 
   /** Aligns the input. `override` stands in for the reference state when
    * it has just been set, ahead of React. */
-  async function runAlign(override?: { externalRef: ExternalReference | null; reference: string | null }) {
-    const external = override ? override.externalRef : externalRef;
-    const reference = override ? override.reference : referenceChoice;
+  async function runAlign(override?: { externalRef?: ExternalReference | null; reference?: string | null; strand?: Strand }) {
+    const external = override && 'externalRef' in override ? (override.externalRef ?? null) : externalRef;
+    const reference = override && 'reference' in override ? (override.reference ?? null) : referenceChoice;
+    const strand = override?.strand ?? referenceStrand;
     setAlignError(null);
     setAlignment(null);
     setCandidates(null);
@@ -293,11 +321,14 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
       setAligning(false);
     }
 
-    const all = [...extraRecords, ...records];
+    let all = [...extraRecords, ...records];
     // The chosen reference while it's still among the records, else the
-    // loaded sequence; without either, MAFFT's order and no query.
+    // loaded sequence; without either, MAFFT's order and no query. On the
+    // − strand it goes in reverse-complemented.
     const ids = new Set(all.map((r) => r.id));
-    setQueryId(reference && ids.has(reference) ? reference : loadedName && ids.has(loadedName) ? loadedName : null);
+    const query = reference && ids.has(reference) ? reference : loadedName && ids.has(loadedName) ? loadedName : null;
+    setQueryId(query);
+    if (query && strand === '-') all = all.map((r) => (r.id === query ? { ...r, seq: reverseComplement(r.seq) } : r));
     if (all.length < 2) {
       setAlignError('Paste at least two sequences to align (FASTA, GenBank, or one bare sequence per line).');
       return;
@@ -384,6 +415,12 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
   function chooseReference(id: string) {
     setRefError(null);
     setReferenceChoice(id === loadedName ? null : id);
+    // A − strand reference was aligned flipped: the old one goes back to
+    // +, the new one flips, so that's a re-align.
+    if (alignment && referenceStrand === '-') {
+      void runAlign({ reference: id === loadedName ? null : id });
+      return;
+    }
     if (alignment && alignedRows.some((r) => r.id === id)) {
       setQueryId(id);
       setHiddenRows((prev) => prev.filter((h) => h !== id));
@@ -426,6 +463,12 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
     if (alignment) await runAlign({ externalRef: ref, reference: ref.id });
   }
 
+  function chooseStrand(strand: Strand) {
+    if (strand === referenceStrand) return;
+    setReferenceStrand(strand);
+    if (alignment) void runAlign({ strand });
+  }
+
   /** Drops the fetched/pasted reference; the loaded sequence takes over. */
   async function dropExternalReference() {
     setExternalRef(null);
@@ -459,6 +502,8 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
         value={currentReference}
         loadedName={loadedName}
         externalRef={externalRef}
+        strand={referenceStrand}
+        onStrandChange={chooseStrand}
         aligned={alignment !== null}
         input={newRefInput}
         onInputChange={setNewRefInput}
@@ -486,9 +531,11 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
         </div>
       )}
 
-      <Button variant="primary" disabled={aligning || fetchingRef} onClick={() => void runAlign()}>
-        {aligning ? 'Aligning…' : 'Align Sequences'}
-      </Button>
+      <div>
+        <Button variant="primary" disabled={aligning || fetchingRef} onClick={() => void runAlign()}>
+          {aligning ? 'Aligning…' : 'Align Sequences'}
+        </Button>
+      </div>
 
       {alignError && <div role="alert" className="mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">{alignError}</div>}
 
@@ -626,17 +673,19 @@ export default function AlignmentPanel({ loadedSequence, geneTranscripts, geneCo
 const MAX_DESIGN_DEGENERACY = 64;
 
 function DegenerateToggle({ checked, onChange, className = '' }: { checked: boolean; onChange: (v: boolean) => void; className?: string }) {
+  // Its own block, so it never runs onto the line of a button before it.
   return (
-    <Checkbox
-      className={className}
-      label={
-        <span className="text-sm">
-          Degenerate primers (IUPAC codes covering every sequence; up to {MAX_DESIGN_DEGENERACY}-fold, the 3′-most 5 bases kept exact)
-        </span>
-      }
-      checked={checked}
-      onChange={(e) => onChange(e.target.checked)}
-    />
+    <div className={className}>
+      <Checkbox
+        label={
+          <span className="text-sm">
+            Degenerate primers (IUPAC codes covering every sequence; up to {MAX_DESIGN_DEGENERACY}-fold, the 3′-most 5 bases kept exact)
+          </span>
+        }
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+    </div>
   );
 }
 

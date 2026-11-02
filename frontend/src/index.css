@@ -60,6 +60,8 @@
   --seq-probe-wt-ink: #15803d;
   --seq-probe-wt-bg: #dcfce7;
   --seq-probe-dual-ink: #1c1c1f;
+  --seq-guide-ink: #6d28d9;
+  --seq-guide-bg: #ede9fe;
   --seq-hit-ring: #b45309;
   --seq-hit-active-bg: #fdba74;
   --seq-hit-active-ring: #9a3412;
@@ -115,6 +117,8 @@
   --seq-probe-wt-ink: #4ade80;
   --seq-probe-wt-bg: rgba(74, 222, 128, 0.13);
   --seq-probe-dual-ink: #e4e4e7;
+  --seq-guide-ink: #c4b5fd;
+  --seq-guide-bg: rgba(196, 181, 253, 0.15);
   --seq-hit-ring: #f59e0b;
   --seq-hit-active-bg: rgba(251, 146, 60, 0.25);
   --seq-hit-active-ring: #fb923c;
@@ -214,6 +218,16 @@
     font-weight: 700;
     text-decoration: underline;
     background-color: var(--seq-probe-bg);
+  }
+
+  /* A CRISPR guide's protospacer - violet, so it reads as neither a
+   * primer (red) nor a probe (blue/green) on a map that may show all
+   * three at once. */
+  .seq-guide {
+    color: var(--seq-guide-ink);
+    font-weight: 700;
+    text-decoration: underline;
+    background-color: var(--seq-guide-bg);
   }
 
   /* The wild-type probe of an allele-detection pair - green to the mutant

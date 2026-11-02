@@ -86,6 +86,7 @@ function collectSplicedSpans(data: SequenceData, sel: Selections): Span[] {
   addMapped(sel.armsRefPrimer, 'seq-primer', 'armsRefPrimer');
   addMapped(sel.armsAltPrimer, 'seq-primer', 'armsAltPrimer');
   addMapped(sel.armsCommon, 'seq-primer', 'armsCommon');
+  addMapped(sel.crisprGuide, 'seq-guide', 'crisprGuide');
 
   return spans.sort((a, b) => a.start - b.start);
 }

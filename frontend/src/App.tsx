@@ -122,7 +122,7 @@ function App() {
   useEffect(() => {
     if (setKey === loadedSetKey) savePrimerSets(setKey, selections);
   }, [setKey, loadedSetKey, selections]);
-  const [primerMode, setPrimerMode] = useSessionState<'flanking' | 'junction' | 'general' | 'arms' | 'conserved'>('app.primerMode', 'flanking');
+  const [primerMode, setPrimerMode] = useSessionState<'flanking' | 'junction' | 'general' | 'arms' | 'conserved' | 'crispr'>('app.primerMode', 'flanking');
 
   // IDT OligoAnalyzer credentials - machine-local like the NCBI key, but
   // encrypted at rest, so they load asynchronously after first render.

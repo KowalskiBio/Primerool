@@ -100,6 +100,7 @@ pub fn build_router(state: state::AppState) -> Router {
         .route("/align", post(routes::align::align))
         .route("/fetch_nucleotide", post(routes::fetch_nucleotide::fetch_nucleotide))
         .route("/design_conserved", post(routes::design_conserved::design_conserved))
+        .route("/design_crispr", post(routes::design_crispr::design_crispr))
         .route("/idt/token", post(routes::idt::idt_token))
         .route("/idt/analyze", post(routes::idt::idt_analyze_route))
         .route("/idt/tm", post(routes::idt::idt_tm_route))

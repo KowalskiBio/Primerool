@@ -179,6 +179,7 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
     add(sel.armsRefPrimer, 'seq-primer', 'armsRefPrimer');
     add(sel.armsAltPrimer, 'seq-primer', 'armsAltPrimer');
     add(sel.armsCommon, 'seq-primer', 'armsCommon');
+    add(sel.crisprGuide, 'seq-guide', 'crisprGuide');
     return out;
   }
 
@@ -265,6 +266,7 @@ function geneBlockSegments(data: SequenceData, sel: Selections, truncateIntrons:
 function colorClassName(key: keyof Selections): string {
   if (key === 'geneProbe') return 'seq-probe-wt';
   if (key === 'geneProbeAlt') return 'seq-probe';
+  if (key === 'crisprGuide') return 'seq-guide';
   return 'seq-primer';
 }
 

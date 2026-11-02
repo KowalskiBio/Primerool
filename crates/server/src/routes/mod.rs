@@ -10,6 +10,7 @@ pub mod analyze_structure;
 pub mod blast;
 pub mod design_arms;
 pub mod design_conserved;
+pub mod design_crispr;
 pub mod design_from_sequence;
 pub mod design_primers;
 pub mod design_probe;

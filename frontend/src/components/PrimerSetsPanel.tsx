@@ -32,6 +32,7 @@ const GROUPS: { id: string; title: string; keys: Key[] }[] = [
   { id: 'junction', title: 'Junction pair', keys: ['juncLeft', 'juncRight'] },
   { id: 'arms', title: 'ARMS', keys: ['armsRefPrimer', 'armsAltPrimer', 'armsCommon'] },
   { id: 'probe', title: 'TaqMan probe', keys: ['geneProbe', 'geneProbeAlt'] },
+  { id: 'crispr', title: 'CRISPR guide', keys: ['crisprGuide'] },
 ];
 
 function roleLabel(key: Key, sel: Selection): string {
@@ -39,6 +40,7 @@ function roleLabel(key: Key, sel: Selection): string {
   if (key === 'armsRefPrimer') return `${dir} twin · wild type${sel.arms ? ` (${sel.arms.wtBase})` : ''}`;
   if (key === 'armsAltPrimer') return `${dir} twin · mutant${sel.arms ? ` (${sel.arms.mutBase})` : ''}`;
   if (key === 'armsCommon') return `${dir} common`;
+  if (key === 'crisprGuide') return `${dir} · sgRNA spacer`;
   if (key === 'geneProbe') return `${dir} probe · wild type${sel.allele ? ` (${sel.allele.wtBase})` : ''}`;
   if (key === 'geneProbeAlt') return `${dir} probe · mutant${sel.allele ? ` (${sel.allele.mutBase})` : ''}`;
   if ((key === 'juncLeft' || key === 'juncRight') && sel.region !== 'spliced') return `${dir} · in the gene (partner crosses the junction)`;

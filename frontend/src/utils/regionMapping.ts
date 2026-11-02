@@ -66,6 +66,10 @@ export interface Selections {
   armsRefPrimer: Selection | null;
   armsAltPrimer: Selection | null;
   armsCommon: Selection | null;
+  /** The currently-picked SpCas9 guide. One slot, not a pair: guides are
+   * chosen one at a time, and a multiplex experiment's second guide is a
+   * second pick rather than a partner of the first. */
+  crisprGuide: Selection | null;
 }
 
 /** The two allele-detection probe slots - the only selections the "My
@@ -85,6 +89,7 @@ export const EMPTY_SELECTIONS: Selections = {
   armsRefPrimer: null,
   armsAltPrimer: null,
   armsCommon: null,
+  crisprGuide: null,
 };
 
 function sortedExons(data: SequenceData): Annotation[] {

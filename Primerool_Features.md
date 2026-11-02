@@ -36,11 +36,12 @@ Primerool is a cloud-based, local web application that allows molecular biologis
    - **Feature Map:** Zoomable timeline showing exons, introns, CDS, and UTRs.
    - **Sequence Map:** Full nucleotide sequence with colour-coded annotations, primer binding site highlights, and interactive navigation between features.
 
-6. **Five Primer Design Modes**
+6. **Primer Design Modes**
    - **WGA (Whole-Genome Amplification):** Primers in flanking regions for amplifying the entire locus. Relaxed GC% (20–80%) and Tm (52–68°C) for AT/GC-rich genomic regions.
    - **Internal (Exon-Exon Junction):** Splice-spanning primers for qRT-PCR, with configurable junction overlap (default 6–12 bp) and product size (default 80–220 bp).
    - **Design from Sequence (Manual):** Targeting specific user-provided forward and reverse regions. Supports **target amplicon length** with a configurable deviation (default ±50 bp), constraining the picker to products of the desired size.
    - **Probe Design (TaqMan):** Design internal oligos (hydrolysis probes) from any sequence region. Configurable probe Tm (default 65/70/75°C min/opt/max), length (default 18/22/30 bp), and GC% (default 30–80%). Each probe is reported with Tm, GC%, hairpin ΔG, and homodimer ΔG.
+   - **CRISPR (SpCas9 guides):** Scans both strands of the gene (or a chosen window) for 20 nt protospacers next to an `NGG` PAM, ranked by GC%, homopolymer runs, spacer self-structure and the PAM-proximal base. Guides carrying a `TTTT` run are dropped by default, since it terminates U6 transcription. Each guide reports its strand, position, blunt cut site, and the annealed top/bottom oligos for cloning into a BbsI-cut pX330 or BsmBI-cut lentiCRISPRv2 backbone (a 5′ G is prepended for the U6 start when the spacer lacks one). No off-target search is performed — a picked spacer can be sent through the existing BLAST path, which is a sanity check rather than a specificity guarantee.
    - **Automatic Pairing:** Configurable conditions (Tm, Length, GC%) applied across all primer modes, with heterodimer cross-check for each returned pair.
 
 7. **Quality Control**

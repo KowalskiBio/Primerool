@@ -13,6 +13,7 @@ pub mod backend_native;
 pub mod conserved;
 pub mod defaults;
 pub mod design_arms;
+pub mod design_crispr;
 pub mod design_flanking;
 pub mod design_from_sequence;
 pub mod design_general;

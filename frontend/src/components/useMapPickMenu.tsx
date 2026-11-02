@@ -45,6 +45,7 @@ const PICK_LABELS: Record<keyof Selections, string> = {
   armsRefPrimer: 'ARMS WT twin',
   armsAltPrimer: 'ARMS mutant twin',
   armsCommon: 'ARMS common primer',
+  crisprGuide: 'sgRNA',
 };
 
 /** The right-click menu over a selected stretch of a sequence map, shared

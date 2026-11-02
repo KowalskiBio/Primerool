@@ -8,6 +8,7 @@ import ResultsTable from './ResultsTable';
 import PrimerSequence from './PrimerSequence';
 import PrimerCard from './PrimerCard';
 import ArmsDesignPanel from './ArmsDesignPanel';
+import CrisprDesignPanel from './CrisprDesignPanel';
 import GeneralPrimerPreview from './GeneralPrimerPreview';
 import { generalSelection } from '../utils/generalSelection';
 import { isCustomSequence } from '../utils/sequenceData';
@@ -19,7 +20,7 @@ import Button from './ui/Button';
 import { fmt, yesNo } from '../utils/format';
 import type { IdtCredentials } from '../utils/idtCredentials';
 
-type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms' | 'conserved';
+type PrimerMode = 'flanking' | 'junction' | 'general' | 'arms' | 'conserved' | 'crispr';
 
 /** `design_general::PRODUCT_SIZE_RANGE` on the server. */
 const GENERAL_PRODUCT_RANGE = '100–1000';
@@ -209,12 +210,15 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode: 
               ]),
           { value: 'arms' as const, label: 'SNP/indel', title: 'ARMS-PCR allele-specific primers' },
           { value: 'conserved' as const, label: 'Conserved', title: 'Primers in a region conserved across species or sequences, from a multi-sequence alignment' },
+          { value: 'crispr' as const, label: 'CRISPR', title: 'SpCas9 guide RNAs (NGG PAM), with the oligos to clone one' },
         ]}
       />
 
       {primerMode === 'conserved' && conservedPanel}
 
       {primerMode === 'arms' && <ArmsDesignPanel data={data} species={species} apiSource={apiSource} onSelect={onSelect} idtCredentials={idtCredentials} />}
+
+      {primerMode === 'crispr' && <CrisprDesignPanel data={data} species={species} onSelect={onSelect} />}
 
       {primerMode === 'general' && (
         <div className="mb-6 rounded-md border border-line bg-surface-2 p-3 text-sm text-ink-muted">
@@ -285,13 +289,13 @@ export default function AutoDesignPanel({ data, species, apiSource, primerMode: 
       )}
 
 
-      {primerMode !== 'arms' && primerMode !== 'conserved' && (
+      {primerMode !== 'arms' && primerMode !== 'conserved' && primerMode !== 'crispr' && (
         <Button variant="primary" className="mb-4" disabled={loading} onClick={() => void (primerMode === 'flanking' ? runFlanking() : primerMode === 'junction' ? runJunction() : runGeneral())}>
           {loading ? 'Designing…' : 'Design Primers'}
         </Button>
       )}
 
-      {primerMode !== 'arms' && primerMode !== 'conserved' && error && (
+      {primerMode !== 'arms' && primerMode !== 'conserved' && primerMode !== 'crispr' && error && (
         <div role="alert" className="mb-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2.5 text-sm font-medium text-danger">
           {error}
         </div>

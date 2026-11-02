@@ -54,6 +54,16 @@ pub const JUNCTION_DEFAULT_LEFT_PAD: u32 = 250;
 pub const JUNCTION_DEFAULT_RIGHT_PAD: u32 = 400;
 pub const JUNCTION_DEFAULT_MAX_CANDIDATES: u32 = 25;
 
+/// SpCas9 guide (`design_crispr`) constants — no Python original (new
+/// feature). The spacer length is the nuclease's, not a preference.
+pub const CRISPR_SPACER_LEN: usize = 20;
+/// The band a guide is not penalized for sitting in.
+pub const CRISPR_GC_IDEAL: GcConstraints = GcConstraints { min_gc: 40.0, max_gc: 60.0 };
+/// Outside this, a guide is dropped rather than penalized: very AT-rich
+/// spacers bind poorly and very GC-rich ones tolerate mismatches, which
+/// costs specificity.
+pub const CRISPR_GC_HARD: GcConstraints = GcConstraints { min_gc: 25.0, max_gc: 80.0 };
+
 pub const DEFAULT_MAX_POLY_X: u32 = 5;
 pub const DEFAULT_MAX_NS_ACCEPTED: u32 = 0;
 

@@ -6,12 +6,12 @@ Template length: 1182 bp. Constraints: size SizeRange { min: 18, opt: 20, max: 2
 
 - Candidates scanned: 9292
 - Primer3Backend picking: considered 9292, GC content failed 1256, low tm 3, high tm 606, long poly-x seq 110, high hairpin stability 14, ok 5
-- NativeBackend picking: considered 9292, GC content failed 1256, low tm 1, high tm 1909, long poly-x seq 105, high hairpin stability 5, ok 5
+- NativeBackend picking: considered 9292, GC content failed 1256, low tm 13, high tm 604, long poly-x seq 109, high hairpin stability 4, ok 5
 
 ## Tm agreement across all 9292 scanned candidates
 
-- Mean |Tm difference|: 2.87 °C
-- Max |Tm difference|: 5.59 °C
+- Mean |Tm difference|: 0.40 °C
+- Max |Tm difference|: 1.35 °C
 
 ## Top 5 ranked candidates per backend
 
@@ -27,11 +27,11 @@ Template length: 1182 bp. Constraints: size SizeRange { min: 18, opt: 20, max: 2
 ### NativeBackend
 | seq | tm | gc% | penalty |
 |---|---|---|---|
-| CACAGAGGAAGAGAATCTCC | 60.4 | 50.0 | 0.35 |
-| CAGTGGTAATCTACTGGGAC | 60.4 | 50.0 | 0.36 |
-| GGAAGACTCCAGTGGTAATC | 60.7 | 50.0 | 0.66 |
-| GTAATCTACTGGGACGGAAC | 60.7 | 50.0 | 0.66 |
-| CATCTTATCCGAGTGGAAGG | 60.8 | 50.0 | 0.77 |
+| CCTGTCATCTTCTGTCCCTT | 60.0 | 50.0 | 0.01 |
+| CCCTCTGAGTCAGGAAACAT | 60.0 | 50.0 | 0.01 |
+| AATCTACTGGGACGGAACAG | 60.0 | 50.0 | 0.03 |
+| GTCCCTTCCCAGAAAACCTA | 60.0 | 50.0 | 0.03 |
+| TCCCTTCCCAGAAAACCTAC | 60.0 | 50.0 | 0.03 |
 
 Top-5 candidate overlap (same start/end window in both rankings): 0/5
 
@@ -43,7 +43,7 @@ Target: [591, 611). Product size range: (100, 300).
 
 | backend | pairs found | wall time |
 |---|---|---|
-| Primer3Backend | 5 | 204.7ms |
-| NativeBackend | 5 | 43.8ms |
+| Primer3Backend | 5 | 282.3ms |
+| NativeBackend | 5 | 92.2ms |
 
 Both backends run the identical `pick_pairs` code path; every returned pair from both respects the target-flanking, non-overlap, and product-size constraints (asserted in `design_internal`'s own tests, not re-checked here).

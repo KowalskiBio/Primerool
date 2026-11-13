@@ -7,9 +7,18 @@
 //! This is the Phase 1 "done when" bar from the rewrite plan: outputs must
 //! match captured Strider Python outputs, not just be internally
 //! consistent.
+//!
+//! One deliberate divergence: the duplex Tm salt correction. Strider
+//! linearises the Owczarzy correction around 340 K and, with Mg2+ in the
+//! mixed regime, uses a von Ahsen sodium equivalent; Primerool applies
+//! Owczarzy 2008 as published, exactly in 1/Tm, as IDT does
+//! (`salt::owczarzy_salt_tm`). The Na+-only Tm checks below therefore
+//! recover Strider's 1 M Na+ Tm from the corpus and re-apply the exact
+//! correction, so the nearest-neighbour core is still held to Strider. The
+//! mixed-regime Tm is anchored to IDT values in `thermo-core`'s unit tests.
 
 use serde::Deserialize;
-use thermo_core::{duplex_dg, duplex_dh_ds, duplex_tm, is_self_complementary, melting_temperature, reverse_complement, salt};
+use thermo_core::{duplex_dg, duplex_dh_ds, is_self_complementary, melting_temperature, reverse_complement, salt};
 
 const TOL: f64 = 1e-6;
 
@@ -20,10 +29,9 @@ struct Case {
     ds: f64,
     tm_default: f64,
     tm_salty: f64,
-    duplex_tm_default: f64,
     dg_default: f64,
+    /// Strider's linearised Na+ correction (°C) at 0.1958 M.
     owczarzy: f64,
-    owczarzy_mg: f64,
     dg_per_bp: f64,
     reverse_complement: String,
     is_self_complementary: bool,
@@ -57,6 +65,14 @@ fn assert_close(name: &str, seq: &str, got: f64, want: f64) {
     );
 }
 
+/// Owczarzy 2004 monovalent correction to 1/Tm (1/K), Strider's own fGC
+/// (G+C over full length).
+fn na_inv(seq: &str, sodium_m: f64) -> f64 {
+    let f = seq.bytes().filter(|b| matches!(b.to_ascii_uppercase(), b'G' | b'C')).count() as f64 / seq.len() as f64;
+    let l = sodium_m.ln();
+    (4.29 * f - 3.95) * 1e-5 * l + 9.40e-6 * l * l
+}
+
 #[test]
 fn thermo_core_matches_strider_python_reference() {
     let corpus = load_corpus();
@@ -67,23 +83,18 @@ fn thermo_core_matches_strider_python_reference() {
         assert_close("duplex_dh_ds.dh", &case.seq, dh, case.dh);
         assert_close("duplex_dh_ds.ds", &case.seq, ds, case.ds);
 
+        // Strider: Tm = Tm(1 M) - inv * 340^2. Primerool: 1/Tm = 1/Tm(1 M) + inv.
+        let exact = |strider_tm: f64, inv: f64| 1.0 / (1.0 / (strider_tm + inv * 340.0 * 340.0 + 273.15) + inv) - 273.15;
+
         let tm_default = melting_temperature(&case.seq, 250e-9, 0.137, 0.0).unwrap();
-        assert_close("melting_temperature(default)", &case.seq, tm_default, case.tm_default);
+        assert_close("melting_temperature(default)", &case.seq, tm_default, exact(case.tm_default, na_inv(&case.seq, 0.137)));
 
         let tm_salty = melting_temperature(&case.seq, 400e-9, 0.1958, 0.0).unwrap();
-        assert_close("melting_temperature(salty)", &case.seq, tm_salty, case.tm_salty);
-
-        let duplex_tm_default = duplex_tm(&case.seq, 0.05, 0.003, 0.0008, 0.25e-6).unwrap();
-        assert_close("duplex_tm(default)", &case.seq, duplex_tm_default, case.duplex_tm_default);
+        assert_close("melting_temperature(salty)", &case.seq, tm_salty, exact(case.tm_salty, -case.owczarzy / (340.0 * 340.0)));
+        assert_close("Owczarzy 2004 Na+ term", &case.seq, -case.owczarzy / (340.0 * 340.0), na_inv(&case.seq, 0.1958));
 
         let dg_default = duplex_dg(&case.seq, 37.0, 1.0, 0.0).unwrap();
         assert_close("duplex_dg(default)", &case.seq, dg_default, case.dg_default);
-
-        let owczarzy = salt::owczarzy_tm_correction(&case.seq, 0.1958, 0.0);
-        assert_close("owczarzy_tm_correction", &case.seq, owczarzy, case.owczarzy);
-
-        let owczarzy_mg = salt::owczarzy_tm_correction(&case.seq, 0.05, 0.003);
-        assert_close("owczarzy_tm_correction(mg)", &case.seq, owczarzy_mg, case.owczarzy_mg);
 
         let dg_per_bp = salt::dg_per_bp_salt(0.05, 0.0022, 37.0, "dna");
         assert_close("dg_per_bp_salt", &case.seq, dg_per_bp, case.dg_per_bp);

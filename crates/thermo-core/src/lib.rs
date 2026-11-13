@@ -239,11 +239,12 @@ fn tm_raw(seq: &str, strand_conc_m: f64, sodium_m: f64, magnesium_m: f64) -> f64
     } else {
         (strand_conc_m / 4.0).ln()
     };
-    let mut tm = (dh * 1000.0) / (ds + R * 1000.0 * ln_ct) - 273.15;
+    let tm_1m = (dh * 1000.0) / (ds + R * 1000.0 * ln_ct);
     if sodium_m != 1.0 || magnesium_m > 0.0 {
-        tm += salt::owczarzy_tm_correction(seq, sodium_m, magnesium_m);
+        salt::owczarzy_salt_tm(tm_1m, seq, sodium_m, magnesium_m) - 273.15
+    } else {
+        tm_1m - 273.15
     }
-    tm
 }
 
 /// Defaults mirror `nn_dna.melting_temperature`: strand_conc_M=250e-9,
@@ -337,6 +338,40 @@ mod tests {
         let free_mg = (magnesium_m - dntp_m).max(0.0);
         let expected = tm_raw(seq, oligo_conc_m, sodium_m, free_mg);
         assert!((got - expected).abs() < TOL);
+    }
+
+    #[test]
+    fn duplex_tm_matches_idt_in_mixed_na_mg_regime() {
+        // IDT OligoAnalyzer: 65.5 °C at 50 mM Na+, 3 mM Mg2+, 0.8 mM dNTPs,
+        // 0.2 µM oligo (qPCR preset). Strider's sodium-equivalent shortcut
+        // gave 68.5 °C here.
+        let tm = duplex_tm("TGTGGGAGGCTGTTATGGATGG", 0.05, 0.003, 0.0008, 0.2e-6).unwrap();
+        assert!((tm - 65.5).abs() < 0.1, "tm={tm}");
+    }
+
+    #[test]
+    fn duplex_tm_tracks_idt_at_high_mg() {
+        // IDT OligoAnalyzer values from Strider issue #10: 50 mM Na+, 10 mM
+        // Mg2+, 0.8 mM dNTPs, 0.5 µM oligo. Owczarzy 2008 lands within
+        // 1.5 °C (GC-rich slightly above, AT-rich slightly below); the von
+        // Ahsen sodium equivalent read 1.5 to 3.3 °C above IDT here.
+        for (seq, idt) in [("GTACGGCCTGTCGTTC", 61.5), ("CACACCTACTACAGCGG", 61.0), ("TCATGGGTCAGTCATTTCATA", 61.8), ("TGTAAATTCACACAGTCACTT", 60.9)] {
+            let tm = duplex_tm(seq, 0.05, 0.010, 0.0008, 0.5e-6).unwrap();
+            assert!((tm - idt).abs() < 1.5, "{seq}: tm={tm} idt={idt}");
+        }
+    }
+
+    #[test]
+    fn salt_correction_is_exact_in_one_over_tm() {
+        // Na+ only: 1/Tm = 1/Tm(1 M) + Owczarzy 2004 term, no linearisation.
+        let seq = "TGTGGGAGGCTGTTATGGATGG";
+        let tm_1m = duplex_tm(seq, 1.0, 0.0, 0.0, 0.25e-6).unwrap() + 273.15;
+        let f = 12.0 / 22.0;
+        let ln_na = 0.05f64.ln();
+        let inv = (4.29 * f - 3.95) * 1e-5 * ln_na + 9.40e-6 * ln_na * ln_na;
+        let want = 1.0 / (1.0 / tm_1m + inv) - 273.15;
+        let got = duplex_tm(seq, 0.05, 0.0, 0.0, 0.25e-6).unwrap();
+        assert!((got - want).abs() < 1e-9, "got={got} want={want}");
     }
 
     #[test]

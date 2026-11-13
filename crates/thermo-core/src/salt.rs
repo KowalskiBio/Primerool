@@ -1,7 +1,9 @@
 //! Salt corrections (mirrors `strider.thermo.salt`) — scalar ports of the
 //! PyO3-bound functions in `strider/native/src/lib.rs`, with `PyResult`/
-//! `PyErr` stripped in favor of plain `Result<T, ThermoError>`. No logic
-//! changes: every formula below is bit-identical to its Strider source.
+//! `PyErr` stripped in favor of plain `Result<T, ThermoError>`. Every
+//! formula is identical to its Strider source except the duplex Tm salt
+//! correction, [`owczarzy_salt_tm`], which Primerool takes from Owczarzy
+//! 2008 as published so its Tm matches IDT (as Thermool does).
 
 use crate::ThermoError;
 
@@ -20,50 +22,60 @@ pub(crate) fn fgc(seq: &[u8]) -> f64 {
     gc as f64 / seq.len() as f64
 }
 
+/// Owczarzy et al. (2004) monovalent correction to 1/Tm (1/K), relative to 1 M Na+.
 #[inline]
-fn na_tm_correction(fgc: f64, sodium_m: f64) -> f64 {
-    // Owczarzy 2004 linearized, Tm_ref = 340 K (strider _na_correction)
+fn na_inv_tm_correction(fgc: f64, sodium_m: f64) -> f64 {
     let ln_na = sodium_m.ln();
-    let inv_tm_correction = (4.29 * fgc - 3.95) * 1e-5 * ln_na + 9.40e-6 * ln_na * ln_na;
-    -inv_tm_correction * 340.0 * 340.0
+    (4.29 * fgc - 3.95) * 1e-5 * ln_na + 9.40e-6 * ln_na * ln_na
 }
 
+/// Owczarzy et al. (2008) Eq. 16 Mg2+ correction to 1/Tm (1/K), relative to
+/// 1 M Na+. `sodium_m` is `Some` in the mixed regime (0.22 <= R < 6), where
+/// Eq. 18 makes a, d and g depend on the monovalent concentration.
 #[inline]
-fn mg_tm_correction(fgc: f64, mg_m: f64, n_bp: usize) -> f64 {
-    // Owczarzy 2008 Eq. 16 (strider _mg_correction)
+fn mg_inv_tm_correction(fgc: f64, mg_m: f64, n_bp: usize, sodium_m: Option<f64>) -> f64 {
     let ln_mg = mg_m.ln();
-    let (a, b, c, d, e, f, g) = (
-        3.92e-5, -9.11e-6, 6.26e-5, 1.42e-5, -4.82e-4, 5.25e-4, 8.31e-5,
-    );
+    let (mut a, b, c, mut d, e, f, mut g) = (3.92e-5, -9.11e-6, 6.26e-5, 1.42e-5, -4.82e-4, 5.25e-4, 8.31e-5);
+    if let Some(na) = sodium_m {
+        let ln_na = na.ln();
+        a *= 0.843 - 0.352 * na.sqrt() * ln_na;
+        d *= 1.279 - 4.03e-3 * ln_na - 8.03e-3 * ln_na * ln_na;
+        g *= 0.486 - 0.258 * ln_na + 5.25e-3 * ln_na.powi(3);
+    }
     let length_factor = 1.0 / (2.0 * (n_bp.max(2) - 1) as f64);
-    let inv_tm_corr =
-        a + b * ln_mg + fgc * (c + d * ln_mg) + length_factor * (e + f * ln_mg + g * ln_mg * ln_mg);
-    -inv_tm_corr * 340.0 * 340.0
+    a + b * ln_mg + fgc * (c + d * ln_mg) + length_factor * (e + f * ln_mg + g * ln_mg * ln_mg)
 }
 
-pub fn owczarzy_tm_correction(seq: &str, sodium_m: f64, magnesium_m: f64) -> f64 {
+/// Salt-corrected duplex Tm (K) from the 1 M Na+ Tm (K), as published by
+/// Owczarzy et al. (2008), Biochemistry 47:5336, and used by IDT
+/// OligoAnalyzer: with R = sqrt([Mg2+]) / [Na+],
+/// - R < 0.22: monovalent ions dominate, Owczarzy 2004 Na+ correction;
+/// - 0.22 <= R < 6: Mg2+ correction with Na+-dependent a, d, g (Eq. 18);
+/// - R >= 6 (or no Na+): Mg2+ correction with the original coefficients.
+///
+/// Applied exactly, `1/Tm = 1/Tm(1 M) + correction`. Primerool's own
+/// choice (shared with Thermool): Strider instead linearises around 340 K and, in the mixed
+/// regime, converts Mg2+ to a von Ahsen sodium equivalent, which reads
+/// about 3 °C above IDT at qPCR conditions.
+pub fn owczarzy_salt_tm(tm_1m_k: f64, seq: &str, sodium_m: f64, magnesium_m: f64) -> f64 {
     let bytes = seq.as_bytes();
     let f = fgc(bytes);
     let n_bp = bytes.len();
-
-    if magnesium_m > 0.0 && sodium_m > 0.0 {
+    let inv = if magnesium_m > 0.0 && sodium_m > 0.0 {
         let ratio = magnesium_m.sqrt() / sodium_m;
         if ratio < 0.22 {
-            na_tm_correction(f, sodium_m)
+            na_inv_tm_correction(f, sodium_m)
         } else if ratio < 6.0 {
-            // _mixed_correction (v1.2.1, issue #10): von Ahsen sodium-equivalent
-            // recipe — [Na+]_eq = [Na+] + 120·√[Mg²⁺]_free (concs in mM),
-            // then evaluate the monovalent Owczarzy 2004 correction at na_eq.
-            let na_eq = sodium_m + 0.120 * (magnesium_m * 1000.0).sqrt();
-            na_tm_correction(f, na_eq)
+            mg_inv_tm_correction(f, magnesium_m, n_bp, Some(sodium_m))
         } else {
-            mg_tm_correction(f, magnesium_m, n_bp)
+            mg_inv_tm_correction(f, magnesium_m, n_bp, None)
         }
     } else if magnesium_m > 0.0 {
-        mg_tm_correction(f, magnesium_m, n_bp)
+        mg_inv_tm_correction(f, magnesium_m, n_bp, None)
     } else {
-        na_tm_correction(f, sodium_m)
-    }
+        na_inv_tm_correction(f, sodium_m)
+    };
+    1.0 / (1.0 / tm_1m_k + inv)
 }
 
 pub fn na_correction_dg(seq: &str, sodium_m: f64, celsius: f64) -> f64 {

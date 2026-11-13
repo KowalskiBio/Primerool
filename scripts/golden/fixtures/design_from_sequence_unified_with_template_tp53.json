@@ -22,99 +22,7 @@
             18
           ],
           "forward_seq": "ACACTTTGCGTTCGGGCT",
-          "forward_tm": 66.5,
-          "heterodimer": {
-            "dg": -1.0,
-            "structure": "...............(((........))).........",
-            "structure_found": true,
-            "tm": -110.6
-          },
-          "product_size": 283,
-          "reverse_coords": [
-            335,
-            20
-          ],
-          "reverse_seq": "ATTCTGGGAGCTTCATCTGG",
-          "reverse_tm": 63.0,
-          "score": 12.869932117963296,
-          "tm_diff": 3.5
-        },
-        {
-          "forward_coords": [
-            53,
-            18
-          ],
-          "forward_seq": "ACACTTTGCGTTCGGGCT",
-          "forward_tm": 66.5,
-          "heterodimer": {
-            "dg": -1.0,
-            "structure": "...............(((..........))).......",
-            "structure_found": true,
-            "tm": -110.6
-          },
-          "product_size": 285,
-          "reverse_coords": [
-            337,
-            20
-          ],
-          "reverse_seq": "GCATTCTGGGAGCTTCATCT",
-          "reverse_tm": 63.6,
-          "score": 12.869932117963296,
-          "tm_diff": 2.9
-        },
-        {
-          "forward_coords": [
-            53,
-            18
-          ],
-          "forward_seq": "ACACTTTGCGTTCGGGCT",
-          "forward_tm": 66.5,
-          "heterodimer": {
-            "dg": 1.4,
-            "structure": "..............(((.........).))........",
-            "structure_found": true,
-            "tm": -415.6
-          },
-          "product_size": 272,
-          "reverse_coords": [
-            324,
-            20
-          ],
-          "reverse_seq": "TTCATCTGGACCTGGGTCTT",
-          "reverse_tm": 64.2,
-          "score": 12.869932117963296,
-          "tm_diff": 2.3
-        },
-        {
-          "forward_coords": [
-            53,
-            18
-          ],
-          "forward_seq": "ACACTTTGCGTTCGGGCT",
-          "forward_tm": 66.5,
-          "heterodimer": {
-            "dg": -1.0,
-            "structure": "...............(((.......)))..........",
-            "structure_found": true,
-            "tm": -110.6
-          },
-          "product_size": 282,
-          "reverse_coords": [
-            334,
-            20
-          ],
-          "reverse_seq": "TTCTGGGAGCTTCATCTGGA",
-          "reverse_tm": 64.3,
-          "score": 12.869932117963296,
-          "tm_diff": 2.2
-        },
-        {
-          "forward_coords": [
-            53,
-            18
-          ],
-          "forward_seq": "ACACTTTGCGTTCGGGCT",
-          "forward_tm": 66.5,
+          "forward_tm": 63.7,
           "heterodimer": {
             "dg": -1.2,
             "structure": "......(((...........)))...............",
@@ -127,9 +35,101 @@
             20
           ],
           "reverse_seq": "TGGCATTCTGGGAGCTTCAT",
-          "reverse_tm": 65.6,
-          "score": 12.869932117963296,
-          "tm_diff": 0.9
+          "reverse_tm": 62.9,
+          "score": 7.272832009616714,
+          "tm_diff": 0.8
+        },
+        {
+          "forward_coords": [
+            53,
+            18
+          ],
+          "forward_seq": "ACACTTTGCGTTCGGGCT",
+          "forward_tm": 63.7,
+          "heterodimer": {
+            "dg": -1.0,
+            "structure": "...............(((.......)))..........",
+            "structure_found": true,
+            "tm": -110.6
+          },
+          "product_size": 282,
+          "reverse_coords": [
+            334,
+            20
+          ],
+          "reverse_seq": "TTCTGGGAGCTTCATCTGGA",
+          "reverse_tm": 61.6,
+          "score": 8.07509607979916,
+          "tm_diff": 2.1
+        },
+        {
+          "forward_coords": [
+            53,
+            18
+          ],
+          "forward_seq": "ACACTTTGCGTTCGGGCT",
+          "forward_tm": 63.7,
+          "heterodimer": {
+            "dg": 1.4,
+            "structure": "..............(((.........).))........",
+            "structure_found": true,
+            "tm": -415.6
+          },
+          "product_size": 272,
+          "reverse_coords": [
+            324,
+            20
+          ],
+          "reverse_seq": "TTCATCTGGACCTGGGTCTT",
+          "reverse_tm": 61.6,
+          "score": 8.100136497568606,
+          "tm_diff": 2.1
+        },
+        {
+          "forward_coords": [
+            53,
+            18
+          ],
+          "forward_seq": "ACACTTTGCGTTCGGGCT",
+          "forward_tm": 63.7,
+          "heterodimer": {
+            "dg": -1.0,
+            "structure": "...............(((.........)))..........",
+            "structure_found": true,
+            "tm": -110.6
+          },
+          "product_size": 284,
+          "reverse_coords": [
+            336,
+            22
+          ],
+          "reverse_seq": "CATTCTGGGAGCTTCATCTGGA",
+          "reverse_tm": 63.0,
+          "score": 8.272832009616714,
+          "tm_diff": 0.7
+        },
+        {
+          "forward_coords": [
+            53,
+            18
+          ],
+          "forward_seq": "ACACTTTGCGTTCGGGCT",
+          "forward_tm": 63.7,
+          "heterodimer": {
+            "dg": -1.0,
+            "structure": "...............(((........)))...........",
+            "structure_found": true,
+            "tm": -110.6
+          },
+          "product_size": 283,
+          "reverse_coords": [
+            335,
+            22
+          ],
+          "reverse_seq": "ATTCTGGGAGCTTCATCTGGAC",
+          "reverse_tm": 63.0,
+          "score": 8.272832009616714,
+          "tm_diff": 0.7
         }
       ],
       "forward_primers": [
@@ -153,7 +153,7 @@
           },
           "length": 18,
           "sequence": "ACACTTTGCGTTCGGGCT",
-          "tm": 66.5
+          "tm": 63.7
         },
         {
           "coords": [
@@ -175,7 +175,7 @@
           },
           "length": 18,
           "sequence": "ACACTTTGCGTTCGGGCT",
-          "tm": 66.5
+          "tm": 63.7
         },
         {
           "coords": [
@@ -197,7 +197,7 @@
           },
           "length": 18,
           "sequence": "ACACTTTGCGTTCGGGCT",
-          "tm": 66.5
+          "tm": 63.7
         },
         {
           "coords": [
@@ -219,7 +219,7 @@
           },
           "length": 18,
           "sequence": "ACACTTTGCGTTCGGGCT",
-          "tm": 66.5
+          "tm": 63.7
         },
         {
           "coords": [
@@ -241,75 +241,31 @@
           },
           "length": 18,
           "sequence": "ACACTTTGCGTTCGGGCT",
-          "tm": 66.5
+          "tm": 63.7
         }
       ],
       "reverse_primers": [
         {
           "coords": [
-            335,
+            339,
             20
           ],
           "gc_percent": 50.0,
           "hairpin": {
-            "dg": 1.3,
-            "structure": ".......((...))......",
+            "dg": -0.6,
+            "structure": "..((.........)).....",
             "structure_found": true,
-            "tm": -19.7
+            "tm": 30.6
           },
           "homodimer": {
-            "dg": -2.1,
-            "structure": "........((((................))))........",
+            "dg": 0.1,
+            "structure": "..((..................))................",
             "structure_found": true,
-            "tm": -75.9
+            "tm": -135.3
           },
           "length": 20,
-          "sequence": "ATTCTGGGAGCTTCATCTGG",
-          "tm": 63.0
-        },
-        {
-          "coords": [
-            337,
-            20
-          ],
-          "gc_percent": 50.0,
-          "hairpin": {
-            "dg": -0.5,
-            "structure": "((.........)).......",
-            "structure_found": true,
-            "tm": 30.5
-          },
-          "homodimer": {
-            "dg": -2.1,
-            "structure": "..........((((................))))......",
-            "structure_found": true,
-            "tm": -75.9
-          },
-          "length": 20,
-          "sequence": "GCATTCTGGGAGCTTCATCT",
-          "tm": 63.6
-        },
-        {
-          "coords": [
-            324,
-            20
-          ],
-          "gc_percent": 50.0,
-          "hairpin": {
-            "dg": -0.7,
-            "structure": "........(((....)))..",
-            "structure_found": true,
-            "tm": 32.3
-          },
-          "homodimer": {
-            "dg": -4.0,
-            "structure": "........((((..((((..........))))..))))..",
-            "structure_found": true,
-            "tm": 9.7
-          },
-          "length": 20,
-          "sequence": "TTCATCTGGACCTGGGTCTT",
-          "tm": 64.2
+          "sequence": "TGGCATTCTGGGAGCTTCAT",
+          "tm": 62.9
         },
         {
           "coords": [
@@ -331,29 +287,73 @@
           },
           "length": 20,
           "sequence": "TTCTGGGAGCTTCATCTGGA",
-          "tm": 64.3
+          "tm": 61.6
         },
         {
           "coords": [
-            339,
+            324,
             20
           ],
           "gc_percent": 50.0,
           "hairpin": {
-            "dg": -0.6,
-            "structure": "..((.........)).....",
+            "dg": -0.7,
+            "structure": "........(((....)))..",
             "structure_found": true,
-            "tm": 30.6
+            "tm": 32.3
           },
           "homodimer": {
-            "dg": 0.1,
-            "structure": "..((..................))................",
+            "dg": -4.0,
+            "structure": "........((((..((((..........))))..))))..",
             "structure_found": true,
-            "tm": -135.3
+            "tm": 9.7
           },
           "length": 20,
-          "sequence": "TGGCATTCTGGGAGCTTCAT",
-          "tm": 65.6
+          "sequence": "TTCATCTGGACCTGGGTCTT",
+          "tm": 61.6
+        },
+        {
+          "coords": [
+            336,
+            22
+          ],
+          "gc_percent": 50.0,
+          "hairpin": {
+            "dg": 0.3,
+            "structure": ".............((.....))",
+            "structure_found": true,
+            "tm": 21.2
+          },
+          "homodimer": {
+            "dg": -2.1,
+            "structure": ".........((((..................)))).........",
+            "structure_found": true,
+            "tm": -75.9
+          },
+          "length": 22,
+          "sequence": "CATTCTGGGAGCTTCATCTGGA",
+          "tm": 63.0
+        },
+        {
+          "coords": [
+            335,
+            22
+          ],
+          "gc_percent": 50.0,
+          "hairpin": {
+            "dg": 0.3,
+            "structure": "............((.....)).",
+            "structure_found": true,
+            "tm": 21.2
+          },
+          "homodimer": {
+            "dg": -2.1,
+            "structure": "........((((..................))))..........",
+            "structure_found": true,
+            "tm": -75.9
+          },
+          "length": 22,
+          "sequence": "ATTCTGGGAGCTTCATCTGGAC",
+          "tm": 63.0
         }
       ]
     },

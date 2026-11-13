@@ -1199,15 +1199,14 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     if (!interactive) return new Set<keyof Selections>();
     const keys = new Set<keyof Selections>();
     for (const s of segments) if (s.key) keys.add(s.key);
-    // The two allele probes overlap almost completely, so an unpicked drag
-    // would just grab whichever renders on top - they stay static until one
-    // is unlocked for editing in "My primers" (`probeEditable`). A lone
-    // probe (no mutant twin) has nothing to collide with, so it drags and
-    // resizes like any primer.
+    // The two allele probes overlap almost completely, so only one of them
+    // is grabbable at a time: the wild-type by default, or whichever twin
+    // is picked in "My primers" (`probeEditable`). A lone probe (no mutant
+    // twin) has nothing to collide with, so it drags like any primer.
     if (selections.geneProbeAlt) {
       keys.delete('geneProbe');
       keys.delete('geneProbeAlt');
-      if (probeEditable) keys.add(probeEditable);
+      keys.add(probeEditable ?? 'geneProbe');
     }
     return keys;
   }, [segments, interactive, probeEditable, selections.geneProbeAlt]);

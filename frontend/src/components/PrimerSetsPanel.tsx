@@ -255,13 +255,13 @@ export default function PrimerSetsPanel({ data, selections, onSelect, probeEditK
                     {amplicon && <span className="ml-2 font-normal text-ink-muted">· {amplicon}</span>}
                   </span>
                   <div className="flex gap-1.5">
-                    {/* Pick which of the two overlapping allele probes is
-                        unlocked for dragging on the sequence map - the only
-                        way to resize one twin independently of the other
-                        (e.g. when a mismatch drops one allele's Tm). */}
+                    {/* Pick which of the two overlapping allele probes the
+                        sequence map drags (wild-type by default) - how one
+                        twin is resized independently of the other (e.g.
+                        when a mismatch drops one allele's Tm). */}
                     {g.id === 'probe' &&
                       g.rows.map(({ key, sel }) => {
-                        const active = probeEditKey === key;
+                        const active = (probeEditKey ?? 'geneProbe') === key;
                         const wt = key === 'geneProbe';
                         const fwd = selectionStrand(sel) === 'F';
                         const label = wt ? `WT${sel.allele ? ` (${sel.allele.wtBase})` : ''}` : `MUT${sel.allele ? ` (${sel.allele.mutBase})` : ''}`;
@@ -270,8 +270,8 @@ export default function PrimerSetsPanel({ data, selections, onSelect, probeEditK
                             <button
                               type="button"
                               aria-pressed={active}
-                              title={active ? 'Lock this probe again (it keeps its current span)' : 'Unlock this probe on the sequence map: drag it to move, or pull an end to lengthen or shorten it'}
-                              onClick={() => onProbeEditKeyChange(active ? null : (key as ProbeEditKey))}
+                              title={active ? 'This probe is the one you drag on the sequence map: drag it to move, or pull an end to lengthen or shorten it' : 'Drag this probe on the sequence map instead: drag it to move, or pull an end to lengthen or shorten it'}
+                              onClick={() => onProbeEditKeyChange(key as ProbeEditKey)}
                               className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${
                                 active
                                   ? wt
@@ -339,14 +339,14 @@ export default function PrimerSetsPanel({ data, selections, onSelect, probeEditK
                     </Button>
                   </div>
                 </div>
-                {g.id === 'probe' && probeEditKey && selections[probeEditKey] && (
+                {g.id === 'probe' && selections.geneProbeAlt && (
                   <p className="mb-2 text-[11px] text-ink-faint">
                     The{' '}
-                    <span className="font-semibold" style={{ color: probeEditKey === 'geneProbe' ? 'var(--seq-probe-wt-ink)' : 'var(--seq-probe-ink)' }}>
-                      {probeEditKey === 'geneProbe' ? 'wild-type' : 'mutant'} probe
+                    <span className="font-semibold" style={{ color: probeEditKey === 'geneProbeAlt' ? 'var(--seq-probe-ink)' : 'var(--seq-probe-wt-ink)' }}>
+                      {probeEditKey === 'geneProbeAlt' ? 'mutant' : 'wild-type'} probe
                     </span>{' '}
-                    is unlocked on the sequence map: drag it to move, or pull an end to lengthen or shorten it - only this probe changes, and it keeps
-                    its allele base at the SNP. Click the {probeEditKey === 'geneProbe' ? 'WT' : 'MUT'} button again when you're done.
+                    is the one you drag on the sequence map: drag it to move, or pull an end to lengthen or shorten it - only this probe changes, and it
+                    keeps covering the SNP. Click {probeEditKey === 'geneProbeAlt' ? 'WT' : 'MUT'} to drag the {probeEditKey === 'geneProbeAlt' ? 'wild-type' : 'mutant'} one instead.
                   </p>
                 )}
                 <div className="space-y-2">

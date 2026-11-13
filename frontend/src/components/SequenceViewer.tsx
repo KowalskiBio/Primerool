@@ -336,6 +336,9 @@ interface Cell {
    * `baseAtPoint`'s `variantRsid`). The alleles themselves are looked up
    * from the marker at hover time rather than duplicated onto every cell. */
   variantRsid?: string;
+  /** Set by `applyPinnedHighlight` for a cell/sub-cell inside a highlight
+   * the user kept - the colour they gave it. */
+  pinColor?: string;
 }
 
 interface Row {
@@ -571,6 +574,139 @@ function applySearchHighlight(cells: Cell[], matches: SearchMatch[], activeIdx: 
   return out;
 }
 
+/** A search result the user chose to keep on the map ("Keep" beside Find /
+ * Align): its located spans are copied out of the search, so a later or
+ * cleared search never moves or removes it - only its own × does. */
+interface PinnedHighlight {
+  id: string;
+  label: string;
+  color: string;
+  /** Which loaded sequence the spans belong to (see `sequenceKey`) - a pin
+   * only shows on the sequence it was made on. */
+  seqKey: string;
+  spans: { start: number; end: number; region: Segment['region'] }[];
+}
+
+const PIN_COLORS = ['#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#0ea5e9', '#10b981'];
+
+/** Identifies a loaded sequence well enough to tell whether pinned
+ * coordinates still mean the same bases (pasted sequences all share
+ * transcript_id 'custom', hence the lengths and leading bases). */
+function sequenceKey(data: SequenceData): string {
+  return [data.transcript_id, data.include_introns ? 'g' : 's', (data.upstream_seq || '').length, data.gene_seq.length, (data.downstream_seq || '').length, data.gene_seq.slice(0, 24)].join('|');
+}
+
+/** Same before/hit/after splitting as `applySearchHighlight`; where two
+ * kept highlights overlap, the one kept later wins. */
+function applyPinnedHighlight(cells: Cell[], pins: PinnedHighlight[]): Cell[] {
+  if (pins.length === 0) return cells;
+  const spans = pins.flatMap((p) => p.spans.map((s) => ({ ...s, color: p.color })));
+  const out: Cell[] = [];
+  for (const cell of cells) {
+    if (cell.isPlaceholder || !cell.region) {
+      out.push(cell);
+      continue;
+    }
+    const cellStart = cell.startPos;
+    const cellEnd = cellStart + cell.text.length;
+    const colorAt = (pos: number) => {
+      let c: string | undefined;
+      for (const s of spans) if (s.region === cell.region && s.start <= pos && pos < s.end) c = s.color;
+      return c;
+    };
+    if (!spans.some((s) => s.region === cell.region && s.end > cellStart && s.start < cellEnd)) {
+      out.push(cell);
+      continue;
+    }
+    // Per-base colour, then merged into runs - overlaps resolve cleanly.
+    let runStart = cellStart;
+    let runColor = colorAt(cellStart);
+    for (let pos = cellStart + 1; pos <= cellEnd; pos++) {
+      const c = pos < cellEnd ? colorAt(pos) : undefined;
+      if (pos === cellEnd || c !== runColor) {
+        out.push({ ...cell, text: cell.text.slice(runStart - cellStart, pos - cellStart), startPos: runStart, pinColor: runColor });
+        runStart = pos;
+        runColor = c;
+      }
+    }
+  }
+  return out;
+}
+
+/** A kept highlight as a tinted background plus a solid bar along the
+ * bottom - on a primer/probe (which has its own background) only the bar,
+ * so the pick stays readable. A background-image, so it never fights the
+ * search ring's box-shadow. */
+function pinStyle(color: string, onPick: boolean): React.CSSProperties {
+  return {
+    backgroundColor: onPick ? undefined : `color-mix(in srgb, ${color} 30%, transparent)`,
+    backgroundImage: `linear-gradient(transparent 82%, ${color} 82%)`,
+  };
+}
+
+/** One kept highlight: its colour (click to change) and label, and the ×
+ * that is the only way to remove it. */
+function PinChip({ pin, onRecolor, onRemove }: { pin: PinnedHighlight; onRecolor: (c: string) => void; onRemove: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  return (
+    <span ref={ref} className="relative inline-flex h-7 items-center gap-1.5 rounded-md border border-line-strong bg-surface pl-1.5 pr-1 text-xs text-ink">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title="Change this highlight's colour"
+        aria-label={`Change colour of ${pin.label}`}
+        className="h-4 w-4 rounded-sm border border-black/15 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+        style={{ backgroundColor: pin.color }}
+      />
+      <span className="max-w-[16ch] truncate font-mono" title={pin.label}>
+        {pin.label}
+      </span>
+      <span className="text-ink-faint">{pin.spans.length > 1 ? `×${pin.spans.length}` : ''}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        title="Remove this highlight"
+        aria-label={`Remove highlight ${pin.label}`}
+        className="flex h-5 w-5 items-center justify-center rounded text-ink-faint hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        &#215;
+      </button>
+      {open && (
+        <span className="absolute left-0 top-full z-20 mt-1 flex items-center gap-1.5 rounded-md border border-line bg-surface p-2 shadow-lg">
+          {PIN_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => {
+                onRecolor(c);
+                setOpen(false);
+              }}
+              aria-label={`Colour ${c}`}
+              className={`h-5 w-5 rounded-sm border ${c === pin.color ? 'border-ink ring-2 ring-accent/40' : 'border-black/15'}`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+          <label className="relative h-5 w-5 cursor-pointer overflow-hidden rounded-sm border border-black/15" title="Any colour…" style={{ background: 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)' }}>
+            <input type="color" value={pin.color} onChange={(e) => onRecolor(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" aria-label="Pick any colour" />
+          </label>
+        </span>
+      )}
+    </span>
+  );
+}
+
+const KEEP_BUTTON_CLASS =
+  'h-7 rounded-md border border-line-strong bg-surface px-2.5 text-xs font-medium text-ink-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-50';
+
 /** Chunks `cells` into fixed-`lineWidth` rows for the position gutter.
  * Every cell already carries the real `startPos` its own originating
  * segment computed (a flank segment resets to 0 at its own start; a gene
@@ -622,6 +758,7 @@ function buildRows(cells: Cell[], lineWidth: number): Row[] {
         searchIdx: cell.searchIdx,
         isVariant: cell.isVariant,
         variantRsid: cell.variantRsid,
+        pinColor: cell.pinColor,
       });
       firstPiece = false;
       currentLen += take.length;
@@ -1009,6 +1146,28 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     return hits.map((m, idx) => ({ ...m, idx }));
   }, [alignHit, rsLocalPos, literalMatches]);
 
+  // Highlights the user kept ("Keep" beside Find / Align). Deliberately not
+  // touched by the search reset above or by a new sequence loading: only a
+  // pin's own × removes it. Pins made on another sequence are just hidden.
+  const [pins, setPins] = useSessionState<PinnedHighlight[]>(persistKey ? `${persistKey}.pinnedHighlights` : null, []);
+  const seqKey = useMemo(() => sequenceKey(data), [data]);
+  const visiblePins = useMemo(() => pins.filter((p) => p.seqKey === seqKey), [pins, seqKey]);
+
+  function addPin(label: string, spans: PinnedHighlight['spans']) {
+    if (spans.length === 0) return;
+    setPins((prev) => {
+      // Keeping the same search twice would just stack an identical chip.
+      if (prev.some((p) => p.seqKey === seqKey && p.label === label)) return prev;
+      const used = new Set(prev.filter((p) => p.seqKey === seqKey).map((p) => p.color));
+      const color = PIN_COLORS.find((c) => !used.has(c)) ?? PIN_COLORS[prev.length % PIN_COLORS.length];
+      return [...prev, { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, label, color, seqKey, spans: spans.map((s) => ({ start: s.start, end: s.end, region: s.region })) }];
+    });
+  }
+
+  /** What the Find field currently locates: an rsID's SNP, else every
+   * literal match. */
+  const findPinnable = rsQuery ? (rsLocalPos !== null ? { label: rsVariant?.id ?? rsQuery, spans: [{ start: rsLocalPos, end: rsLocalPos + 1, region: 'gene' as const }] } : null) : literalMatches.length > 0 ? { label: cleanDNA(searchQuery), spans: literalMatches } : null;
+
   const segments = useMemo(() => {
     const up = flankSegments(data.upstream_seq || '', 'up', data, selections);
     // A search/align hit landing inside a truncated intron would collapse
@@ -1188,7 +1347,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
 
   const rawCells = buildCells(segments, interactive, dragSession, deltaChars, editableKeys, data, selections, startDrag);
   const variantCells = applyVariantHighlight(rawCells, allVariantMarkers);
-  const cells = applySearchHighlight(variantCells, searchMatches, activeSearchIdx);
+  const cells = applySearchHighlight(applyPinnedHighlight(variantCells, visiblePins), searchMatches, activeSearchIdx);
   const rows = buildRows(cells, lineWidth);
 
   // Hovering a base shows its position from the start of the gene (and
@@ -1336,6 +1495,15 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         >
           Clear
         </button>
+        <button
+          type="button"
+          disabled={!findPinnable}
+          onClick={() => findPinnable && addPin(findPinnable.label, findPinnable.spans)}
+          title="Keep these hits highlighted on the map in their own colour - they stay while you search for other things, until you remove them"
+          className={KEEP_BUTTON_CLASS}
+        >
+          Keep
+        </button>
         <span className="text-xs text-ink-faint" aria-live="polite">
           {literalMatches.length === 0
             ? rsQuery || searchQuery === ''
@@ -1364,6 +1532,15 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
         >
           Find alignment
         </button>
+        <button
+          type="button"
+          disabled={!alignHit}
+          onClick={() => alignHit && addPin(`≈${cleanDNA(alignQuery)}`, [alignHit])}
+          title="Keep this binding site highlighted on the map in its own colour - it stays while you search for other things, until you remove it"
+          className={KEEP_BUTTON_CLASS}
+        >
+          Keep
+        </button>
         {alignQuery !== '' && (
           <button
             type="button"
@@ -1377,6 +1554,20 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
           </button>
         )}
       </div>
+
+      {visiblePins.length > 0 && (
+        <div className="-mt-1 mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-ink-muted">Kept highlights:</span>
+          {visiblePins.map((pin) => (
+            <PinChip
+              key={pin.id}
+              pin={pin}
+              onRecolor={(color) => setPins((prev) => prev.map((p) => (p.id === pin.id ? { ...p, color } : p)))}
+              onRemove={() => setPins((prev) => prev.filter((p) => p.id !== pin.id))}
+            />
+          ))}
+        </div>
+      )}
 
       {/* rsID-search result summary - a small panel under the search bar
        * (see the `rsQuery` machinery above). Kept outside the search bar's
@@ -1507,6 +1698,7 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
                   data-region={p.region}
                   data-pos={p.region ? p.startPos : undefined}
                   data-pick-key={p.pickKey}
+                  style={p.pinColor ? pinStyle(p.pinColor, Boolean(p.pickKey)) : undefined}
                   onMouseDown={p.onMouseDown}
                 >
                   {p.text}

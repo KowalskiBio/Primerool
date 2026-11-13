@@ -190,10 +190,10 @@ export default function SplicedSequenceViewer({ data, selections, onSelect, prob
     for (const key of DRAGGABLE_KEYS) {
       const sel = selections[key];
       if (!sel) continue;
-      // Allele probes drag one at a time, picked in "My primers" - an
-      // unpicked grab would catch whichever twin renders on top. A lone
-      // probe (no mutant twin) drags like any primer.
-      if (selections.geneProbeAlt && (key === 'geneProbe' || key === 'geneProbeAlt') && probeEditable !== key) continue;
+      // Allele probes drag one at a time - the wild-type by default, or the
+      // twin picked in "My primers" - since both at once would catch
+      // whichever renders on top. A lone probe drags like any primer.
+      if (selections.geneProbeAlt && (key === 'geneProbe' || key === 'geneProbeAlt') && (probeEditable ?? 'geneProbe') !== key) continue;
       const reverse = selectionStrand(sel) === 'R';
       const primerOf = (slice: string) => (reverse ? reverseComplement(slice) : slice);
       const onlyEdge = sel.arms ? (reverse ? 'right' : 'left') : undefined;

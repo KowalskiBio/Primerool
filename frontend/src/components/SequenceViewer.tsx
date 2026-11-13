@@ -1040,12 +1040,16 @@ export default function SequenceViewer({ data, selections, truncateIntrons, onSe
     for (const s of segments) if (s.key) keys.add(s.key);
     // The two allele probes overlap almost completely, so an unpicked drag
     // would just grab whichever renders on top - they stay static until one
-    // is unlocked for editing in "My primers" (`probeEditable`).
-    keys.delete('geneProbe');
-    keys.delete('geneProbeAlt');
-    if (probeEditable) keys.add(probeEditable);
+    // is unlocked for editing in "My primers" (`probeEditable`). A lone
+    // probe (no mutant twin) has nothing to collide with, so it drags and
+    // resizes like any primer.
+    if (selections.geneProbeAlt) {
+      keys.delete('geneProbe');
+      keys.delete('geneProbeAlt');
+      if (probeEditable) keys.add(probeEditable);
+    }
     return keys;
-  }, [segments, interactive, probeEditable]);
+  }, [segments, interactive, probeEditable, selections.geneProbeAlt]);
 
   const activeSearchIdx = searchMatches.length > 0 ? Math.min(activeMatchIndex, searchMatches.length - 1) : -1;
 
